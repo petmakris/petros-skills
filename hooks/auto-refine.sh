@@ -7,8 +7,7 @@ set -euo pipefail
 # Reads the UserPromptSubmit payload on stdin and emits an
 # additionalContext block telling Claude to run refine-prompt on messy
 # prompts, skip on clean/short/mid-flow prompts, and treat the refined
-# prompt as canonical after `go`. Pairs with hooks/dump-md.sh — both
-# fire on UserPromptSubmit and inject independent context.
+# prompt as canonical after `go`.
 #
 # Spec: docs/superpowers/specs/2026-05-14-auto-refine-prompt-hook-design.md
 
