@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Install this repo's git hooks into .git/hooks/ as symlinks.
+# Re-run any time you clone fresh.
+
+set -eu
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+git_dir="$(git -C "$SCRIPT_DIR" rev-parse --git-dir 2>/dev/null)" || {
+  echo "Not a git repository: $SCRIPT_DIR" >&2
+  echo "Run 'git init' first." >&2
+  exit 1
+}
+
+# Resolve to absolute path (rev-parse returns it relative to -C dir)
+case "$git_dir" in
+  /*) ;;
+  *) git_dir="$SCRIPT_DIR/$git_dir" ;;
+esac
+
+hooks_dest="$git_dir/hooks"
+mkdir -p "$hooks_dest"
+
+install_hook() {
+  local src="$1"
+  local name="$2"
+  local dest="$hooks_dest/$name"
+
+  if [ ! -f "$src" ]; then
+    echo "Hook source missing: $src" >&2
+    return 1
+  fi
+
+  chmod +x "$src"
+
+  if [ -e "$dest" ] && [ "$(readlink "$dest" 2>/dev/null)" != "$src" ]; then
+    local backup="${dest}.backup.$(date +%s)"
+    mv "$dest" "$backup"
+    echo "  Backed up existing $name -> $backup"
+  fi
+
+  ln -sf "$src" "$dest"
+  echo "  Installed $name -> $src"
+}
+
+echo "Installing git hooks into $hooks_dest ..."
+install_hook "$SCRIPT_DIR/git-hooks/pre-commit-claude-scan" "pre-commit"
+
+echo ""
+echo "Done."
+echo ""
+echo "The pre-commit scanner runs Claude over each staged diff to catch"
+echo "secrets, hardcoded home paths, internal URLs, and other content you"
+echo "may not want in a public commit."
+echo ""
+echo "Bypass once:   git commit --no-verify"
+echo "Skip scanner:  SKIP_CLAUDE_SCAN=1 git commit ..."

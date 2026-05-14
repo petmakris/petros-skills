@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+input=$(cat)
+
+# --- Colors ---
+RESET=$'\033[0m'
+DIM=$'\033[2m'
+BOLD=$'\033[1m'
+CYAN=$'\033[36m'
+GREEN=$'\033[32m'
+YELLOW=$'\033[33m'
+RED=$'\033[31m'
+BLUE=$'\033[34m'
+MAGENTA=$'\033[35m'
+
+# --- Icons (require a Nerd Font) ---
+ICON_DIR=$''      #   folder
+ICON_GIT=$''      #   git branch
+ICON_CTX=$''      #   bolt (context)
+ICON_DIFF=$''     #   diff
+ICON_USER=$''     #   user / account
+ICON_TREE=$'\xef\x83\xa8'     #   sitemap (worktrees)
+
+# --- Parse JSON ---
+cwd=$(echo "$input"        | jq -r '.workspace.current_dir // ""')
+model_id=$(echo "$input"   | jq -r '.model.id // ""')
+used_pct=$(echo "$input"   | jq -r '.context_window.used_percentage // 0')
+used_tokens=$(echo "$input"| jq -r '.context_window.used_tokens // 0')
+added=$(echo "$input"      | jq -r '.cost.total_lines_added // 0')
+removed=$(echo "$input"    | jq -r '.cost.total_lines_removed // 0')
+rl5h_pct=$(echo "$input"   | jq -r '.rate_limits.five_hour.used_percentage // empty')
+rl7d_pct=$(echo "$input"   | jq -r '.rate_limits.seven_day.used_percentage // empty')
+
+dir=$(basename "$cwd")
+
+# --- Pressure color picker (shared by context + rate limits) ---
+pressure_color() {
+  local p="$1"
+  if   [ "$p" -ge 75 ]; then printf '%s' "$RED"
+  elif [ "$p" -ge 50 ]; then printf '%s' "$YELLOW"
+  else                       printf '%s' "$GREEN"
+  fi
+}
+
+# --- Git ---
+branch=$(git -C "$cwd" --no-optional-locks rev-parse --abbrev-ref HEAD 2>/dev/null)
+dirty=""
+ab=""
+worktrees=0
+if [ -n "$branch" ]; then
+  worktrees=$(git -C "$cwd" --no-optional-locks worktree list 2>/dev/null | wc -l | tr -d ' ')
+fi
+if [ -n "$branch" ]; then
+  if [ -n "$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)" ]; then
+    dirty=" ${YELLOW}●${RESET}"
+  fi
+  upstream=$(git -C "$cwd" --no-optional-locks rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+  if [ -n "$upstream" ]; then
+    counts=$(git -C "$cwd" --no-optional-locks rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null)
+    behind=$(echo "$counts" | awk '{print $1+0}')
+    ahead=$(echo  "$counts" | awk '{print $2+0}')
+    parts=""
+    [ "$ahead"  != "0" ] && parts="${MAGENTA}↑${ahead}${RESET}"
+    [ "$behind" != "0" ] && parts="${parts:+$parts }${MAGENTA}↓${behind}${RESET}"
+    [ -n "$parts" ] && ab=" $parts"
+  fi
+fi
+
+# --- Context % + tokens (color by pressure) ---
+pct_int=$(printf '%.0f' "$used_pct")
+ctx_color=$(pressure_color "$pct_int")
+if [ "$used_tokens" -ge 1000 ]; then
+  tok_str=$(awk -v t="$used_tokens" 'BEGIN{printf "%.0fk", t/1000}')
+else
+  tok_str="$used_tokens"
+fi
+
+# --- Model family + 1M badge ---
+model_family=""
+if [[ "$model_id" == *"opus"* ]]; then
+  model_family="${MAGENTA}Opus${RESET}"
+elif [[ "$model_id" == *"sonnet"* ]]; then
+  model_family="${BLUE}Sonnet${RESET}"
+elif [[ "$model_id" == *"haiku"* ]]; then
+  model_family="${GREEN}Haiku${RESET}"
+fi
+
+badge=""
+[[ "$model_id" == *"1m"* ]] && badge=" ${BOLD}${MAGENTA}[1M]${RESET}"
+
+# --- Profile (Claude account, derived from CLAUDE_CONFIG_DIR) ---
+config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+case "$config_dir" in
+  "$HOME/.claude")        profile="personal"; profile_color="$CYAN" ;;
+  "$HOME/.claude-evooq")  profile="evooq";    profile_color="$YELLOW" ;;
+  *)                      profile=$(basename "$config_dir"); profile_color="$MAGENTA" ;;
+esac
+
+# --- Compose ---
+out=""
+out+="${DIM}[${RESET}${profile_color}${ICON_USER} ${profile}${RESET}${DIM}]${RESET} "
+out+="${DIM}[${RESET}${CYAN}${ICON_DIR} ${dir}${RESET}${DIM}]${RESET}"
+if [ -n "$branch" ]; then
+  out+=" ${DIM}[${RESET}${GREEN}${ICON_GIT} ${branch}${RESET}${dirty}${ab}${DIM}]${RESET}"
+fi
+if [ "$worktrees" -gt 1 ] 2>/dev/null; then
+  out+=" ${DIM}[${RESET}${CYAN}${ICON_TREE} ${worktrees}${RESET}${DIM}]${RESET}"
+fi
+out+=" ${DIM}[${RESET}${ctx_color}${ICON_CTX} ${pct_int}% · ${tok_str}${RESET}${DIM}]${RESET}"
+# Rate-limit segments: 5-hour and 7-day rolling windows, sourced from
+# .rate_limits.{five_hour,seven_day}.used_percentage in the Claude Code
+# statusline JSON. Each window also exposes .resets_at (Unix epoch seconds),
+# currently unused.
+#
+# Easy follow-ups if these get noisy when usage is low:
+#   - Hide a segment below some threshold (e.g. only show 7d when >=10%).
+#   - Show reset countdown (e.g. "5h 60% · 2h12m") only when usage is high,
+#     using .resets_at minus `date +%s`.
+if [ -n "$rl5h_pct" ]; then
+  rl5h_int=$(printf '%.0f' "$rl5h_pct")
+  rl5h_color=$(pressure_color "$rl5h_int")
+  out+=" ${DIM}[${RESET}${rl5h_color}5h ${rl5h_int}%${RESET}${DIM}]${RESET}"
+fi
+if [ -n "$rl7d_pct" ]; then
+  rl7d_int=$(printf '%.0f' "$rl7d_pct")
+  rl7d_color=$(pressure_color "$rl7d_int")
+  out+=" ${DIM}[${RESET}${rl7d_color}7d ${rl7d_int}%${RESET}${DIM}]${RESET}"
+fi
+if [ -n "$model_family" ]; then
+  out+=" ${DIM}[${RESET}${model_family}${DIM}]${RESET}"
+fi
+if [ "$added" != "0" ] || [ "$removed" != "0" ]; then
+  out+=" ${DIM}[${RESET}${BLUE}${ICON_DIFF}${RESET} ${GREEN}+${added}${RESET} ${RED}-${removed}${RESET}${DIM}]${RESET}"
+fi
+out+="$badge"
+
+printf '%s' "$out"
