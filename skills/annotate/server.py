@@ -26,9 +26,6 @@ import threading
 import time
 from pathlib import Path
 
-from skills.annotate import render
-
-
 SHUTDOWN_AFTER_SECONDS = int(os.environ.get("ANNOTATE_SHUTDOWN_SECONDS", 24 * 60 * 60))
 PORT_RANGE = range(54580, 54601)  # inclusive both ends
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -41,8 +38,78 @@ _sessions: dict[str, dict[str, Path]] = {}
 _sessions_lock = threading.Lock()
 
 
+def _sessions_file() -> Path:
+    return Path(os.path.expanduser("~/.claude/annotate/sessions.json"))
+
+
 def _make_sid() -> str:
-    return f"{int(time.time())}-{secrets.token_hex(2)}"
+    # Date-keyed slug: YYMMDD-HHMMSS-<hex6>. Scannable in URLs, sortable on disk,
+    # 24 bits of randomness avoids collisions when two sessions register in the
+    # same second.
+    return f"{time.strftime('%y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+
+
+def _persist_sessions() -> None:
+    """Write _sessions to disk so a server restart can rehydrate them."""
+    path = _sessions_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _sessions_lock:
+        snapshot = {
+            sid: {k: str(v) for k, v in dirs.items()}
+            for sid, dirs in _sessions.items()
+        }
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(snapshot, indent=2))
+    tmp.replace(path)
+
+
+def _rehydrate_sessions() -> None:
+    """Populate _sessions from the on-disk snapshot, dropping any whose dirs are gone."""
+    path = _sessions_file()
+    if not path.exists():
+        return
+    try:
+        snapshot = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(snapshot, dict):
+        return
+    restored: dict[str, dict[str, Path]] = {}
+    for sid, dirs in snapshot.items():
+        if not _SID_RE.match(sid) or not isinstance(dirs, dict):
+            continue
+        try:
+            response_dir = Path(dirs["response_dir"])
+            annotations_dir = Path(dirs["annotations_dir"])
+            state_dir = Path(dirs["state_dir"])
+        except KeyError:
+            continue
+        if not (response_dir.is_dir() and annotations_dir.is_dir() and state_dir.is_dir()):
+            continue
+        restored[sid] = {
+            "response_dir": response_dir,
+            "annotations_dir": annotations_dir,
+            "state_dir": state_dir,
+        }
+    with _sessions_lock:
+        _sessions.update(restored)
+
+
+def _session_is_pending(dirs: dict[str, Path]) -> bool:
+    """A session is pending if Claude pushed a response but the user hasn't
+    submitted or cancelled yet."""
+    meta = dirs["response_dir"] / "meta.json"
+    submitted = dirs["annotations_dir"] / "annotations.json"
+    cancelled = dirs["state_dir"] / "cancelled"
+    return meta.exists() and not submitted.exists() and not cancelled.exists()
+
+
+def _any_session_pending() -> bool:
+    with _sessions_lock:
+        for dirs in _sessions.values():
+            if _session_is_pending(dirs):
+                return True
+    return False
 
 
 def _register_session(cwd: Path) -> dict:
@@ -60,6 +127,7 @@ def _register_session(cwd: Path) -> dict:
     }
     with _sessions_lock:
         _sessions[sid] = dirs
+    _persist_sessions()
     return {"sid": sid, **dirs}
 
 
@@ -85,6 +153,29 @@ def _read_meta(response_dir: Path) -> dict:
         return json.loads(path.read_text())
     except json.JSONDecodeError:
         return {}
+
+
+INDEX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>annotate-server</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-theme="dark">
+<header class="page-header">
+  <div class="header-title">
+    <span class="header-emoji">📝</span>
+    <span class="header-text">annotate-server</span>
+  </div>
+</header>
+<main class="prose">
+<p>The server is running. Individual response pages live under <code>/s/&lt;session-id&gt;/</code>.</p>
+{sessions_block}
+</main>
+</body>
+</html>
+"""
 
 
 WAITING_HTML = """<!DOCTYPE html>
@@ -134,9 +225,7 @@ RESPONSE_HTML = """<!DOCTYPE html>
     <button id="theme-dark" type="button" class="theme-btn" aria-label="Dark theme">🌙</button>
   </div>
 </header>
-<main class="prose">
-{body_html}
-</main>
+<main class="prose"></main>
 <footer class="actions">
   <span id="comment-count" class="comment-count"></span>
   <span id="submit-status"></span>
@@ -144,6 +233,7 @@ RESPONSE_HTML = """<!DOCTYPE html>
   <button id="cancel-btn" type="button" class="cancel-btn">Cancel</button>
   <button id="submit-btn" type="button">Submit annotations</button>
 </footer>
+<script src="/static/markdown-it.min.js"></script>
 <script src="/static/script.js"></script>
 </body>
 </html>
@@ -188,6 +278,9 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/health":
             self._send_text(200, "annotate-server v1")
             return
+        if self.path == "/":
+            self._serve_index()
+            return
         if self.path.startswith("/static/"):
             self._serve_static(self.path[len("/static/"):])
             return
@@ -199,12 +292,33 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
             if rest == "/":
                 self._serve_root(dirs)
                 return
+            if rest == "/raw":
+                self._serve_raw(dirs)
+                return
             if rest == "/poll":
                 self._serve_poll(dirs)
                 return
             self._send_text(404, "not found")
             return
         self._send_text(404, "not found")
+
+    def _serve_index(self) -> None:
+        with _sessions_lock:
+            items = [(sid, dirs) for sid, dirs in _sessions.items()]
+        rows = []
+        for sid, dirs in sorted(items, reverse=True):
+            meta = _read_meta(dirs["response_dir"])
+            title = meta.get("title", "(waiting for response)")
+            href = f"/s/{sid}/"
+            rows.append(
+                f'<li><a href="{href}">{html_escape(title)}</a> '
+                f'<span class="header-respid">{html_escape(sid)}</span></li>'
+            )
+        if rows:
+            sessions_block = "<ul>" + "".join(rows) + "</ul>"
+        else:
+            sessions_block = "<p><em>No active sessions yet.</em></p>"
+        self._send_html(200, INDEX_HTML.format(sessions_block=sessions_block))
 
     def _send_text(self, status: int, body: str) -> None:
         data = body.encode("utf-8")
@@ -229,15 +343,24 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, WAITING_HTML)
             return
         meta = _read_meta(response_dir)
-        # body_html is safe to inject: markdown_lite HTML-escapes all user content
-        # before emitting tags, so no Claude-authored prose can break out into raw HTML.
-        body_html = render.render_with_block_ids(response_path.read_text())
+        # The shell ships empty; the client fetches /raw and renders with markdown-it.
         page = RESPONSE_HTML.format(
             title=html_escape(meta.get("title", "Response")),
             response_id=html_escape(meta.get("response_id", "")),
-            body_html=body_html,
         )
         self._send_html(200, page)
+
+    def _serve_raw(self, dirs: dict) -> None:
+        response_path = dirs["response_dir"] / "response.md"
+        if not response_path.exists():
+            self._send_text(404, "not found")
+            return
+        data = response_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/markdown; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _serve_static(self, name: str) -> None:
         # Reject path traversal and absolute paths.
@@ -377,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
     # ensure_server.sh; sessions are created via POST /api/sessions.
     argparse.ArgumentParser().parse_args(argv)
 
+    _rehydrate_sessions()
+
     sock, port = _bind_first_available_port()
     sock.listen()
 
@@ -400,6 +525,9 @@ def main(argv: list[str] | None = None) -> int:
     def _watch_idle():
         while not stop_event.wait(1.0):
             if _seconds_since_activity() >= SHUTDOWN_AFTER_SECONDS:
+                # Keep the server alive while a user is mid-annotation.
+                if _any_session_pending():
+                    continue
                 threading.Thread(target=server.shutdown, daemon=True).start()
                 return
 

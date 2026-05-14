@@ -12,6 +12,49 @@
   const countEl = document.getElementById("comment-count");
   const STORAGE_KEY = `annotate.drafts.${responseId}`;
 
+  // Top-level elements that get their own annotation block id (matches the
+  // contract the Python renderer used to provide).
+  const BLOCK_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "PRE", "BLOCKQUOTE"]);
+
+  function assignBlockIds(root) {
+    let n = 0;
+    function walk(el) {
+      if (el.nodeType !== 1) return;
+      if (BLOCK_TAGS.has(el.tagName)) {
+        el.dataset.blockId = `b-${n++}`;
+        // Lists themselves don't get IDs but their <li> children do, so recurse
+        // through unwrapped container tags.
+      }
+      if (el.tagName === "UL" || el.tagName === "OL" || el.tagName === "BLOCKQUOTE") {
+        for (const child of el.children) walk(child);
+      }
+    }
+    for (const child of root.children) walk(child);
+  }
+
+  async function renderMarkdown() {
+    if (!proseEl || typeof window.markdownit !== "function") return;
+    let text = "";
+    try {
+      const r = await fetch(BASE + "raw", { cache: "no-store" });
+      if (!r.ok) return;
+      text = await r.text();
+    } catch (_) {
+      return;
+    }
+    const md = window.markdownit({
+      html: false,
+      linkify: true,
+      typographer: false,
+      breaks: false,
+    });
+    proseEl.innerHTML = md.render(text);
+    assignBlockIds(proseEl);
+    renderHoverActions();
+    renderComments();
+    applyEngagedStyling();
+  }
+
   const THEME_KEY = "annotate.theme";
 
   function getInitialTheme() {
@@ -60,7 +103,6 @@
 
   // annotations: { [annotId]: { block_id, selected_text, comment, prefix?, suffix? } }
   let annotations = loadDrafts();
-  renderComments();
 
   const cancelBtn = document.getElementById("cancel-btn");
 
@@ -129,8 +171,7 @@
     focusComment(id);
   }
 
-  renderHoverActions();
-  applyEngagedStyling();
+  renderMarkdown();
 
   submitBtn.addEventListener("click", onSubmit);
   cancelBtn.addEventListener("click", onCancel);

@@ -115,11 +115,16 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", body)
         self.assertIn("Waiting for a response", body)
 
-    def test_legacy_root_returns_404(self):
-        status, _ = _http_get("localhost", self.info["port"], "/")
-        self.assertEqual(status, 404)
+    def test_root_serves_session_index(self):
+        status, body = _http_get("localhost", self.info["port"], "/")
+        self.assertEqual(status, 200)
+        self.assertIn("annotate-server", body)
+        # The test's session should appear in the index by sid.
+        self.assertIn(self.sess["sid"], body)
+        # And link to it.
+        self.assertIn(f'href="/s/{self.sess["sid"]}/"', body)
 
-    def test_root_serves_rendered_response(self):
+    def test_root_serves_response_shell(self):
         response_dir = Path(self.sess["response_dir"])
         (response_dir / "meta.json").write_text(json.dumps({
             "response_id": "resp-1",
@@ -128,17 +133,47 @@ class ServerStartupTests(unittest.TestCase):
         (response_dir / "response.md").write_text("## Plan\n\nDual-write for two weeks.")
         status, body = _http_get("localhost", self.info["port"], self.base + "/")
         self.assertEqual(status, 200)
+        # Header / title / response-id are rendered server-side.
         self.assertIn("Auth refactor", body)
         self.assertIn('data-response-id="resp-1"', body)
-        self.assertIn('data-block-id="b-0"', body)
-        self.assertIn("Plan", body)
-        self.assertIn('data-block-id="b-1"', body)
-        self.assertIn("Dual-write", body)
+        # The shell ships an empty <main class="prose"></main>; markdown body is
+        # fetched and rendered by markdown-it on the client.
+        self.assertIn('<main class="prose"></main>', body)
+        self.assertNotIn("Dual-write", body)  # not in the shell — JS fetches /raw
         self.assertIn('id="cancel-btn"', body)
         self.assertIn('class="page-header"', body)
         self.assertIn('id="theme-light"', body)
         self.assertIn('id="theme-dark"', body)
         self.assertIn('annotate.theme', body)
+        # Client-side renderer is loaded.
+        self.assertIn("/static/markdown-it.min.js", body)
+        self.assertIn("/static/script.js", body)
+
+    def test_raw_returns_markdown_bytes(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-raw", "title": "T",
+        }))
+        markdown = "# Heading\n\nA *paragraph* with **mixed** formatting.\n"
+        (response_dir / "response.md").write_text(markdown)
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("GET", self.base + "/raw")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        ctype = resp.getheader("Content-Type", "")
+        self.assertIn("text/markdown", ctype)
+        body = resp.read().decode("utf-8")
+        conn.close()
+        self.assertEqual(body, markdown)
+
+    def test_raw_returns_404_when_no_response(self):
+        status, _ = _http_get("localhost", self.info["port"], self.base + "/raw")
+        self.assertEqual(status, 404)
+
+    def test_static_serves_markdown_it_bundle(self):
+        status, body = _http_get("localhost", self.info["port"], "/static/markdown-it.min.js")
+        self.assertEqual(status, 200)
+        self.assertIn("markdown-it", body)
 
     def test_submit_writes_annotations_json(self):
         response_dir = Path(self.sess["response_dir"])

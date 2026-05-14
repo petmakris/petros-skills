@@ -1,6 +1,6 @@
 ---
 name: annotate
-description: Render long-form Claude responses as an interactive web page with span-based annotation. Activated automatically by Claude whenever a response contains 2+ distinct things the user might want to react to (plans, analyses, multi-paragraph answers, lists of findings). The user reads in the browser, highlights any text, leaves free-text comments, and submits — Claude reads the annotations on the next turn.
+description: Render Claude responses as an interactive web page with span-based annotation. Two trigger paths — (1) auto: Claude routes its current response through the view when it contains 2+ distinct things the user might want to react to (plans, analyses, multi-paragraph answers, lists of findings); (2) postmortem: user manually invokes the skill ("annotate", "annotate that", "/annotate") after a big response has already landed, and the skill pushes the most recent prior assistant message through the same pipeline. In both cases the user reads in the browser, highlights any text, leaves free-text comments, and submits — Claude reads the annotations on the next turn.
 allowed-tools:
   - Bash
   - Read
@@ -11,7 +11,9 @@ allowed-tools:
 
 Long responses (multi-step plans, analyses, lists of findings) get pushed to a browser page where the user highlights any text and leaves free-text comments. You read structured annotations on your next turn and address each.
 
-## When to use
+The skill has two trigger paths. The pipeline downstream of "ensure the server is running" is identical for both — only the **content source** differs.
+
+## Mode A — Forward (Claude-initiated)
 
 Route to the annotation view when ANY of the following is true about the response you are about to write:
 
@@ -29,6 +31,25 @@ DO NOT use the annotation view for:
 - Tool-result discussions where you're just reporting what a command produced.
 
 When in doubt, prefer the annotation view.
+
+**Content source in forward mode:** compose the response as fresh plain markdown and write that to `response.md`.
+
+## Mode B — Postmortem (user-invoked)
+
+The user invokes the skill after a big response has already been delivered in terminal. Typical triggers:
+
+- The user types `/annotate` (skill is invoked directly).
+- The user says "annotate", "annotate that", "annotate the last response", or anything semantically equivalent.
+
+When invoked this way, treat the user's message as the trigger only — **do not** generate a fresh response. Instead:
+
+1. Take **your most recent prior assistant message from conversation context** as the content. Do not consult transcript files; the conversation context is authoritative.
+2. Use that text **verbatim**. No curating, no polishing, no rewording, no summarizing. What the user already saw in terminal must be what they see in the browser. The only transformation is markdown → styled HTML (handled by the renderer).
+3. Strip nothing except: the final `assistant:` / system metadata wrappers if any, and any per-turn-hook trailer (e.g. a trailing absolute path the dump hook used to append). Substantive prose, lists, code blocks, headings — preserved exactly.
+4. If your most recent prior assistant message is empty, trivial (a one-line acknowledgement), or contains only tool-call narration without standalone prose, tell the user briefly that there is nothing meaningful to annotate and stop. Do not invent content.
+5. From here on, follow the exact same flow as forward mode: `ensure_server.sh` → POST `/api/sessions` → write `meta.json` then `response.md` → announce the URL → end your turn. The Stop hook waits for submission identically.
+
+**Token-budget note:** postmortem mode does not produce a new response. The only outputs in your terminal turn are short status lines (creating session, writing files, announcing URL). Keep terminal text minimal.
 
 ## On every invocation: ensure the server is running
 
