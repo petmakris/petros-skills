@@ -120,7 +120,7 @@ Before doing anything else with the user's message for this turn:
 
 ## Verification plan
 
-1. **Script smoke test.** Pipe a synthetic `UserPromptSubmit` payload into `auto-refine.sh`, assert the output is valid JSON with the expected shape. Add a small test next to existing `hooks/test_annotate_wait.py` (bash or python is fine; bash test matches the script's language).
+1. **Script smoke test.** Pipe a synthetic `UserPromptSubmit` payload into `auto-refine.sh`, assert the output is valid JSON with the expected shape. Add a bash test (e.g., `hooks/test_auto_refine.sh`) that runs the script with a fixture payload and validates the `additionalContext` field is present and non-empty. Bash matches the script's language and avoids pulling python into a script-only path.
 
 2. **Manual: golden path.** Fresh Claude Code session in this repo. Paste a known-messy transcript (e.g., `"um so can you check the the thing with the cards on mobile its like too tight"`). Confirm Claude runs the skill, shows a refined prompt, and asks `go`.
 
