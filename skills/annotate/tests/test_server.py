@@ -151,6 +151,17 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn("/static/markdown-it.min.js", body)
         self.assertIn("/static/script.js", body)
 
+    def test_response_shell_does_not_load_cdn_fonts(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-cdn", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("body")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/")
+        self.assertEqual(status, 200)
+        self.assertNotIn("fonts.googleapis.com", body)
+        self.assertNotIn("fonts.gstatic.com", body)
+
     def test_raw_returns_markdown_bytes(self):
         response_dir = Path(self.sess["response_dir"])
         (response_dir / "meta.json").write_text(json.dumps({
@@ -386,15 +397,14 @@ class ServerStartupTests(unittest.TestCase):
         self.assertEqual(resp.status, 409)
         conn.close()
 
-    def test_root_includes_bricolage_font_link(self):
-        response_dir = Path(self.sess["response_dir"])
-        (response_dir / "meta.json").write_text(json.dumps({
-            "response_id": "resp-fonts", "title": "T",
-        }))
-        (response_dir / "response.md").write_text("para")
-        status, body = _http_get("localhost", self.info["port"], self.base + "/")
-        self.assertEqual(status, 200)
-        self.assertIn("fonts.googleapis.com/css2?family=Bricolage+Grotesque", body)
+    def test_static_serves_bricolage_grotesque_font(self):
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("GET", "/static/fonts/BricolageGrotesque-Variable.woff2")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        body = resp.read()
+        conn.close()
+        self.assertGreater(len(body), 10000)
 
     def test_static_serves_monaspace_radon_woff2(self):
         conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)

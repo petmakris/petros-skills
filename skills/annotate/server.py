@@ -261,7 +261,6 @@ RESPONSE_HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <title>{title}</title>
 <link rel="stylesheet" href="/static/style.css">
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&display=swap" rel="stylesheet">
 <script>
   (function () {{
     try {{
