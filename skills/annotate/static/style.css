@@ -80,6 +80,44 @@
   --type-comment-wash: rgba(59, 130, 246, 0.06);
 }
 
+/* === Accent variants ================================================= */
+/* Each combines with [data-theme] to override the page accent. The
+   four type tokens (--type-reject-*, --type-question-*, --type-rewrite-*,
+   --type-comment-*) intentionally stay theme-only and are not redefined
+   here — they are load-bearing UX signals that must not shift with accent. */
+
+[data-theme="dark"][data-accent="mint"] {
+  --accent: #7ee0c2;
+  --accent-fg: #0e0f12;
+  --selection: rgba(126, 224, 194, 0.30);
+}
+[data-theme="dark"][data-accent="lavender"] {
+  --accent: #c4b5fd;
+  --accent-fg: #1a1d22;
+  --selection: rgba(196, 181, 253, 0.30);
+}
+[data-theme="dark"][data-accent="blue"] {
+  --accent: #60a5fa;
+  --accent-fg: #0e0f12;
+  --selection: rgba(96, 165, 250, 0.30);
+}
+
+[data-theme="light"][data-accent="mint"] {
+  --accent: #0d9488;
+  --accent-fg: #ffffff;
+  --selection: rgba(13, 148, 136, 0.20);
+}
+[data-theme="light"][data-accent="lavender"] {
+  --accent: #5b21b6;
+  --accent-fg: #ffffff;
+  --selection: rgba(91, 33, 182, 0.20);
+}
+[data-theme="light"][data-accent="blue"] {
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --selection: rgba(37, 99, 235, 0.20);
+}
+
 /* Default to dark until JS sets data-theme. The inline pre-paint script in
    RESPONSE_HTML <head> (added in Task 3) applies it before first render so
    this fallback is only hit if JS is disabled. */

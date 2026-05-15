@@ -455,6 +455,20 @@ class ServerStartupTests(unittest.TestCase):
         self.assertEqual(types, ["question"])
         self.assertNotIn("approve", types)
 
+    def test_static_style_defines_three_accent_variants(self):
+        status, body = _http_get("localhost", self.info["port"], "/static/style.css")
+        self.assertEqual(status, 200)
+        for accent in ("mint", "lavender", "blue"):
+            self.assertIn(f'[data-accent="{accent}"]', body,
+                          f"accent variant {accent!r} missing from style.css")
+        for theme in ("dark", "light"):
+            for accent in ("mint", "lavender", "blue"):
+                self.assertIn(
+                    f'[data-theme="{theme}"][data-accent="{accent}"]',
+                    body,
+                    f"missing accent selector for theme={theme} accent={accent}",
+                )
+
     def test_two_concurrent_sessions_are_isolated(self):
         other_project = Path(tempfile.mkdtemp(prefix="annotate-other-"))
         self.addCleanup(shutil.rmtree, other_project, True)
