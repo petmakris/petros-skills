@@ -87,6 +87,39 @@
     applyTheme("dark");
   });
 
+  const ACCENT_KEY = "annotate.accent";
+  const ACCENTS = ["mint", "lavender", "blue"];
+  const DEFAULT_ACCENT = "mint";
+
+  function getInitialAccent() {
+    const saved = localStorage.getItem(ACCENT_KEY);
+    return ACCENTS.includes(saved) ? saved : DEFAULT_ACCENT;
+  }
+  const accentBtns = [
+    document.getElementById("accent-mint"),
+    document.getElementById("accent-lavender"),
+    document.getElementById("accent-blue"),
+  ];
+
+  function applyAccent(accent) {
+    document.documentElement.dataset.accent = accent;
+    accentBtns.forEach((btn, i) => {
+      if (btn) btn.classList.toggle("active", ACCENTS[i] === accent);
+    });
+  }
+  applyAccent(getInitialAccent());
+
+  function persistAccent(accent) {
+    try { localStorage.setItem(ACCENT_KEY, accent); } catch (_) { /* ignore */ }
+  }
+
+  accentBtns.forEach((btn, i) => {
+    btn?.addEventListener("click", () => {
+      persistAccent(ACCENTS[i]);
+      applyAccent(ACCENTS[i]);
+    });
+  });
+
   const ACTION_TYPES = [
     { id: "reject",   glyph: "✗",  title: "Reject"   },
     { id: "question", glyph: "?",  title: "Question" },

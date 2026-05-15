@@ -512,6 +512,15 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn('.accent-swatch.active', body)
         self.assertIn('.accent-swatch .dot', body)
 
+    def test_script_js_handles_accent_picker(self):
+        status, body = _http_get("localhost", self.info["port"], "/static/script.js")
+        self.assertEqual(status, 200)
+        self.assertIn('ACCENT_KEY', body)
+        self.assertIn('"annotate.accent"', body)
+        self.assertIn('applyAccent', body)
+        for accent in ("mint", "lavender", "blue"):
+            self.assertIn(f'accent-{accent}', body)
+
 
 class ServerIdleShutdownTests(unittest.TestCase):
     def setUp(self):
