@@ -46,8 +46,19 @@ When invoked this way, treat the user's message as the trigger only — **do not
 1. Take **your most recent prior assistant message from conversation context** as the content. Do not consult transcript files; the conversation context is authoritative.
 2. Use that text **verbatim**. No curating, no polishing, no rewording, no summarizing. What the user already saw in terminal must be what they see in the browser. The only transformation is markdown → styled HTML (handled by the renderer).
 3. Strip nothing except: the final `assistant:` / system metadata wrappers if any, and any per-turn-hook trailer (e.g. a trailing absolute path the dump hook used to append). Substantive prose, lists, code blocks, headings — preserved exactly.
-4. If your most recent prior assistant message is empty, trivial (a one-line acknowledgement), or contains only tool-call narration without standalone prose, tell the user briefly that there is nothing meaningful to annotate and stop. Do not invent content.
+4. If your most recent prior assistant message is empty, trivial (a one-line acknowledgement), or contains only tool-call narration without standalone prose, do **not** push it. Instead, switch to **Mode C — armed for the session** (see below). Don't invent content; arm forward mode and reply once in terminal so the user knows annotate is on.
 5. From here on, follow the exact same flow as forward mode: `ensure_server.sh` → POST `/api/sessions` → write `meta.json` then `response.md` → announce the URL → end your turn. The Stop hook waits for submission identically.
+
+## Mode C — Armed for the session (no prior message to annotate)
+
+Triggered when the user invokes the skill (`/annotate`, "annotate", etc.) but there is nothing usable to push — typically the first turn of a session, or right after a short status reply.
+
+What to do:
+
+1. Don't try to push the empty/trivial prior message.
+2. Reply once in terminal, one line: *"Annotate is armed for this session — long-form responses from now on will route through the browser. Say 'respond in terminal' to disarm."*
+3. From this turn on, treat forward mode (Mode A) as **armed**: route every response that meets *any* Mode A trigger, AND lower the bar — when in doubt, route. The arming persists across turns of this session because Claude reads its own prior "armed" line in conversation context.
+4. Disarm if the user says "respond in terminal", "stop annotating", or anything semantically equivalent. Acknowledge briefly and stop routing for the rest of the session.
 
 **Token-budget note:** postmortem mode does not produce a new response. The only outputs in your terminal turn are short status lines (creating session, writing files, announcing URL). Keep terminal text minimal.
 
@@ -90,7 +101,7 @@ Save `url`, `response_dir`, `annotations_dir`, `state_dir` for the rest of this 
 5. End your turn. Do not produce additional content.
 
 The plugin's Stop hook (`hooks/annotate-wait.py`) will block here, polling for
-`annotations.json` up to 30 minutes. When the user clicks Submit, the hook
+`annotations.json` up to 2 hours. When the user clicks Submit, the hook
 injects the annotations payload as a system reminder so your next turn starts
 with them already in context — no user typing required.
 
@@ -103,7 +114,7 @@ On your next turn, **before** any other action:
    `<annotations_dir>/annotations.json` from disk (it's the source of truth and
    the hook may have truncated very large payloads).
    - Exists → read it.
-   - Doesn't exist → user didn't submit, and the hook either timed out (30 min)
+   - Doesn't exist → user didn't submit, and the hook either timed out (2 h)
      or the server went away. Treat the terminal message as implicit "looks
      good" and continue.
 

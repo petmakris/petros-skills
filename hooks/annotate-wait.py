@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 POLL_INTERVAL_S = 0.25
-MAX_WAIT_S = 30 * 60
+MAX_WAIT_S = 2 * 60 * 60
 # Pushes older than this are treated as leftovers from a previous turn the user
 # already handled (or abandoned). Stops the hook from blocking on stale state.
 FRESH_PUSH_WINDOW_S = 5 * 60
