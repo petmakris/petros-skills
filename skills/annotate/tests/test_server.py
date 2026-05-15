@@ -222,7 +222,7 @@ class ServerStartupTests(unittest.TestCase):
         response_dir = Path(self.sess["response_dir"])
         status, body = _http_get("localhost", self.info["port"], self.base + "/poll")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {"response_id": None})
+        self.assertEqual(json.loads(body), {"response_id": None, "terminal": None})
 
         (response_dir / "meta.json").write_text(json.dumps({
             "response_id": "resp-poll-1", "title": "T",
@@ -230,7 +230,7 @@ class ServerStartupTests(unittest.TestCase):
         (response_dir / "response.md").write_text("x")
         status, body = _http_get("localhost", self.info["port"], self.base + "/poll")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {"response_id": "resp-poll-1"})
+        self.assertEqual(json.loads(body), {"response_id": "resp-poll-1", "terminal": None})
 
     def test_static_files_are_served(self):
         status, body = _http_get("localhost", self.info["port"], "/static/style.css")
@@ -274,7 +274,7 @@ class ServerStartupTests(unittest.TestCase):
         conn.close()
         self.assertTrue((Path(self.sess["state_dir"]) / "submitted").exists())
 
-    def test_root_serves_waiting_when_submitted_marker_present(self):
+    def test_root_serves_closed_when_submitted_marker_present(self):
         response_dir = Path(self.sess["response_dir"])
         (response_dir / "meta.json").write_text(json.dumps({
             "response_id": "resp-locked", "title": "T",
@@ -283,10 +283,14 @@ class ServerStartupTests(unittest.TestCase):
         (Path(self.sess["state_dir"]) / "submitted").write_text("")
         status, body = _http_get("localhost", self.info["port"], self.base + "/")
         self.assertEqual(status, 200)
-        self.assertIn("Waiting for a response", body)
+        self.assertIn("closed", body.lower())
+        self.assertNotIn("Waiting for a response", body)
         self.assertNotIn('data-response-id="resp-locked"', body)
+        # The closed page must not load script.js — otherwise a stale tab
+        # could try to re-submit. Statically rendered, no JS.
+        self.assertNotIn("script.js", body)
 
-    def test_root_serves_waiting_when_cancelled_marker_present(self):
+    def test_root_serves_closed_when_cancelled_marker_present(self):
         response_dir = Path(self.sess["response_dir"])
         (response_dir / "meta.json").write_text(json.dumps({
             "response_id": "resp-cancel", "title": "T",
@@ -295,8 +299,92 @@ class ServerStartupTests(unittest.TestCase):
         (Path(self.sess["state_dir"]) / "cancelled").write_text("{}")
         status, body = _http_get("localhost", self.info["port"], self.base + "/")
         self.assertEqual(status, 200)
-        self.assertIn("Waiting for a response", body)
+        self.assertIn("closed", body.lower())
         self.assertNotIn('data-response-id="resp-cancel"', body)
+
+    def test_raw_returns_410_after_submit(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-r", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("sensitive content")
+        (Path(self.sess["state_dir"]) / "submitted").write_text("")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/raw")
+        self.assertEqual(status, 410)
+        # Body must not contain the response content — the whole point of 410
+        # here is that the URL no longer serves the prose.
+        self.assertNotIn("sensitive content", body)
+
+    def test_raw_returns_410_after_cancel(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-r", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("sensitive content")
+        (Path(self.sess["state_dir"]) / "cancelled").write_text("{}")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/raw")
+        self.assertEqual(status, 410)
+        self.assertNotIn("sensitive content", body)
+
+    def test_poll_reports_terminal_after_submit(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-t", "title": "T",
+        }))
+        (Path(self.sess["state_dir"]) / "submitted").write_text("")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/poll")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload.get("terminal"), "submitted")
+
+    def test_poll_reports_terminal_after_cancel(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-t", "title": "T",
+        }))
+        (Path(self.sess["state_dir"]) / "cancelled").write_text("{}")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/poll")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload.get("terminal"), "cancelled")
+
+    def test_poll_terminal_null_when_session_active(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-t", "title": "T",
+        }))
+        status, body = _http_get("localhost", self.info["port"], self.base + "/poll")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertIsNone(payload.get("terminal"))
+
+    def test_submit_after_submit_returns_409(self):
+        # Double-submit guard. Without it, a slow network + double-click would
+        # let the second payload clobber the first.
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-ds", "title": "T",
+        }))
+        (Path(self.sess["state_dir"]) / "submitted").write_text("")
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("POST", self.base + "/api/submit",
+                     body=json.dumps({"response_id": "resp-ds", "annotations": []}),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 409)
+        conn.close()
+
+    def test_cancel_after_submit_returns_409(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-cs", "title": "T",
+        }))
+        (Path(self.sess["state_dir"]) / "submitted").write_text("")
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("POST", self.base + "/api/cancel", body="")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 409)
+        conn.close()
 
     def test_root_includes_bricolage_font_link(self):
         response_dir = Path(self.sess["response_dir"])

@@ -93,11 +93,22 @@ def _format_one(ann: dict) -> str:
     comment = (ann.get("comment") or "").strip()
     replacement = ann.get("replacement")
     block_id = ann.get("block_id", "")
+    snippet = _truncate((ann.get("block_snippet") or "").strip(), 60)
 
-    target = f'"{selected}"' if selected else "(whole block)"
+    if selected and snippet:
+        target = f'"{selected}"  ·in "{snippet}"'
+    elif selected:
+        target = f'"{selected}"'
+    elif snippet:
+        target = f'on "{snippet}"'
+    else:
+        target = "(whole block)"
     header = f"{icon} {label}  {target}"
     if block_id:
-        header += f"  ·{block_id}"
+        # With a snippet, the block id is just a Claude-side reference — tuck
+        # it into a parenthetical. Without one, it's the only handle so keep
+        # the original `·b-N` form.
+        header += f"  ({block_id})" if snippet else f"  ·{block_id}"
 
     lines = [header]
     if replacement:

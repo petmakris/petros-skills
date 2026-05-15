@@ -176,6 +176,21 @@ def html_escape(s: str) -> str:
     return _html.escape(s, quote=True)
 
 
+def _terminal_state(state_dir: Path) -> str | None:
+    """Return 'submitted' / 'cancelled' / None for a session's terminal state.
+
+    A session is "terminal" once the user has either submitted annotations or
+    cancelled the round. Past that point every route the page depends on
+    (GET /, GET /raw, POST /api/submit, POST /api/cancel) must refuse to do
+    its normal work — the URL exists only to surface a "closed" page.
+    """
+    if (state_dir / "submitted").exists():
+        return "submitted"
+    if (state_dir / "cancelled").exists():
+        return "cancelled"
+    return None
+
+
 def _read_meta(response_dir: Path) -> dict:
     path = response_dir / "meta.json"
     if not path.exists():
@@ -219,6 +234,22 @@ WAITING_HTML = """<!DOCTYPE html>
 <body>
 <main class="waiting">
   <p>Waiting for a response. Claude will push one shortly.</p>
+</main>
+</body>
+</html>
+"""
+
+
+CLOSED_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Annotation round closed</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="waiting">
+  <p>This annotation round is closed. You can close this tab.</p>
 </main>
 </body>
 </html>
@@ -368,12 +399,14 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _serve_root(self, dirs: dict) -> None:
-        state_dir = dirs["state_dir"]
         # Terminal-state markers (submit / cancel) take precedence over the
-        # response file so a refresh after a terminal action shows the waiting
-        # screen rather than the now-consumed response.
-        if (state_dir / "submitted").exists() or (state_dir / "cancelled").exists():
-            self._send_html(200, WAITING_HTML)
+        # response file so a refresh after a terminal action shows the closed
+        # screen rather than the now-consumed response. Both markers serve the
+        # same CLOSED page — the user doesn't need to distinguish "I submitted"
+        # from "I cancelled," and we don't want to leak which path Claude took
+        # on a session opened in a stranger's browser.
+        if _terminal_state(dirs["state_dir"]) is not None:
+            self._send_html(200, CLOSED_HTML)
             return
         response_dir = dirs["response_dir"]
         response_path = response_dir / "response.md"
@@ -389,6 +422,13 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         self._send_html(200, page)
 
     def _serve_raw(self, dirs: dict) -> None:
+        # Once the session is terminal, the page should be inert — refuse to
+        # serve the response body so a stale tab can't re-render the prose
+        # underneath an already-locked overlay (or a curious user can't fetch
+        # /raw directly and reconstruct the page).
+        if _terminal_state(dirs["state_dir"]) is not None:
+            self._send_text(410, "session closed")
+            return
         response_path = dirs["response_dir"] / "response.md"
         if not response_path.exists():
             self._send_text(404, "not found")
@@ -425,7 +465,15 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
 
     def _serve_poll(self, dirs: dict) -> None:
         meta = _read_meta(dirs["response_dir"])
-        body = json.dumps({"response_id": meta.get("response_id")})
+        terminal = _terminal_state(dirs["state_dir"])
+        # `terminal` lets an already-loaded page detect that the server-side
+        # session has closed (by this tab or another) and transition itself
+        # into the locked state — without it the tab keeps polling forever
+        # after submit and the user sees no UI change until they refresh.
+        body = json.dumps({
+            "response_id": meta.get("response_id"),
+            "terminal": terminal,
+        })
         data = body.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -486,6 +534,13 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _handle_submit(self, dirs: dict) -> None:
+        # Reject if the session is already terminal — prevents a double-submit
+        # (e.g. user hits Submit twice through a slow network, or a stale tab
+        # POSTs after another tab has already cancelled). Without this guard
+        # the second write would clobber the first annotations payload.
+        if _terminal_state(dirs["state_dir"]) is not None:
+            self._send_text(409, "session closed")
+            return
         length = int(self.headers.get("Content-Length", "0") or "0")
         raw = self.rfile.read(length).decode("utf-8") if length else ""
         try:
@@ -524,6 +579,11 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         self._send_text(200, "ok")
 
     def _handle_cancel(self, dirs: dict) -> None:
+        # Same guard as submit: don't let a cancel land after a submit (or
+        # another cancel) has already closed the session.
+        if _terminal_state(dirs["state_dir"]) is not None:
+            self._send_text(409, "session closed")
+            return
         marker = dirs["state_dir"] / "cancelled"
         marker.write_text(
             json.dumps({"reason": "user-cancelled", "at": int(time.time())})

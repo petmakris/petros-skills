@@ -209,6 +209,20 @@
     return n;
   }
 
+  // Short, human-readable label for a block — used by the submit payload so the
+  // terminal-side hook can show "Unified skill scaffolding command" instead of
+  // a bare "b-12". Strips hover-action UI before extracting text.
+  function blockSnippet(blockId) {
+    if (!blockId) return "";
+    const block = document.querySelector(`[data-block-id="${blockId}"]`);
+    if (!block) return "";
+    const clone = block.cloneNode(true);
+    for (const ha of clone.querySelectorAll(".hover-actions")) ha.remove();
+    const text = (clone.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    return text.length > 60 ? text.slice(0, 59).trimEnd() + "…" : text;
+  }
+
   function buildCard(id, a) {
     const card = document.createElement("div");
     card.className = "comment-card";
@@ -336,17 +350,24 @@
   }
 
 
+  // `hasAction: true` means the locked card gets a button. Only the `stale`
+  // state has somewhere meaningful to send the user — `submitted` and
+  // `cancelled` are terminal and there's no page to refresh into, so they
+  // ship without a button.
   const LOCKED_STATES = {
-    submitted: { icon: "✓", title: "Annotations submitted",       message: "You can close this tab." },
-    stale:     { icon: "⟳", title: "A newer response is available", message: "Refresh to load it." },
-    cancelled: { icon: "⊘", title: "Annotation round cancelled",   message: "You can close this tab." },
+    submitted: { icon: "✓", title: "Annotations submitted",         message: "You can close this tab.",  hasAction: false },
+    stale:     { icon: "⟳", title: "A newer response is available", message: "Refresh to load it.",      hasAction: true,  actionLabel: "Refresh" },
+    cancelled: { icon: "⊘", title: "Annotation round cancelled",     message: "You can close this tab.", hasAction: false },
   };
 
   let lockedOverlay = null;
+  let lockedKind = null;
 
   function enterLockedState(kind) {
     const cfg = LOCKED_STATES[kind];
     if (!cfg) return;
+    if (lockedKind === kind) return;  // idempotent — repeated poll hits are a no-op
+    lockedKind = kind;
     if (!lockedOverlay) {
       lockedOverlay = document.createElement("div");
       lockedOverlay.className = "locked-overlay";
@@ -355,12 +376,8 @@
           <div class="locked-icon"></div>
           <h2 class="locked-title"></h2>
           <p class="locked-message"></p>
-          <button type="button" class="locked-action">Refresh</button>
         </div>
       `;
-      lockedOverlay.querySelector(".locked-action").addEventListener("click", () => {
-        window.location.reload();
-      });
       document.body.appendChild(lockedOverlay);
     }
     const iconEl = lockedOverlay.querySelector(".locked-icon");
@@ -368,6 +385,20 @@
     iconEl.dataset.kind = kind;
     lockedOverlay.querySelector(".locked-title").textContent = cfg.title;
     lockedOverlay.querySelector(".locked-message").textContent = cfg.message;
+
+    // Rebuild the action area each time so re-entering with a different kind
+    // (e.g. stale → submitted, if that ever happens) flips the button cleanly.
+    const card = lockedOverlay.querySelector(".locked-card");
+    const existingBtn = card.querySelector(".locked-action");
+    if (existingBtn) existingBtn.remove();
+    if (cfg.hasAction) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "locked-action";
+      btn.textContent = cfg.actionLabel || "Refresh";
+      btn.addEventListener("click", () => { window.location.reload(); });
+      card.appendChild(btn);
+    }
 
     const prose = document.querySelector("main.prose");
     const footer = document.querySelector("footer.actions");
@@ -393,6 +424,8 @@
         if (a.replacement !== undefined) out.replacement = a.replacement;
         if (a.prefix !== undefined) out.prefix = a.prefix;
         if (a.suffix !== undefined) out.suffix = a.suffix;
+        const snippet = blockSnippet(a.block_id);
+        if (snippet) out.block_snippet = snippet;
         return out;
       }),
     };
@@ -420,6 +453,13 @@
 
   function pollForUpdate() {
     fetch(BASE + "poll").then(r => r.json()).then(data => {
+      // Terminal beats "stale" — if another tab (or this one) submitted/cancelled,
+      // lock the page immediately rather than nagging about a newer response that
+      // the user can no longer act on.
+      if (data.terminal === "submitted" || data.terminal === "cancelled") {
+        enterLockedState(data.terminal);
+        return;
+      }
       if (data.response_id && data.response_id !== responseId) {
         showToast("New response available — reload");
       }

@@ -148,6 +148,40 @@ class AnnotateWaitTests(unittest.TestCase):
         self.assertIn("I think it's too much", out)
         self.assertIn("sounds better", out)
 
+    def test_format_one_uses_block_snippet_when_present(self):
+        # Snippet present → human label shows up as the target, b-id moves to
+        # a trailing parenthetical so it's still parsable but no longer the
+        # primary identifier the user sees.
+        out_block_scope = hook._format_one({
+            "block_id": "b-12", "type": "comment",
+            "selected_text": "", "comment": "approve",
+            "block_snippet": "Unified skill scaffolding command",
+        })
+        self.assertIn("Unified skill scaffolding command", out_block_scope)
+        self.assertIn("(b-12)", out_block_scope)
+        self.assertNotIn("·b-12", out_block_scope)
+        self.assertNotIn("(whole block)", out_block_scope)
+
+        out_span_scope = hook._format_one({
+            "block_id": "b-7", "type": "reject",
+            "selected_text": "burn the build",
+            "comment": "no",
+            "block_snippet": "Hook installer audit",
+        })
+        self.assertIn('"burn the build"', out_span_scope)
+        self.assertIn("Hook installer audit", out_span_scope)
+        self.assertIn("(b-7)", out_span_scope)
+
+    def test_format_one_falls_back_to_block_id_without_snippet(self):
+        # Old payloads with no snippet still display the bare `·b-N` form so
+        # the hook degrades gracefully if the client doesn't send block_snippet.
+        out = hook._format_one({
+            "block_id": "b-3", "type": "comment",
+            "selected_text": "", "comment": "x",
+        })
+        self.assertIn("·b-3", out)
+        self.assertIn("(whole block)", out)
+
     def test_format_context_empty_annotations_is_terse(self):
         out = hook._format_context({"response_id": "resp-empty", "annotations": []})
         self.assertIn("resp-empty", out)
