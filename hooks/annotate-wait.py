@@ -107,6 +107,21 @@ def _format_one(ann: dict) -> str:
     return "\n".join(lines)
 
 
+# The annotate skill's loop-back rule (SKILL.md "Continuing the annotation
+# loop") lives here too because the skill body is not re-loaded on the
+# response-to-annotations turn — this injected reminder is the only thing
+# guaranteed to be in context, so the routing rule must travel with the
+# annotations payload. Keep this in sync with SKILL.md.
+_ROUTING_REMINDER = (
+    "— continuation —\n"
+    "If your reply will be long-form (addresses 2+ annotations, contains a "
+    "plan or multi-paragraph analysis, or lists separable points), re-invoke "
+    "the `annotate` skill and route the reply through the browser. For short "
+    "replies (1-line acknowledgement, single-fact answer, status update, "
+    "tool-result narration) respond in terminal. When in doubt, route."
+)
+
+
 def _format_context(payload: dict) -> str:
     response_id = payload.get("response_id", "?")
     annotations = payload.get("annotations") or []
@@ -116,7 +131,8 @@ def _format_context(payload: dict) -> str:
         return (
             f"The user clicked Submit on the annotate page for `{response_id}` "
             "with no annotations. Treat as full approval — acknowledge briefly "
-            "and continue."
+            "and continue.\n\n"
+            f"{_ROUTING_REMINDER}"
         )
 
     parts = [
@@ -127,6 +143,7 @@ def _format_context(payload: dict) -> str:
     for ann in annotations:
         parts.append(_format_one(ann))
         parts.append("")
+    parts.append(_ROUTING_REMINDER)
     return "\n".join(parts).rstrip()
 
 

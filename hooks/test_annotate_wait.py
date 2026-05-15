@@ -153,6 +153,40 @@ class AnnotateWaitTests(unittest.TestCase):
         self.assertIn("resp-empty", out)
         self.assertIn("no annotations", out)
 
+    def test_format_context_with_annotations_includes_routing_reminder(self):
+        # The hook is the only thing guaranteed to be in context on the response-
+        # to-annotations turn, so the routing rule for follow-ups must travel with
+        # the annotations payload. Without this, Claude defaults to terminal and
+        # the annotation loop breaks after the first iteration.
+        payload = {
+            "response_id": "resp-route",
+            "annotations": [
+                {"block_id": "b-1", "type": "question",
+                 "selected_text": "foo", "comment": "explain"},
+                {"block_id": "b-2", "type": "comment",
+                 "selected_text": "bar", "comment": "also explain"},
+            ],
+        }
+        out = hook._format_context(payload)
+        # Routing block is present and marked.
+        self.assertIn("continuation", out.lower())
+        # Both branches of the rule are spelled out.
+        self.assertIn("long-form", out.lower())
+        self.assertIn("terminal", out.lower())
+        # Names the skill so Claude knows what to re-invoke.
+        self.assertIn("annotate", out.lower())
+        # Routing block sits after the annotations list (decision needs the
+        # annotation context to land first).
+        self.assertGreater(out.lower().index("continuation"),
+                           out.index("explain"))
+
+    def test_format_context_empty_annotations_includes_routing_reminder(self):
+        # Zero-annotation approval still needs the routing nudge — the user may
+        # have approved a plan and Claude's next move could itself be long-form.
+        out = hook._format_context({"response_id": "resp-empty", "annotations": []})
+        self.assertIn("long-form", out.lower())
+        self.assertIn("annotate", out.lower())
+
     def test_timeout_exits_silently(self):
         self._make_session(response_id="resp-x")
         # Force the loop's deadline to be in the past via the `now` kwarg so the
