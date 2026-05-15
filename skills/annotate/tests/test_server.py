@@ -505,6 +505,13 @@ class ServerStartupTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("Waiting for a response", body)
 
+    def test_static_style_defines_accent_swatch_rules(self):
+        status, body = _http_get("localhost", self.info["port"], "/static/style.css")
+        self.assertEqual(status, 200)
+        self.assertIn('.accent-swatch', body)
+        self.assertIn('.accent-swatch.active', body)
+        self.assertIn('.accent-swatch .dot', body)
+
 
 class ServerIdleShutdownTests(unittest.TestCase):
     def setUp(self):

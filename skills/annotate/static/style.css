@@ -310,6 +310,38 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   background: var(--surface);
   color: var(--text);
 }
+.accent-swatches {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-right: 6px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.accent-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 120ms ease, transform 100ms ease;
+}
+.accent-swatch:hover { transform: scale(1.08); }
+.accent-swatch .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: block;
+}
+.accent-swatch.active {
+  border-color: var(--text-strong);
+}
 
 .hover-actions {
   position: absolute;
