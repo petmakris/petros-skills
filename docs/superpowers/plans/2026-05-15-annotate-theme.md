@@ -35,7 +35,7 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Add this test method to the `RootShellTests` class (or whichever class contains `test_root_serves_response_shell`) in `skills/annotate/tests/test_server.py`:
+Add this test method to the `ServerStartupTests` class (or whichever class contains `test_root_serves_response_shell`) in `skills/annotate/tests/test_server.py`:
 
 ```python
 def test_response_shell_does_not_load_cdn_fonts(self):
@@ -52,7 +52,7 @@ def test_response_shell_does_not_load_cdn_fonts(self):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_response_shell_does_not_load_cdn_fonts -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_response_shell_does_not_load_cdn_fonts -v`
 Expected: FAIL with `AssertionError: 'fonts.googleapis.com' unexpectedly found in <html…>`
 
 - [ ] **Step 3: Download the Bricolage Grotesque variable font and write its license**
@@ -122,12 +122,12 @@ RESPONSE_HTML = """<!DOCTYPE html>
 
 - [ ] **Step 6: Run the test from Step 1 to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_response_shell_does_not_load_cdn_fonts -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_response_shell_does_not_load_cdn_fonts -v`
 Expected: PASS
 
 - [ ] **Step 7: Run the full test module to verify no regressions**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server -v`
 Expected: all tests pass.
 
 - [ ] **Step 8: Commit**
@@ -172,7 +172,7 @@ def test_static_style_defines_three_accent_variants(self):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_static_style_defines_three_accent_variants -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_static_style_defines_three_accent_variants -v`
 Expected: FAIL with `AssertionError: '[data-accent="mint"]' missing from style.css`
 
 - [ ] **Step 3: Add the accent variants in `style.css`**
@@ -221,7 +221,7 @@ In `skills/annotate/static/style.css`, immediately after the existing `[data-the
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_static_style_defines_three_accent_variants -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_static_style_defines_three_accent_variants -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -241,7 +241,7 @@ git commit -m "feat(annotate): add three accent palettes scoped under [data-acce
 
 - [ ] **Step 1: Write the failing test**
 
-Append this test method to `RootShellTests`:
+Append this test method to `ServerStartupTests`:
 
 ```python
 def test_response_shell_renders_accent_swatches_and_prepaint(self):
@@ -264,7 +264,7 @@ def test_response_shell_renders_accent_swatches_and_prepaint(self):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_response_shell_renders_accent_swatches_and_prepaint -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_response_shell_renders_accent_swatches_and_prepaint -v`
 Expected: FAIL with `AssertionError: 'id="accent-mint"' not found in body`
 
 - [ ] **Step 3: Extend the inline pre-paint script in `RESPONSE_HTML`**
@@ -323,12 +323,12 @@ The swatch dots use hardcoded hex (not CSS variables) because they advertise the
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_response_shell_renders_accent_swatches_and_prepaint -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_response_shell_renders_accent_swatches_and_prepaint -v`
 Expected: PASS
 
 - [ ] **Step 6: Run the full test module**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server -v`
 Expected: all tests pass.
 
 - [ ] **Step 7: Commit**
@@ -348,7 +348,7 @@ git commit -m "feat(annotate): render accent swatch row and resolve accent befor
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `RootShellTests`:
+Append to `ServerStartupTests`:
 
 ```python
 def test_static_style_defines_accent_swatch_rules(self):
@@ -361,7 +361,7 @@ def test_static_style_defines_accent_swatch_rules(self):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_static_style_defines_accent_swatch_rules -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_static_style_defines_accent_swatch_rules -v`
 Expected: FAIL with `AssertionError: '.accent-swatch' not found in body`
 
 - [ ] **Step 3: Add the swatch styles in `style.css`**
@@ -405,7 +405,7 @@ In `skills/annotate/static/style.css`, immediately after the existing `.theme-bt
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_static_style_defines_accent_swatch_rules -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_static_style_defines_accent_swatch_rules -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -424,7 +424,7 @@ git commit -m "style(annotate): accent swatch row styling"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `RootShellTests` in `skills/annotate/tests/test_server.py`:
+Append to `ServerStartupTests` in `skills/annotate/tests/test_server.py`:
 
 ```python
 def test_script_js_handles_accent_picker(self):
@@ -440,7 +440,7 @@ def test_script_js_handles_accent_picker(self):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_script_js_handles_accent_picker -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_script_js_handles_accent_picker -v`
 Expected: FAIL with `AssertionError: 'ACCENT_KEY' not found in body`
 
 - [ ] **Step 3: Add the accent handling block to `script.js`**
@@ -482,7 +482,7 @@ This mirrors the existing theme handler block exactly, including the `try { ... 
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_script_js_handles_accent_picker -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_script_js_handles_accent_picker -v`
 Expected: PASS
 
 - [ ] **Step 5: Manual browser smoke test**
@@ -521,7 +521,7 @@ git commit -m "feat(annotate): wire up accent picker with localStorage persisten
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `RootShellTests`:
+Append to `ServerStartupTests`:
 
 ```python
 def test_static_style_typographic_refinements(self):
@@ -538,7 +538,7 @@ def test_static_style_typographic_refinements(self):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_static_style_typographic_refinements -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_static_style_typographic_refinements -v`
 Expected: FAIL with `AssertionError: 'font-size: 15.5px' not found`
 
 - [ ] **Step 3: Update the dark theme token block**
@@ -622,12 +622,12 @@ main.prose h3 {
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests.test_server.RootShellTests.test_static_style_typographic_refinements -v`
+Run: `python3 -m unittest skills.annotate.tests.test_server.ServerStartupTests.test_static_style_typographic_refinements -v`
 Expected: PASS
 
 - [ ] **Step 6: Run the full annotate test suite**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest skills.annotate.tests -v`
+Run: `python3 -m unittest skills.annotate.tests -v`
 Expected: all tests pass.
 
 - [ ] **Step 7: Manual browser smoke test**
@@ -655,7 +655,7 @@ git commit -m "style(annotate): typographic refinements + deeper cool-dark bg"
 
 - [ ] **Step 1: Run the full repo test suite**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && python3 -m unittest discover -s skills -v`
+Run: `python3 -m unittest discover -s skills -v`
 Expected: all tests pass.
 
 - [ ] **Step 2: DevTools network audit**
