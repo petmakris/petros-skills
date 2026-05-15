@@ -264,12 +264,18 @@ RESPONSE_HTML = """<!DOCTYPE html>
 <script>
   (function () {{
     try {{
-      var saved = localStorage.getItem("annotate.theme");
+      var savedTheme = localStorage.getItem("annotate.theme");
       var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      var theme = (saved === "light" || saved === "dark") ? saved : (prefersDark ? "dark" : "light");
+      var theme = (savedTheme === "light" || savedTheme === "dark") ? savedTheme : (prefersDark ? "dark" : "light");
       document.documentElement.dataset.theme = theme;
+
+      var savedAccent = localStorage.getItem("annotate.accent");
+      var ACCENTS = ["mint", "lavender", "blue"];
+      var accent = ACCENTS.indexOf(savedAccent) >= 0 ? savedAccent : "mint";
+      document.documentElement.dataset.accent = accent;
     }} catch (e) {{
       document.documentElement.dataset.theme = "dark";
+      document.documentElement.dataset.accent = "mint";
     }}
   }})();
 </script>
@@ -282,6 +288,11 @@ RESPONSE_HTML = """<!DOCTYPE html>
     <span class="header-respid">{response_id}</span>
   </div>
   <div class="header-actions">
+    <div class="accent-swatches" role="group" aria-label="Accent color">
+      <button id="accent-mint"     type="button" class="accent-swatch" data-accent="mint"     aria-label="Mint accent"><span class="dot" style="background:#7ee0c2"></span></button>
+      <button id="accent-lavender" type="button" class="accent-swatch" data-accent="lavender" aria-label="Lavender accent"><span class="dot" style="background:#c4b5fd"></span></button>
+      <button id="accent-blue"     type="button" class="accent-swatch" data-accent="blue"     aria-label="Blue accent"><span class="dot" style="background:#60a5fa"></span></button>
+    </div>
     <button id="theme-light" type="button" class="theme-btn" aria-label="Light theme">☀</button>
     <button id="theme-dark" type="button" class="theme-btn" aria-label="Dark theme">🌙</button>
   </div>

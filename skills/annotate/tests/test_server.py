@@ -285,6 +285,23 @@ class ServerStartupTests(unittest.TestCase):
         conn.close()
         self.assertTrue((Path(self.sess["state_dir"]) / "submitted").exists())
 
+    def test_response_shell_renders_accent_swatches_and_prepaint(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-acc", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("body")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/")
+        self.assertEqual(status, 200)
+        # Three swatch buttons exist
+        self.assertIn('id="accent-mint"', body)
+        self.assertIn('id="accent-lavender"', body)
+        self.assertIn('id="accent-blue"', body)
+        # Pre-paint script resolves accent before first render
+        self.assertIn('annotate.accent', body)
+        # Default accent for a first-time visitor is "mint"
+        self.assertIn('"mint"', body)
+
     def test_root_serves_closed_when_submitted_marker_present(self):
         response_dir = Path(self.sess["response_dir"])
         (response_dir / "meta.json").write_text(json.dumps({
