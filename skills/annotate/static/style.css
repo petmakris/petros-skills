@@ -21,16 +21,16 @@
 }
 
 [data-theme="dark"] {
-  --bg: #1a1d22;
-  --surface: #22262d;
-  --surface-soft: #1e2127;
-  --border: rgba(255, 255, 255, 0.08);
+  --bg: #0e0f12;
+  --surface: #16181d;
+  --surface-soft: #07080a;
+  --border: rgba(255, 255, 255, 0.07);
   --surface-hover: rgba(255, 255, 255, 0.04);
-  --text: #e8eaee;
+  --text: #d4d7de;
   --text-strong: #ffffff;
-  --text-dim: #9aa0aa;
+  --text-dim: #7c828d;
   --accent: #c4b5fd;
-  --accent-fg: #1a1d22;
+  --accent-fg: #0e0f12;
   --comment-bg: rgba(96, 165, 250, 0.08);
   --highlight: rgba(251, 191, 36, 0.25);
   --selection: rgba(96, 165, 250, 0.35);
@@ -93,7 +93,7 @@
 }
 [data-theme="dark"][data-accent="lavender"] {
   --accent: #c4b5fd;
-  --accent-fg: #1a1d22;
+  --accent-fg: #0e0f12;
   --selection: rgba(196, 181, 253, 0.30);
 }
 [data-theme="dark"][data-accent="blue"] {
@@ -122,7 +122,7 @@
    RESPONSE_HTML <head> (added in Task 3) applies it before first render so
    this fallback is only hit if JS is disabled. */
 html:not([data-theme]) { color-scheme: dark; }
-html:not([data-theme]) body { background: #1a1d22; color: #e8eaee; }
+html:not([data-theme]) body { background: #0e0f12; color: #d4d7de; }
 
 * { box-sizing: border-box; }
 body {
@@ -130,8 +130,9 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  font-size: 16px;
-  line-height: 1.65;
+  font-size: 15.5px;
+  line-height: 1.6;
+  letter-spacing: -0.003em;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -145,9 +146,16 @@ main.prose {
   width: 100%;
   margin: 0 auto;
 }
-main.prose h1 { color: var(--text-strong); margin-top: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.005em; }
-main.prose h2 { color: var(--text-strong); margin-top: 1.4em; font-size: 22px; font-weight: 700; letter-spacing: -0.005em; }
-main.prose h3 { color: var(--text-strong); margin-top: 1.2em; font-size: 18px; font-weight: 600; }
+main.prose h1 { color: var(--text-strong); margin-top: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.022em; }
+main.prose h2 { color: var(--text-strong); margin-top: 1.4em; font-size: 21px; font-weight: 700; letter-spacing: -0.022em; }
+main.prose h3 {
+  color: var(--accent);
+  margin-top: 1.6em;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
 main.prose p, main.prose li, main.prose blockquote {
   position: relative;
   padding: 4px 140px 4px 6px;

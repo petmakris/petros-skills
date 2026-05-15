@@ -246,7 +246,7 @@ class ServerStartupTests(unittest.TestCase):
     def test_static_files_are_served(self):
         status, body = _http_get("localhost", self.info["port"], "/static/style.css")
         self.assertEqual(status, 200)
-        self.assertIn("--bg: #1a1d22", body)
+        self.assertIn("--bg: #0e0f12", body)
         status, body = _http_get("localhost", self.info["port"], "/static/script.js")
         self.assertEqual(status, 200)
         self.assertIn("annotate skill", body)
@@ -520,6 +520,14 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn('applyAccent', body)
         for accent in ("mint", "lavender", "blue"):
             self.assertIn(f'accent-{accent}', body)
+
+    def test_static_style_typographic_refinements(self):
+        status, body = _http_get("localhost", self.info["port"], "/static/style.css")
+        self.assertEqual(status, 200)
+        self.assertIn('font-size: 15.5px', body)
+        self.assertIn('line-height: 1.6', body)
+        self.assertIn('letter-spacing: -0.022em', body)
+        self.assertIn('--bg: #0e0f12', body)
 
 
 class ServerIdleShutdownTests(unittest.TestCase):
