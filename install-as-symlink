@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Replace the user-scope plugin install with a symlink back to this working
+# tree, so edits here are live without needing /plugin update every time.
+#
+# Prerequisite: you've already run `/plugin install petros-skills@petros-skills`
+# at least once. This script just swaps the frozen copy for a symlink.
+
+set -eu
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_JSON="$SCRIPT_DIR/.claude-plugin/plugin.json"
+
+if [ ! -f "$PLUGIN_JSON" ]; then
+  echo "Missing $PLUGIN_JSON — run this from inside the plugin repo." >&2
+  exit 1
+fi
+
+# Read name + version from plugin.json (stdlib python — no jq dependency).
+read -r PLUGIN_NAME PLUGIN_VERSION < <(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+print(m["name"], m["version"])
+' "$PLUGIN_JSON")
+
+# The marketplace name comes from .claude-plugin/marketplace.json in this repo,
+# which is what /plugin marketplace add picks up. For this repo it matches the
+# plugin name, but read it anyway so we don't drift.
+MARKETPLACE_JSON="$SCRIPT_DIR/.claude-plugin/marketplace.json"
+if [ -f "$MARKETPLACE_JSON" ]; then
+  MARKETPLACE_NAME="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1]))["name"])
+' "$MARKETPLACE_JSON")"
+else
+  MARKETPLACE_NAME="$PLUGIN_NAME"
+fi
+
+CACHE_DIR="$HOME/.claude/plugins/cache/$MARKETPLACE_NAME/$PLUGIN_NAME/$PLUGIN_VERSION"
+
+if [ ! -e "$CACHE_DIR" ] && [ ! -L "$CACHE_DIR" ]; then
+  echo "Plugin not installed yet at $CACHE_DIR" >&2
+  echo "Run these in Claude Code first, then re-run this script:" >&2
+  echo "  /plugin marketplace add $SCRIPT_DIR" >&2
+  echo "  /plugin install $PLUGIN_NAME@$MARKETPLACE_NAME" >&2
+  exit 1
+fi
+
+# Idempotent: if it's already a symlink to the right place, we're done.
+if [ -L "$CACHE_DIR" ] && [ "$(readlink "$CACHE_DIR")" = "$SCRIPT_DIR" ]; then
+  echo "Already symlinked: $CACHE_DIR -> $SCRIPT_DIR"
+  exit 0
+fi
+
+echo "Replacing $CACHE_DIR with symlink to $SCRIPT_DIR ..."
+rm -rf "$CACHE_DIR"
+ln -s "$SCRIPT_DIR" "$CACHE_DIR"
+echo "Done. Run /reload-plugins in Claude Code to pick up the change."
+echo ""
+echo "Note: a future '/plugin update petros-skills@petros-skills' may replace"
+echo "this symlink with a fresh copy. Re-run this script if that happens."

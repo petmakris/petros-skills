@@ -25,6 +25,18 @@ Then restart Claude Code (or run `/reload-plugins`). Verify with `/plugin` — `
 
 > If the cwd of the Claude session you run the commands from happens to be this repo, `./` works in place of the absolute path. Either way, the marketplace registration is stored in `~/.claude/settings.json` and persists across projects.
 
+## Live-edit mode (for working on this plugin)
+
+`/plugin install` copies the source into `~/.claude/plugins/cache/...`, so edits in this repo don't propagate — you'd have to `/plugin update` after every change. To avoid that, run once:
+
+```
+./install-as-symlink
+```
+
+This replaces the cached copy with a symlink back to this working tree. From then on, every edit is live — just `/reload-plugins` in Claude Code to pick it up. Re-run the script if a future `/plugin update` ever overwrites the symlink with a fresh copy.
+
+Skip this if you're just *using* the plugin and not editing it.
+
 ## Disable per project
 
 Hooks fire in *every* project once the plugin is installed. To opt a single project out, add to that project's `.claude/settings.json`:
