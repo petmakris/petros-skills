@@ -26,6 +26,7 @@
   --comment-bg: rgba(96, 165, 250, 0.08);
   --highlight: rgba(251, 191, 36, 0.25);
   --selection: rgba(96, 165, 250, 0.35);
+  --hover-tint: rgba(255, 255, 255, 0.06);
 
   --type-reject-fg: #fca5a5;
   --type-reject-bg: rgba(239, 68, 68, 0.18);
@@ -55,6 +56,7 @@
   --comment-bg: #f7f6f3;
   --highlight: #fde68a;
   --selection: rgba(91, 33, 182, 0.20);
+  --hover-tint: #ece9e0;
 
   --type-reject-fg: #b91c1c;
   --type-reject-bg: #ffe0e0;
@@ -100,17 +102,26 @@ main.prose {
 main.prose h1 { color: var(--text-strong); margin-top: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.005em; }
 main.prose h2 { color: var(--text-strong); margin-top: 1.4em; font-size: 22px; font-weight: 700; letter-spacing: -0.005em; }
 main.prose h3 { color: var(--text-strong); margin-top: 1.2em; font-size: 18px; font-weight: 600; }
-main.prose p, main.prose li, main.prose pre, main.prose blockquote {
+main.prose p, main.prose li, main.prose blockquote {
   position: relative;
-  padding: 4px 6px;
+  padding: 4px 140px 4px 6px;
   border-radius: 3px;
   transition: background-color 120ms ease;
 }
-main.prose p:hover, main.prose li:hover { background: var(--surface-hover); }
+main.prose h1, main.prose h2, main.prose h3,
+main.prose h4, main.prose h5, main.prose h6 {
+  padding-right: 140px;
+  transition: background-color 120ms ease;
+  border-radius: 3px;
+}
+main.prose [data-block-id]:hover { background: var(--hover-tint); }
+main.prose blockquote p:hover { background: transparent; }
 main.prose pre {
   background: var(--surface);
   border: 1px solid var(--border);
-  padding: 12px 14px;
+  padding: 12px 140px 12px 14px;
+  border-radius: 3px;
+  transition: background-color 120ms ease;
   font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13.5px;
   overflow-x: auto;
@@ -256,31 +267,31 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .hover-actions {
   position: absolute;
-  right: -36px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 6px;
+  right: 8px;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding-left: 12px;
+  flex-direction: row;
+  gap: 4px;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 100ms ease;
+  transition: opacity 140ms ease;
 }
 [data-block-id]:hover .hover-actions,
-.hover-actions:hover { opacity: 1; pointer-events: auto; }
+.hover-actions:hover,
+.hover-actions[data-visible="1"] { opacity: 1; pointer-events: auto; }
 .hover-actions button {
-  width: 24px; height: 24px;
+  width: 28px; height: 28px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--text);
   display: flex; align-items: center; justify-content: center;
   padding: 0;
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .hover-actions button[data-type="reject"]:hover   { background: var(--type-reject-bg);   color: var(--type-reject-fg);   border-color: transparent; }
 .hover-actions button[data-type="question"]:hover { background: var(--type-question-bg); color: var(--type-question-fg); border-color: transparent; }
@@ -312,6 +323,13 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 [data-block-id][data-engaged-type="rewrite"]::before     { background: var(--type-rewrite-fg); }
 [data-block-id][data-engaged-type="comment"]             { background: var(--type-comment-wash); }
 [data-block-id][data-engaged-type="comment"]::before     { background: var(--type-comment-fg); }
+
+/* Engaged blocks on hover: blend the hover tint over the type-wash so the
+   active-for-annotation state is still visible without losing type identity. */
+[data-block-id][data-engaged-type="reject"]:hover   { background: color-mix(in srgb, var(--type-reject-wash) 55%,   var(--hover-tint)); }
+[data-block-id][data-engaged-type="question"]:hover { background: color-mix(in srgb, var(--type-question-wash) 55%, var(--hover-tint)); }
+[data-block-id][data-engaged-type="rewrite"]:hover  { background: color-mix(in srgb, var(--type-rewrite-wash) 55%,  var(--hover-tint)); }
+[data-block-id][data-engaged-type="comment"]:hover  { background: color-mix(in srgb, var(--type-comment-wash) 55%,  var(--hover-tint)); }
 
 .inline-comments {
   margin: 6px 0 16px 0;
@@ -445,3 +463,62 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   line-height: 1;
 }
 .first-time-toast .dismiss:hover { color: var(--text); }
+
+.locked-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: locked-fade-in 180ms ease;
+}
+@keyframes locked-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.locked-card {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 26px 28px 22px 28px;
+  max-width: 360px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+}
+.locked-icon {
+  font-size: 32px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.locked-icon[data-kind="submitted"] { color: #10b981; }
+.locked-icon[data-kind="stale"]     { color: #f59e0b; }
+.locked-icon[data-kind="cancelled"] { color: var(--text-dim); }
+.locked-title {
+  margin: 0 0 6px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.locked-message {
+  margin: 0 0 18px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.locked-action {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+.locked-action:hover { filter: brightness(1.1); }

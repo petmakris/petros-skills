@@ -29,6 +29,8 @@ def _start_server(fake_home: Path) -> tuple[subprocess.Popen, dict]:
     env["PYTHONPATH"] = str(REPO_ROOT)
     env["ANNOTATE_SHUTDOWN_SECONDS"] = "60"
     env["HOME"] = str(fake_home)
+    # Pin announced URLs to localhost so tests don't depend on Tailscale state.
+    env["ANNOTATE_PUBLIC_HOST"] = "localhost"
     proc = subprocess.Popen(
         [sys.executable, "-m", "skills.annotate.server"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
@@ -256,6 +258,45 @@ class ServerStartupTests(unittest.TestCase):
         payload = json.loads(cancelled.read_text())
         self.assertEqual(payload["reason"], "user-cancelled")
         self.assertIsInstance(payload["at"], int)
+
+    def test_submit_writes_submitted_marker(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-mark", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("para")
+        payload = {"response_id": "resp-mark", "annotations": []}
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("POST", self.base + "/api/submit", body=json.dumps(payload),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        conn.close()
+        self.assertTrue((Path(self.sess["state_dir"]) / "submitted").exists())
+
+    def test_root_serves_waiting_when_submitted_marker_present(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-locked", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("para")
+        (Path(self.sess["state_dir"]) / "submitted").write_text("")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/")
+        self.assertEqual(status, 200)
+        self.assertIn("Waiting for a response", body)
+        self.assertNotIn('data-response-id="resp-locked"', body)
+
+    def test_root_serves_waiting_when_cancelled_marker_present(self):
+        response_dir = Path(self.sess["response_dir"])
+        (response_dir / "meta.json").write_text(json.dumps({
+            "response_id": "resp-cancel", "title": "T",
+        }))
+        (response_dir / "response.md").write_text("para")
+        (Path(self.sess["state_dir"]) / "cancelled").write_text("{}")
+        status, body = _http_get("localhost", self.info["port"], self.base + "/")
+        self.assertEqual(status, 200)
+        self.assertIn("Waiting for a response", body)
+        self.assertNotIn('data-response-id="resp-cancel"', body)
 
     def test_root_includes_bricolage_font_link(self):
         response_dir = Path(self.sess["response_dir"])

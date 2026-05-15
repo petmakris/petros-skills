@@ -106,11 +106,26 @@
 
   const cancelBtn = document.getElementById("cancel-btn");
 
+  const HOVER_LINGER_MS = 500;
+
   function renderHoverActions() {
     document.querySelectorAll("[data-block-id]").forEach(block => {
       if (block.querySelector(".hover-actions")) return;
       const wrap = document.createElement("div");
       wrap.className = "hover-actions";
+      let hideTimer = null;
+      const show = () => {
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        wrap.dataset.visible = "1";
+      };
+      const scheduleHide = () => {
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => { delete wrap.dataset.visible; hideTimer = null; }, HOVER_LINGER_MS);
+      };
+      block.addEventListener("mouseenter", show);
+      block.addEventListener("mouseleave", scheduleHide);
+      wrap.addEventListener("mouseenter", show);
+      wrap.addEventListener("mouseleave", scheduleHide);
       for (const t of ACTION_TYPES) {
         const b = document.createElement("button");
         b.type = "button";
@@ -119,6 +134,7 @@
         b.title = t.title;
         b.addEventListener("click", (ev) => {
           ev.stopPropagation();
+          show();
           onHoverAction(block, t.id);
         });
         wrap.appendChild(b);
@@ -307,7 +323,7 @@
 
   function focusComment(id) {
     const ta = document.querySelector(`.comment-card[data-id="${id}"] textarea`);
-    if (ta) ta.focus();
+    if (ta) ta.focus({ preventScroll: true });
   }
 
   function loadDrafts() {
@@ -319,6 +335,47 @@
     catch { /* ignore */ }
   }
 
+
+  const LOCKED_STATES = {
+    submitted: { icon: "✓", title: "Annotations submitted",       message: "You can close this tab." },
+    stale:     { icon: "⟳", title: "A newer response is available", message: "Refresh to load it." },
+    cancelled: { icon: "⊘", title: "Annotation round cancelled",   message: "You can close this tab." },
+  };
+
+  let lockedOverlay = null;
+
+  function enterLockedState(kind) {
+    const cfg = LOCKED_STATES[kind];
+    if (!cfg) return;
+    if (!lockedOverlay) {
+      lockedOverlay = document.createElement("div");
+      lockedOverlay.className = "locked-overlay";
+      lockedOverlay.innerHTML = `
+        <div class="locked-card">
+          <div class="locked-icon"></div>
+          <h2 class="locked-title"></h2>
+          <p class="locked-message"></p>
+          <button type="button" class="locked-action">Refresh</button>
+        </div>
+      `;
+      lockedOverlay.querySelector(".locked-action").addEventListener("click", () => {
+        window.location.reload();
+      });
+      document.body.appendChild(lockedOverlay);
+    }
+    const iconEl = lockedOverlay.querySelector(".locked-icon");
+    iconEl.textContent = cfg.icon;
+    iconEl.dataset.kind = kind;
+    lockedOverlay.querySelector(".locked-title").textContent = cfg.title;
+    lockedOverlay.querySelector(".locked-message").textContent = cfg.message;
+
+    const prose = document.querySelector("main.prose");
+    const footer = document.querySelector("footer.actions");
+    if (prose) prose.inert = true;
+    if (footer) footer.inert = true;
+    submitBtn.disabled = true;
+    cancelBtn.disabled = true;
+  }
 
   function onSubmit() {
     submitBtn.disabled = true;
@@ -345,20 +402,18 @@
       body: JSON.stringify(payload),
     }).then(r => {
       if (r.ok) {
-        statusEl.textContent = "Submitted ✓";
-        statusEl.className = "ok";
         localStorage.removeItem(STORAGE_KEY);
+        enterLockedState("submitted");
       } else if (r.status === 409) {
-        statusEl.textContent = "Response is stale — reload the page.";
-        statusEl.className = "err";
+        enterLockedState("stale");
       } else {
         statusEl.textContent = "Submit failed.";
         statusEl.className = "err";
+        submitBtn.disabled = false;
       }
     }).catch(() => {
       statusEl.textContent = "Network error.";
       statusEl.className = "err";
-    }).finally(() => {
       submitBtn.disabled = false;
     });
   }
@@ -387,9 +442,7 @@
     fetch(BASE + "api/cancel", { method: "POST" })
       .then(r => {
         if (r.ok) {
-          statusEl.textContent = "Cancelled — you can close this tab.";
-          statusEl.className = "ok";
-          submitBtn.disabled = true;
+          enterLockedState("cancelled");
         } else {
           statusEl.textContent = "Cancel failed.";
           statusEl.className = "err";

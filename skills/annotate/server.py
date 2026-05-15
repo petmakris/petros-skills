@@ -21,6 +21,7 @@ import re
 import secrets
 import socket
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -29,6 +30,35 @@ from pathlib import Path
 SHUTDOWN_AFTER_SECONDS = int(os.environ.get("ANNOTATE_SHUTDOWN_SECONDS", 24 * 60 * 60))
 PORT_RANGE = range(54580, 54601)  # inclusive both ends
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# Hostname used in announced URLs. Resolved once at startup so the same value
+# appears in server.json and every session URL. Tailscale MagicDNS lets the
+# same short hostname (e.g. petross-macbook-pro) resolve from the Mac itself
+# AND from any other tailnet device (phone, iPad), so one URL works for both
+# local and remote use.
+_PUBLIC_HOST = "127.0.0.1"
+
+
+def _resolve_public_host() -> str:
+    if env := os.environ.get("ANNOTATE_PUBLIC_HOST"):
+        return env
+    # Use the leading label of Self.DNSName (e.g. "my-laptop" from
+    # "my-laptop.tail<id>.ts.net."). That's the MagicDNS short name and it
+    # resolves identically on the local machine and any other tailnet device.
+    # The OS device name (Self.HostName) often has spaces and smart quotes
+    # and isn't DNS-safe.
+    try:
+        out = subprocess.check_output(
+            ["tailscale", "status", "--json"], timeout=1, text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        dns_name = json.loads(out).get("Self", {}).get("DNSName") or ""
+        short = dns_name.split(".", 1)[0]
+        if short:
+            return short
+    except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError, ValueError):
+        pass
+    return "127.0.0.1"
 
 _last_activity = time.time()
 _last_activity_lock = threading.Lock()
@@ -43,10 +73,11 @@ def _sessions_file() -> Path:
 
 
 def _make_sid() -> str:
-    # Date-keyed slug: YYMMDD-HHMMSS-<hex6>. Scannable in URLs, sortable on disk,
-    # 24 bits of randomness avoids collisions when two sessions register in the
-    # same second.
-    return f"{time.strftime('%y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+    # Date-keyed slug: YYMMDD-HHMMSS-<hex16>. Sortable on disk, and 64 bits of
+    # randomness makes the URL unguessable when the server is reachable on the
+    # tailnet (anyone on the wifi could scan the port, but they still need the
+    # SID to do anything with it).
+    return f"{time.strftime('%y%m%d-%H%M%S')}-{secrets.token_hex(8)}"
 
 
 def _persist_sessions() -> None:
@@ -246,7 +277,7 @@ def _bind_first_available_port() -> tuple[socket.socket, int]:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(("127.0.0.1", port))
+            s.bind(("0.0.0.0", port))
             return s, port
         except OSError:
             s.close()
@@ -337,6 +368,13 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _serve_root(self, dirs: dict) -> None:
+        state_dir = dirs["state_dir"]
+        # Terminal-state markers (submit / cancel) take precedence over the
+        # response file so a refresh after a terminal action shows the waiting
+        # screen rather than the now-consumed response.
+        if (state_dir / "submitted").exists() or (state_dir / "cancelled").exists():
+            self._send_html(200, WAITING_HTML)
+            return
         response_dir = dirs["response_dir"]
         response_path = response_dir / "response.md"
         if not response_path.exists():
@@ -435,7 +473,7 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         port = self.server.server_address[1]
         body = json.dumps({
             "sid": sess["sid"],
-            "url": f"http://localhost:{port}/s/{sess['sid']}/",
+            "url": f"http://{_PUBLIC_HOST}:{port}/s/{sess['sid']}/",
             "response_dir": str(sess["response_dir"]),
             "annotations_dir": str(sess["annotations_dir"]),
             "state_dir": str(sess["state_dir"]),
@@ -480,6 +518,9 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
         tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(out, indent=2))
         tmp.replace(target)
+        # Mark the response as consumed so a page refresh shows the waiting
+        # screen instead of re-rendering an already-submitted response.
+        (dirs["state_dir"] / "submitted").write_text("")
         self._send_text(200, "ok")
 
     def _handle_cancel(self, dirs: dict) -> None:
@@ -500,19 +541,22 @@ def main(argv: list[str] | None = None) -> int:
     # ensure_server.sh; sessions are created via POST /api/sessions.
     argparse.ArgumentParser().parse_args(argv)
 
+    global _PUBLIC_HOST
+    _PUBLIC_HOST = _resolve_public_host()
+
     _rehydrate_sessions()
 
     sock, port = _bind_first_available_port()
     sock.listen()
 
-    server = _ThreadedHTTPServer(("127.0.0.1", port), AnnotateHandler, bind_and_activate=False)
+    server = _ThreadedHTTPServer(("0.0.0.0", port), AnnotateHandler, bind_and_activate=False)
     server.socket = sock
-    server.server_address = ("127.0.0.1", port)
+    server.server_address = ("0.0.0.0", port)
 
     info = {
         "type": "server-started",
         "port": port,
-        "url": f"http://localhost:{port}",
+        "url": f"http://{_PUBLIC_HOST}:{port}",
     }
     home_info_dir = Path(os.path.expanduser("~/.claude/annotate"))
     home_info_dir.mkdir(parents=True, exist_ok=True)
