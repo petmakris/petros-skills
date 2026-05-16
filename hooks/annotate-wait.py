@@ -44,14 +44,30 @@ def _resolve_cwd(event: dict) -> Path:
     return Path.cwd()
 
 
-def _latest_session(cwd: Path) -> Path | None:
+def _latest_session_for(cwd: Path, claude_session_id: str) -> Path | None:
+    """Return the most recent annotate session dir whose meta.json was tagged
+    with this Claude Code `session_id`.
+
+    Filtering by session_id is what makes the hook safe when two Claude Code
+    instances run in the same cwd: each waits only on dirs it created itself.
+    Dirs missing `claude_session_id` (older format) are ignored — never
+    "match anything" — so a leftover untagged dir can't cross-contaminate.
+    """
     base = cwd / ".claude" / "annotate"
-    if not base.is_dir():
+    if not base.is_dir() or not claude_session_id:
         return None
-    sessions = [p for p in base.iterdir() if p.is_dir()]
-    if not sessions:
+    matches = []
+    for session in base.iterdir():
+        if not session.is_dir():
+            continue
+        meta = _read_json(session / "response" / "meta.json")
+        if not meta:
+            continue
+        if meta.get("claude_session_id") == claude_session_id:
+            matches.append(session)
+    if not matches:
         return None
-    return max(sessions, key=lambda p: p.stat().st_mtime)
+    return max(matches, key=lambda p: p.stat().st_mtime)
 
 
 def _read_json(path: Path) -> dict | None:
@@ -163,8 +179,11 @@ def run(event: dict, *, now: float | None = None, sleep=time.sleep) -> int:
     if event.get("hook_event_name") != "Stop":
         return 0
 
+    claude_session_id = event.get("session_id") or ""
+    if not claude_session_id:
+        return 0
     cwd = _resolve_cwd(event)
-    session = _latest_session(cwd)
+    session = _latest_session_for(cwd, claude_session_id)
     if session is None:
         return 0
 

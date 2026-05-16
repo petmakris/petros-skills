@@ -29,13 +29,25 @@ class AnnotateWaitTests(unittest.TestCase):
         self.cwd = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
 
-    def _make_session(self, response_id: str = "resp-42", meta_age_s: float = 0.0) -> dict:
-        session = self.cwd / ".claude" / "annotate" / "1700000000"
+    SESSION_ID = "claude-sess-aaaa"
+
+    def _make_session(
+        self,
+        response_id: str = "resp-42",
+        meta_age_s: float = 0.0,
+        *,
+        claude_session_id: str | None = "claude-sess-aaaa",
+        dir_name: str = "1700000000",
+    ) -> dict:
+        session = self.cwd / ".claude" / "annotate" / dir_name
         (session / "response").mkdir(parents=True)
         (session / "annotations").mkdir(parents=True)
         (session / "state").mkdir(parents=True)
         meta = session / "response" / "meta.json"
-        meta.write_text(json.dumps({"response_id": response_id, "title": "t"}))
+        meta_payload = {"response_id": response_id, "title": "t"}
+        if claude_session_id is not None:
+            meta_payload["claude_session_id"] = claude_session_id
+        meta.write_text(json.dumps(meta_payload))
         if meta_age_s > 0:
             past = time.time() - meta_age_s
             import os
@@ -48,6 +60,7 @@ class AnnotateWaitTests(unittest.TestCase):
         }
 
     def _run(self, event: dict, *, sleep=lambda s: None):
+        event = {"session_id": self.SESSION_ID, **event}
         buf = io.StringIO()
         with redirect_stdout(buf):
             rc = hook.run(event, sleep=sleep)
@@ -228,7 +241,8 @@ class AnnotateWaitTests(unittest.TestCase):
         buf = io.StringIO()
         with redirect_stdout(buf):
             rc = hook.run(
-                {"hook_event_name": "Stop", "cwd": str(self.cwd)},
+                {"hook_event_name": "Stop", "cwd": str(self.cwd),
+                 "session_id": self.SESSION_ID},
                 now=time.time() - hook.MAX_WAIT_S - 1,
                 sleep=lambda _: None,
             )
@@ -252,6 +266,85 @@ class AnnotateWaitTests(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
         self.assertEqual(out, "")
+
+
+    def test_other_session_dir_is_ignored(self):
+        # Bug repro: two Claude Code instances in the same cwd. Session B's hook
+        # must not pick up the annotate dir created by session A — otherwise
+        # B receives A's annotations when the user clicks Submit.
+        s = self._make_session(
+            response_id="resp-from-A",
+            claude_session_id="claude-sess-OTHER",
+            dir_name="1700000000",
+        )
+        ticks = {"n": 0}
+
+        def fake_sleep(_):
+            # If the hook entered the wait loop, it'd block forever. Simulate
+            # an A-side submit landing — the B-side hook must STILL ignore it
+            # because the dir isn't tagged with B's session_id.
+            ticks["n"] += 1
+            if ticks["n"] == 2:
+                s["annotations"].write_text(json.dumps({
+                    "response_id": "resp-from-A", "annotations": [
+                        {"block_id": "b-0", "comment": "for session A only"},
+                    ],
+                }))
+            if ticks["n"] > 10:
+                raise AssertionError("hook entered the wait loop for another session's dir")
+
+        rc, out = self._run(
+            {"hook_event_name": "Stop", "cwd": str(self.cwd)},
+            sleep=fake_sleep,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, "")  # nothing injected
+
+    def test_untagged_dir_is_ignored(self):
+        # Legacy / older-format dir with no claude_session_id must not match
+        # by accident — the hook treats missing tag as "skip", not "wildcard".
+        self._make_session(claude_session_id=None)
+        rc, out = self._run({"hook_event_name": "Stop", "cwd": str(self.cwd)})
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, "")
+
+    def test_missing_session_id_in_event_is_noop(self):
+        # If the Stop event somehow lacks session_id, the hook must bail rather
+        # than fall back to "latest dir wins" (the old leaky behavior).
+        self._make_session()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = hook.run(
+                {"hook_event_name": "Stop", "cwd": str(self.cwd)},
+                sleep=lambda _: None,
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_picks_latest_among_own_session_dirs(self):
+        # Same Claude session pushed twice (loop continuation). Hook must
+        # wait on the newer dir.
+        import os
+        old = self._make_session(response_id="resp-old", dir_name="aaa-old")
+        os.utime(old["session"], (time.time() - 60, time.time() - 60))
+        new = self._make_session(response_id="resp-new", dir_name="bbb-new")
+
+        ticks = {"n": 0}
+
+        def fake_sleep(_):
+            ticks["n"] += 1
+            if ticks["n"] == 2:
+                new["annotations"].write_text(json.dumps({
+                    "response_id": "resp-new", "annotations": [],
+                }))
+
+        rc, out = self._run(
+            {"hook_event_name": "Stop", "cwd": str(self.cwd)},
+            sleep=fake_sleep,
+        )
+        self.assertEqual(rc, 0)
+        result = json.loads(out)
+        self.assertIn("resp-new", result["reason"])
 
 
 if __name__ == "__main__":

@@ -95,7 +95,7 @@ Save `url`, `response_dir`, `annotations_dir`, `state_dir` for the rest of this 
 ## How to push a response
 
 1. Compose the response as **plain markdown**. No frontmatter, no block IDs — the server assigns those.
-2. Write `meta.json` first: `{"response_id": "resp-<timestamp>", "title": "<short title>"}`.
+2. Write `meta.json` first: `{"response_id": "resp-<timestamp>", "title": "<short title>", "claude_session_id": "$CLAUDE_CODE_SESSION_ID"}`. The `claude_session_id` field is **required** — read it from the `CLAUDE_CODE_SESSION_ID` env var (exposed to all Bash tool calls). Without it, the Stop hook can't tell which Claude Code session created this dir and refuses to wait on it; without that filtering, two Claude Code instances running in the same cwd would cross-receive each other's annotations.
 3. Then write the markdown to `<response_dir>/response.md`. Order matters: meta first, response second, so any incoming `GET /` between the two writes sees a consistent pair (the server reads both files per-request and falls through to the waiting page if `response.md` isn't there yet).
 4. Tell the user, in one short sentence: **"Response in browser → `<url>`. Submit when ready."**
 5. End your turn. Do not produce additional content.
