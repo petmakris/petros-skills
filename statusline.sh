@@ -32,6 +32,23 @@ rl7d_pct=$(echo "$input"   | jq -r '.rate_limits.seven_day.used_percentage // em
 
 dir=$(basename "$cwd")
 
+# --- Repo / worktree detection ---
+# repo_name  = basename of the main repo (where the real .git lives)
+# wt_name    = basename of the current worktree dir (only set when in a linked worktree)
+repo_name=""
+wt_name=""
+git_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-dir 2>/dev/null)
+common_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-common-dir 2>/dev/null)
+if [ -n "$common_dir" ]; then
+  common_abs=$(cd "$cwd" 2>/dev/null && cd "$common_dir" 2>/dev/null && pwd)
+  [ -n "$common_abs" ] && repo_name=$(basename "$(dirname "$common_abs")")
+  if [ -n "$git_dir" ] && [ "$git_dir" != "$common_dir" ]; then
+    toplevel=$(git -C "$cwd" --no-optional-locks rev-parse --show-toplevel 2>/dev/null)
+    [ -n "$toplevel" ] && wt_name=$(basename "$toplevel")
+  fi
+fi
+[ -z "$repo_name" ] && repo_name="$dir"
+
 # --- Pressure color picker (shared by context + rate limits) ---
 pressure_color() {
   local p="$1"
@@ -45,10 +62,6 @@ pressure_color() {
 branch=$(git -C "$cwd" --no-optional-locks rev-parse --abbrev-ref HEAD 2>/dev/null)
 dirty=""
 ab=""
-worktrees=0
-if [ -n "$branch" ]; then
-  worktrees=$(git -C "$cwd" --no-optional-locks worktree list 2>/dev/null | wc -l | tr -d ' ')
-fi
 if [ -n "$branch" ]; then
   if [ -n "$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)" ]; then
     dirty=" ${YELLOW}●${RESET}"
@@ -96,16 +109,19 @@ case "$config_dir" in
 esac
 
 # --- Compose ---
+# Line 1 = identity (who/where): profile, repo, worktree (when in one), branch.
+# Line 2 = runtime state: context, rate limits, model, diff.
 out=""
 out+="${DIM}[${RESET}${profile_color}${ICON_USER} ${profile}${RESET}${DIM}]${RESET} "
-out+="${DIM}[${RESET}${CYAN}${ICON_DIR} ${dir}${RESET}${DIM}]${RESET}"
+out+="${DIM}[${RESET}${BLUE}${ICON_DIR} ${repo_name}${RESET}${DIM}]${RESET}"
+if [ -n "$wt_name" ]; then
+  out+=" ${DIM}[${RESET}${YELLOW}${ICON_TREE} ${wt_name}${RESET}${DIM}]${RESET}"
+fi
 if [ -n "$branch" ]; then
   out+=" ${DIM}[${RESET}${GREEN}${ICON_GIT} ${branch}${RESET}${dirty}${ab}${DIM}]${RESET}"
 fi
-if [ "$worktrees" -gt 1 ] 2>/dev/null; then
-  out+=" ${DIM}[${RESET}${CYAN}${ICON_TREE} ${worktrees}${RESET}${DIM}]${RESET}"
-fi
-out+=" ${DIM}[${RESET}${ctx_color}${ICON_CTX} ${pct_int}% · ${tok_str}${RESET}${DIM}]${RESET}"
+out+=$'\n'
+out+="${DIM}[${RESET}${ctx_color}${ICON_CTX} ${pct_int}% · ${tok_str}${RESET}${DIM}]${RESET}"
 # Rate-limit segments: 5-hour and 7-day rolling windows, sourced from
 # .rate_limits.{five_hour,seven_day}.used_percentage in the Claude Code
 # statusline JSON. Each window also exposes .resets_at (Unix epoch seconds),
