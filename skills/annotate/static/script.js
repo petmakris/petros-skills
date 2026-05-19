@@ -140,9 +140,11 @@
   const cancelBtn = document.getElementById("cancel-btn");
 
   const HOVER_LINGER_MS = 500;
+  const HEADING_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 
   function renderHoverActions() {
     document.querySelectorAll("[data-block-id]").forEach(block => {
+      if (HEADING_TAGS.has(block.tagName)) return;
       if (block.querySelector(".hover-actions")) return;
       const wrap = document.createElement("div");
       wrap.className = "hover-actions";

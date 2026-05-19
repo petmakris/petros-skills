@@ -19,6 +19,7 @@ ICON_CTX=$''      #   bolt (context)
 ICON_DIFF=$''     #   diff
 ICON_USER=$''     #   user / account
 ICON_TREE=$'\xef\x83\xa8'     #   sitemap (worktrees)
+ICON_SESSION=$''     #   hashtag (session id)
 
 # --- Parse JSON ---
 cwd=$(echo "$input"        | jq -r '.workspace.current_dir // ""')
@@ -29,6 +30,8 @@ added=$(echo "$input"      | jq -r '.cost.total_lines_added // 0')
 removed=$(echo "$input"    | jq -r '.cost.total_lines_removed // 0')
 rl5h_pct=$(echo "$input"   | jq -r '.rate_limits.five_hour.used_percentage // empty')
 rl7d_pct=$(echo "$input"   | jq -r '.rate_limits.seven_day.used_percentage // empty')
+session_id=$(echo "$input" | jq -r '.session_id // ""')
+session_short=${session_id:0:8}
 
 dir=$(basename "$cwd")
 
@@ -119,6 +122,9 @@ if [ -n "$wt_name" ]; then
 fi
 if [ -n "$branch" ]; then
   out+=" ${DIM}[${RESET}${GREEN}${ICON_GIT} ${branch}${RESET}${dirty}${ab}${DIM}]${RESET}"
+fi
+if [ -n "$session_short" ]; then
+  out+=" ${DIM}[${RESET}${DIM}${ICON_SESSION} ${session_short}${RESET}${DIM}]${RESET}"
 fi
 out+=$'\n'
 out+="${DIM}[${RESET}${ctx_color}${ICON_CTX} ${pct_int}% · ${tok_str}${RESET}${DIM}]${RESET}"
