@@ -619,6 +619,9 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
     _UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 
     def _handle_upload(self, dirs: dict) -> None:
+        if _terminal_state(dirs["state_dir"]) is not None:
+            self._send_text(409, "session closed")
+            return
         ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
         ext = self._UPLOAD_EXT.get(ctype)
         if ext is None:

@@ -607,6 +607,65 @@ class UploadTests(unittest.TestCase):
         expected_parent = Path(self.sess["state_dir"]) / "images"
         self.assertEqual(on_disk.parent, expected_parent)
 
+    def test_upload_rejects_unsupported_media_type(self):
+        status, _ = self._upload(b"not really a pdf", "application/pdf")
+        self.assertEqual(status, 415)
+
+    def test_upload_rejects_oversized_payload(self):
+        # Declare Content-Length above the limit but don't send the body —
+        # the server checks the header value before reading, so it returns 413
+        # immediately. Use a raw socket so we can read the response without
+        # the http.client machinery blocking on sending the (unsent) body.
+        import socket as _socket
+        oversized = 10 * 1024 * 1024 + 1
+        raw = (
+            f"POST /s/{self.sess['sid']}/api/upload HTTP/1.1\r\n"
+            f"Host: localhost:{self.port}\r\n"
+            f"Content-Type: image/png\r\n"
+            f"Content-Length: {oversized}\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        ).encode()
+        sock = _socket.create_connection(("localhost", self.port), timeout=2)
+        try:
+            sock.sendall(raw)
+            resp_bytes = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                resp_bytes += chunk
+        finally:
+            sock.close()
+        status_line = resp_bytes.split(b"\r\n", 1)[0].decode()
+        status = int(status_line.split()[1])
+        self.assertEqual(status, 413)
+
+    def test_upload_rejects_missing_content_length(self):
+        conn = http.client.HTTPConnection("localhost", self.port, timeout=2)
+        conn.putrequest("POST", f"/s/{self.sess['sid']}/api/upload")
+        conn.putheader("Content-Type", "image/png")
+        conn.endheaders()
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 411)
+        conn.close()
+
+    def test_upload_rejects_after_session_terminal(self):
+        conn = http.client.HTTPConnection("localhost", self.port, timeout=2)
+        conn.request(
+            "POST", f"/s/{self.sess['sid']}/api/submit",
+            body=json.dumps({"response_id": "irrelevant", "annotations": []}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(conn.getresponse().status, 200)
+        conn.close()
+        png = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+            "0000000d49444154789c63000100000005000101a5f645400000000049454e44ae426082"
+        )
+        status, _ = self._upload(png, "image/png")
+        self.assertEqual(status, 409)
+
 
 if __name__ == "__main__":
     unittest.main()
