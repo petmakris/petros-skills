@@ -124,14 +124,11 @@ On your next turn, **before** any other action:
 
 4. For each annotation in the array:
    - `block_id` = index of the block in your prior `response.md` (b-0 is the first block). May be `null` for a **general comment** — feedback about the response as a whole, not tied to a specific block. Treat null-block comments as overall direction (tone, scope, missing context, etc.).
-   - `type` = one of `reject`, `question`, `rewrite`, `comment`. Drives how you respond:
+   - `type` = one of `comment`, `reject`. Drives how you respond:
      - `reject` — user disagrees with the highlighted point. Engage and either justify, revise, or back off.
-     - `question` — user wants you to expand or clarify the highlighted point.
-     - `rewrite` — user wants the highlighted span literally replaced with `replacement`. Apply the rewrite and move on (no debate unless the rewrite breaks something).
      - `comment` — free-text feedback; parse intent yourself.
    - `selected_text` = literal text the user highlighted, or absent if the annotation is block-scoped (the user clicked a hover-action button without highlighting first).
    - `comment` = free-text feedback. May be empty for `reject`.
-   - `replacement` = present only on `rewrite` annotations; the literal text the user wants substituted.
    - Optional `prefix` and `suffix` (~20 chars each) disambiguate when the same `selected_text` appears multiple times in the block.
 
 5. Address each annotation in your next response. If the new response is also long-form, loop back through the browser — see "Continuing the annotation loop" below.

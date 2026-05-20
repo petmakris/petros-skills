@@ -41,12 +41,6 @@
   --type-reject-fg: #fca5a5;
   --type-reject-bg: rgba(239, 68, 68, 0.18);
   --type-reject-wash: rgba(239, 68, 68, 0.08);
-  --type-question-fg: #fde047;
-  --type-question-bg: rgba(234, 179, 8, 0.18);
-  --type-question-wash: rgba(234, 179, 8, 0.08);
-  --type-rewrite-fg: #c4b5fd;
-  --type-rewrite-bg: rgba(139, 92, 246, 0.22);
-  --type-rewrite-wash: rgba(139, 92, 246, 0.08);
   --type-comment-fg: #93c5fd;
   --type-comment-bg: rgba(59, 130, 246, 0.22);
   --type-comment-wash: rgba(59, 130, 246, 0.08);
@@ -71,22 +65,16 @@
   --type-reject-fg: #b91c1c;
   --type-reject-bg: #ffe0e0;
   --type-reject-wash: rgba(239, 68, 68, 0.06);
-  --type-question-fg: #92400e;
-  --type-question-bg: #fff3cc;
-  --type-question-wash: rgba(245, 158, 11, 0.08);
-  --type-rewrite-fg: #5b21b6;
-  --type-rewrite-bg: #ede0ff;
-  --type-rewrite-wash: rgba(139, 92, 246, 0.06);
   --type-comment-fg: #1e40af;
   --type-comment-bg: #dbeafe;
   --type-comment-wash: rgba(59, 130, 246, 0.06);
 }
 
 /* === Accent variants ================================================= */
-/* Each combines with [data-theme] to override the page accent. The
-   four type tokens (--type-reject-*, --type-question-*, --type-rewrite-*,
-   --type-comment-*) intentionally stay theme-only and are not redefined
-   here — they are load-bearing UX signals that must not shift with accent. */
+/* Each combines with [data-theme] to override the page accent. The two
+   type tokens (--type-reject-*, --type-comment-*) intentionally stay
+   theme-only and are not redefined here — they are load-bearing UX
+   signals that must not shift with accent. */
 
 [data-theme="dark"][data-accent="mint"] {
   --accent: #7ee0c2;
@@ -399,11 +387,11 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .hover-actions {
   position: absolute;
-  top: 6px;
-  right: 8px;
+  top: 4px;
+  right: 6px;
   display: flex;
   flex-direction: row;
-  gap: 4px;
+  gap: 6px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 140ms ease;
@@ -412,23 +400,31 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .hover-actions:hover,
 .hover-actions[data-visible="1"] { opacity: 1; pointer-events: auto; }
 .hover-actions button {
-  width: 28px; height: 28px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  width: 26px; height: 26px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 50%;
   cursor: pointer;
-  color: var(--text);
+  color: var(--text-dim);
   display: flex; align-items: center; justify-content: center;
   padding: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-family: inherit;
   line-height: 1;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
 }
-.hover-actions button[data-type="reject"]:hover   { background: var(--type-reject-bg);   color: var(--type-reject-fg);   border-color: transparent; }
-.hover-actions button[data-type="question"]:hover { background: var(--type-question-bg); color: var(--type-question-fg); border-color: transparent; }
-.hover-actions button[data-type="rewrite"]:hover  { background: var(--type-rewrite-bg);  color: var(--type-rewrite-fg);  border-color: transparent; }
-.hover-actions button[data-type="comment"]:hover  { background: var(--type-comment-bg);  color: var(--type-comment-fg);  border-color: transparent; }
+.hover-actions button[data-type="comment"]:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.hover-actions button[data-type="reject"]:hover {
+  color: var(--type-reject-fg);
+  border-color: var(--type-reject-fg);
+  border-style: solid;
+  background: color-mix(in srgb, var(--type-reject-fg) 10%, transparent);
+}
 
 @media (hover: none) {
   .hover-actions { opacity: 0.4; pointer-events: auto; }
@@ -449,19 +445,13 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 [data-block-id][data-engaged-type="reject"]              { background: var(--type-reject-wash); }
 [data-block-id][data-engaged-type="reject"]::before      { background: var(--type-reject-fg); }
-[data-block-id][data-engaged-type="question"]            { background: var(--type-question-wash); }
-[data-block-id][data-engaged-type="question"]::before    { background: var(--type-question-fg); }
-[data-block-id][data-engaged-type="rewrite"]             { background: var(--type-rewrite-wash); }
-[data-block-id][data-engaged-type="rewrite"]::before     { background: var(--type-rewrite-fg); }
 [data-block-id][data-engaged-type="comment"]             { background: var(--type-comment-wash); }
 [data-block-id][data-engaged-type="comment"]::before     { background: var(--type-comment-fg); }
 
 /* Engaged blocks on hover: blend the hover tint over the type-wash so the
    active-for-annotation state is still visible without losing type identity. */
-[data-block-id][data-engaged-type="reject"]:hover   { background: color-mix(in srgb, var(--type-reject-wash) 55%,   var(--hover-tint)); }
-[data-block-id][data-engaged-type="question"]:hover { background: color-mix(in srgb, var(--type-question-wash) 55%, var(--hover-tint)); }
-[data-block-id][data-engaged-type="rewrite"]:hover  { background: color-mix(in srgb, var(--type-rewrite-wash) 55%,  var(--hover-tint)); }
-[data-block-id][data-engaged-type="comment"]:hover  { background: color-mix(in srgb, var(--type-comment-wash) 55%,  var(--hover-tint)); }
+[data-block-id][data-engaged-type="reject"]:hover   { background: color-mix(in srgb, var(--type-reject-wash) 55%, var(--hover-tint)); }
+[data-block-id][data-engaged-type="comment"]:hover  { background: color-mix(in srgb, var(--type-comment-wash) 55%, var(--hover-tint)); }
 
 .inline-comments {
   margin: 6px 0 16px 0;
@@ -470,40 +460,53 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 8px;
 }
 .comment-card {
+  position: relative;
   border: none;
   border-radius: 10px;
-  padding: 14px 18px 12px;
+  padding: 14px 18px;
   font-size: 14px;
   line-height: 1.5;
   background: var(--surface-soft);
 }
 .comment-card[data-type="reject"]   { background: var(--type-reject-wash); }
-.comment-card[data-type="question"] { background: var(--type-question-wash); }
-.comment-card[data-type="rewrite"]  { background: var(--type-rewrite-wash); }
 .comment-card[data-type="comment"]  { background: var(--type-comment-wash); }
-.type-badge {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 9px;
-  border-radius: 4px;
-  margin-bottom: 10px;
+.card-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: background 140ms ease, color 140ms ease;
 }
-.type-badge[data-type="reject"]   { background: var(--type-reject-bg);   color: var(--type-reject-fg); }
-.type-badge[data-type="question"] { background: var(--type-question-bg); color: var(--type-question-fg); }
-.type-badge[data-type="rewrite"]  { background: var(--type-rewrite-bg);  color: var(--type-rewrite-fg); }
-.type-badge[data-type="comment"]  { background: var(--type-comment-bg);  color: var(--type-comment-fg); }
+.card-close[data-type="reject"]:hover {
+  background: color-mix(in srgb, var(--type-reject-fg) 16%, transparent);
+  color: var(--type-reject-fg);
+}
+.card-close[data-type="comment"]:hover {
+  background: color-mix(in srgb, var(--type-comment-fg) 16%, transparent);
+  color: var(--type-comment-fg);
+}
 .comment-card .quote {
   font-size: 11px;
   font-style: italic;
   color: var(--text-dim);
   padding-left: 8px;
   margin-bottom: 8px;
+  margin-right: 32px;
   border-left: 2px solid var(--border);
 }
 .comment-card .quote[data-type="reject"]   { border-left-color: var(--type-reject-fg); }
-.comment-card .quote[data-type="question"] { border-left-color: var(--type-question-fg); }
-.comment-card .quote[data-type="rewrite"]  { border-left-color: var(--type-rewrite-fg); }
 .comment-card .quote[data-type="comment"]  { border-left-color: var(--type-comment-fg); }
 .editor-wrap {
   position: relative;
@@ -627,42 +630,6 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .editor-resize:hover {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
-.card-actions {
-  display: flex;
-  gap: 14px;
-  margin-top: 10px;
-}
-.card-link {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 0;
-  font-family: inherit;
-}
-.card-link:hover { color: var(--text); }
-.type-menu {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px;
-  margin-top: 6px;
-}
-.type-menu button {
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font-size: 12px;
-  padding: 4px 8px;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 3px;
-  font-family: inherit;
-}
-.type-menu button:hover { background: var(--surface); }
 
 .first-time-toast {
   position: fixed;
