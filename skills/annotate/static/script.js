@@ -17,10 +17,8 @@
     : null;
 
   const PLACEHOLDER_TEXT = {
-    rewrite: "Replace selected text with…",
     reject: "Optional note…",
     comment: "Your comment…",
-    question: "Your comment…",
   };
 
   // Top-level elements that get their own annotation block id (matches the
@@ -132,18 +130,9 @@
   });
 
   const ACTION_TYPES = [
-    { id: "reject",   glyph: "✗",  title: "Reject"   },
-    { id: "question", glyph: "?",  title: "Question" },
-    { id: "rewrite",  glyph: "✏",  title: "Rewrite"  },
-    { id: "comment",  glyph: "💬", title: "Comment"  },
+    { id: "comment", glyph: "💬", title: "Comment" },
+    { id: "reject",  glyph: "✗",  title: "Reject"  },
   ];
-
-  const TYPE_BADGE_TEXT = {
-    reject: "✗ reject",
-    question: "? question",
-    rewrite: "✏ rewrite",
-    comment: "💬 comment",
-  };
 
   // annotations: { [annotId]: { block_id, selected_text, comment, prefix?, suffix? } }
   let annotations = loadDrafts();
@@ -225,7 +214,6 @@
         annot.suffix = blockText.slice(idx + selectedText.length, idx + selectedText.length + 20);
       }
     }
-    if (type === "rewrite") annot.replacement = "";
     annotations[id] = annot;
     saveDrafts();
     renderComments();
@@ -278,11 +266,20 @@
     card.dataset.id = id;
     card.dataset.type = a.type;
 
-    const badge = document.createElement("div");
-    badge.className = "type-badge";
-    badge.dataset.type = a.type;
-    badge.textContent = TYPE_BADGE_TEXT[a.type] || a.type;
-    card.appendChild(badge);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "card-close";
+    closeBtn.dataset.type = a.type;
+    closeBtn.title = "Remove";
+    closeBtn.setAttribute("aria-label", "Remove annotation");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => {
+      delete annotations[id];
+      saveDrafts();
+      renderComments();
+      applyEngagedStyling();
+    });
+    card.appendChild(closeBtn);
 
     if (a.selected_text) {
       const quote = document.createElement("div");
@@ -299,19 +296,79 @@
     preview.className = "editor-preview";
 
     const ta = document.createElement("textarea");
-    const isRewrite = a.type === "rewrite";
+    // Image-paste state for this textarea. `pastes` is the ordered list of
+    // uploaded images for this annotation; `nextIndex` is the next paste-N
+    // number to assign. Initial state is rehydrated from the annotation's
+    // `images` array on re-render (drafts → reload survives across pageloads).
+    const pasteState = {
+      pastes: (annotations[id].images || []).map((img) => ({
+        token: img.token,
+        path: img.path,
+        thumbUrl: null, // no blob available after reload; strip will show a placeholder tile
+      })),
+      nextIndex: ((annotations[id].images || []).length) + 1,
+    };
+
+    const pasteStrip = document.createElement("div");
+    pasteStrip.className = "paste-strip";
+    if (pasteState.pastes.length === 0) pasteStrip.dataset.empty = "1";
+
+    function renderStrip() {
+      pasteStrip.replaceChildren();
+      if (pasteState.pastes.length === 0) {
+        pasteStrip.dataset.empty = "1";
+        return;
+      }
+      delete pasteStrip.dataset.empty;
+      for (const p of pasteState.pastes) {
+        const tile = document.createElement("div");
+        tile.className = "paste-thumb";
+        tile.dataset.token = p.token;
+        const img = document.createElement("img");
+        img.alt = p.token;
+        if (p.thumbUrl) img.src = p.thumbUrl;
+        else tile.classList.add("no-thumb");
+        const label = document.createElement("span");
+        label.className = "paste-label";
+        label.textContent = p.token;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "paste-remove";
+        remove.title = "Remove";
+        remove.textContent = "×";
+        remove.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          pasteState.pastes = pasteState.pastes.filter(x => x.token !== p.token);
+          persistImages();
+          renderStrip();
+        });
+        tile.appendChild(img);
+        tile.appendChild(label);
+        tile.appendChild(remove);
+        pasteStrip.appendChild(tile);
+      }
+    }
+
+    function persistImages() {
+      if (pasteState.pastes.length === 0) {
+        delete annotations[id].images;
+      } else {
+        annotations[id].images = pasteState.pastes.map(p => ({ token: p.token, path: p.path }));
+      }
+      saveDrafts();
+    }
+
     const placeholder = PLACEHOLDER_TEXT[a.type] || PLACEHOLDER_TEXT.comment;
     ta.placeholder = placeholder;
-    ta.value = isRewrite ? (a.replacement || "") : (a.comment || "");
+    ta.value = a.comment || "";
     ta.addEventListener("input", () => {
-      if (isRewrite) annotations[id].replacement = ta.value;
-      else annotations[id].comment = ta.value;
+      annotations[id].comment = ta.value;
       saveDrafts();
       autoGrow();
     });
 
     const renderPreview = () => {
-      const v = isRewrite ? (annotations[id].replacement || "") : (annotations[id].comment || "");
+      const v = annotations[id].comment || "";
       if (!v.trim()) {
         preview.classList.add("empty");
         preview.textContent = placeholder;
@@ -322,8 +379,7 @@
         preview.textContent = v;
         return;
       }
-      const src = isRewrite ? "```\n" + v + "\n```" : v;
-      preview.innerHTML = commentMd.render(src);
+      preview.innerHTML = commentMd.render(v);
     };
 
     const autoGrow = () => {
@@ -375,34 +431,10 @@
     wrap.appendChild(ta);
     wrap.appendChild(handle);
     card.appendChild(wrap);
+    card.appendChild(pasteStrip);
     renderPreview();
+    renderStrip();
 
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-
-    const changeBtn = document.createElement("button");
-    changeBtn.type = "button";
-    changeBtn.className = "card-link";
-    changeBtn.textContent = "change type";
-    changeBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      openChangeTypeMenu(id, card);
-    });
-    actions.appendChild(changeBtn);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "card-link";
-    remove.textContent = "remove";
-    remove.addEventListener("click", () => {
-      delete annotations[id];
-      saveDrafts();
-      renderComments();
-      applyEngagedStyling();
-    });
-    actions.appendChild(remove);
-
-    card.appendChild(actions);
     return card;
   }
 
@@ -451,28 +483,6 @@
     saveDrafts();
     renderComments();
     focusComment(id);
-  }
-
-  function openChangeTypeMenu(annotationId, card) {
-    const existing = card.querySelector(".type-menu");
-    if (existing) { existing.remove(); return; }
-    const menu = document.createElement("div");
-    menu.className = "type-menu";
-    for (const t of ACTION_TYPES) {
-      const opt = document.createElement("button");
-      opt.type = "button";
-      opt.textContent = TYPE_BADGE_TEXT[t.id];
-      opt.addEventListener("click", () => {
-        const a = annotations[annotationId];
-        a.type = t.id;
-        if (t.id === "rewrite" && a.replacement === undefined) a.replacement = "";
-        saveDrafts();
-        renderComments();
-        applyEngagedStyling();
-      });
-      menu.appendChild(opt);
-    }
-    card.appendChild(menu);
   }
 
   function focusComment(id) {
@@ -568,7 +578,6 @@
           selected_text: a.selected_text,
           comment: a.comment,
         };
-        if (a.replacement !== undefined) out.replacement = a.replacement;
         if (a.prefix !== undefined) out.prefix = a.prefix;
         if (a.suffix !== undefined) out.suffix = a.suffix;
         if (a.block_id) {
