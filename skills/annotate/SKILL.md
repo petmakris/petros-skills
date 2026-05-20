@@ -123,7 +123,7 @@ On your next turn, **before** any other action:
 3. **Implicit approval:** any block not present in the `annotations` array is approved by the user. Acknowledge briefly only if you have something to add; otherwise move on.
 
 4. For each annotation in the array:
-   - `block_id` = index of the block in your prior `response.md` (b-0 is the first block).
+   - `block_id` = index of the block in your prior `response.md` (b-0 is the first block). May be `null` for a **general comment** — feedback about the response as a whole, not tied to a specific block. Treat null-block comments as overall direction (tone, scope, missing context, etc.).
    - `type` = one of `reject`, `question`, `rewrite`, `comment`. Drives how you respond:
      - `reject` — user disagrees with the highlighted point. Engage and either justify, revise, or back off.
      - `question` — user wants you to expand or clarify the highlighted point.

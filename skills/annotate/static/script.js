@@ -12,6 +12,17 @@
   const countEl = document.getElementById("comment-count");
   const STORAGE_KEY = `annotate.drafts.${responseId}`;
 
+  const commentMd = (typeof window.markdownit === "function")
+    ? window.markdownit({ html: false, linkify: true, typographer: false, breaks: true })
+    : null;
+
+  const PLACEHOLDER_TEXT = {
+    rewrite: "Replace selected text with…",
+    reject: "Optional note…",
+    comment: "Your comment…",
+    question: "Your comment…",
+  };
+
   // Top-level elements that get their own annotation block id (matches the
   // contract the Python renderer used to provide).
   const BLOCK_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "PRE", "BLOCKQUOTE"]);
@@ -183,6 +194,7 @@
       delete b.dataset.engagedType;
     });
     for (const a of Object.values(annotations)) {
+      if (!a.block_id) continue;
       const block = document.querySelector(`[data-block-id="${a.block_id}"]`);
       if (block) block.dataset.engagedType = a.type;
     }
@@ -226,6 +238,8 @@
 
   submitBtn.addEventListener("click", onSubmit);
   cancelBtn.addEventListener("click", onCancel);
+  const addGeneralBtn = document.getElementById("add-general");
+  if (addGeneralBtn) addGeneralBtn.addEventListener("click", addGeneralComment);
 
   // Background polling — if response_id changes, the page is stale.
   setInterval(pollForUpdate, 2000);
@@ -278,24 +292,90 @@
       card.appendChild(quote);
     }
 
+    const wrap = document.createElement("div");
+    wrap.className = "editor-wrap preview-mode";
+
+    const preview = document.createElement("div");
+    preview.className = "editor-preview";
+
     const ta = document.createElement("textarea");
-    if (a.type === "rewrite") {
-      ta.value = a.replacement || "";
-      ta.placeholder = "Replace selected text with…";
-      ta.rows = 3;
-      ta.addEventListener("input", () => {
-        annotations[id].replacement = ta.value;
-        saveDrafts();
-      });
-    } else {
-      ta.value = a.comment;
-      ta.placeholder = a.type === "reject" ? "Optional note…" : "Your comment…";
-      ta.addEventListener("input", () => {
-        annotations[id].comment = ta.value;
-        saveDrafts();
-      });
-    }
-    card.appendChild(ta);
+    const isRewrite = a.type === "rewrite";
+    const placeholder = PLACEHOLDER_TEXT[a.type] || PLACEHOLDER_TEXT.comment;
+    ta.placeholder = placeholder;
+    ta.value = isRewrite ? (a.replacement || "") : (a.comment || "");
+    ta.addEventListener("input", () => {
+      if (isRewrite) annotations[id].replacement = ta.value;
+      else annotations[id].comment = ta.value;
+      saveDrafts();
+      autoGrow();
+    });
+
+    const renderPreview = () => {
+      const v = isRewrite ? (annotations[id].replacement || "") : (annotations[id].comment || "");
+      if (!v.trim()) {
+        preview.classList.add("empty");
+        preview.textContent = placeholder;
+        return;
+      }
+      preview.classList.remove("empty");
+      if (!commentMd) {
+        preview.textContent = v;
+        return;
+      }
+      const src = isRewrite ? "```\n" + v + "\n```" : v;
+      preview.innerHTML = commentMd.render(src);
+    };
+
+    const autoGrow = () => {
+      if (wrap.dataset.userSized === "1") return;
+      ta.style.height = "auto";
+      const cap = Math.max(160, Math.round(window.innerHeight * 0.5));
+      ta.style.height = Math.min(ta.scrollHeight + 2, cap) + "px";
+    };
+
+    preview.addEventListener("click", () => { ta.focus(); });
+    ta.addEventListener("focus", () => {
+      wrap.classList.remove("preview-mode");
+      wrap.classList.add("edit-mode");
+      autoGrow();
+    });
+    ta.addEventListener("blur", () => {
+      renderPreview();
+      wrap.classList.remove("edit-mode");
+      wrap.classList.add("preview-mode");
+    });
+
+    const handle = document.createElement("div");
+    handle.className = "editor-resize";
+    handle.title = "Drag to resize · double-click to reset";
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = ta.offsetHeight;
+      handle.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const newH = Math.max(60, startH + (ev.clientY - startY));
+        ta.style.height = newH + "px";
+        wrap.dataset.userSized = "1";
+      };
+      const up = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+    });
+    handle.addEventListener("dblclick", () => {
+      delete wrap.dataset.userSized;
+      ta.style.height = "";
+      autoGrow();
+    });
+
+    wrap.appendChild(preview);
+    wrap.appendChild(ta);
+    wrap.appendChild(handle);
+    card.appendChild(wrap);
+    renderPreview();
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
@@ -328,10 +408,14 @@
 
   function renderComments() {
     document.querySelectorAll(".inline-comments").forEach(el => el.remove());
+    const generalEl = document.getElementById("general-comments");
+    if (generalEl) generalEl.replaceChildren();
 
     const byBlock = {};
+    const general = [];
     for (const [id, a] of Object.entries(annotations)) {
-      (byBlock[a.block_id] ||= []).push([id, a]);
+      if (!a.block_id) general.push([id, a]);
+      else (byBlock[a.block_id] ||= []).push([id, a]);
     }
 
     for (const [blockId, items] of Object.entries(byBlock)) {
@@ -344,8 +428,29 @@
       block.insertAdjacentElement("afterend", wrap);
     }
 
+    if (generalEl) {
+      for (const [id, a] of general) {
+        const card = buildCard(id, a);
+        card.classList.add("general");
+        generalEl.appendChild(card);
+      }
+    }
+
     const n = Object.keys(annotations).length;
     if (countEl) countEl.textContent = n === 0 ? "" : (n === 1 ? "1 comment" : `${n} comments`);
+  }
+
+  function addGeneralComment() {
+    const id = `a-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    annotations[id] = {
+      block_id: null,
+      type: "comment",
+      selected_text: "",
+      comment: "",
+    };
+    saveDrafts();
+    renderComments();
+    focusComment(id);
   }
 
   function openChangeTypeMenu(annotationId, card) {
@@ -371,7 +476,14 @@
   }
 
   function focusComment(id) {
-    const ta = document.querySelector(`.comment-card[data-id="${id}"] textarea`);
+    const card = document.querySelector(`.comment-card[data-id="${id}"]`);
+    if (!card) return;
+    const wrap = card.querySelector(".editor-wrap");
+    const ta = card.querySelector("textarea");
+    if (wrap) {
+      wrap.classList.remove("preview-mode");
+      wrap.classList.add("edit-mode");
+    }
     if (ta) ta.focus({ preventScroll: true });
   }
 
@@ -459,8 +571,10 @@
         if (a.replacement !== undefined) out.replacement = a.replacement;
         if (a.prefix !== undefined) out.prefix = a.prefix;
         if (a.suffix !== undefined) out.suffix = a.suffix;
-        const snippet = blockSnippet(a.block_id);
-        if (snippet) out.block_snippet = snippet;
+        if (a.block_id) {
+          const snippet = blockSnippet(a.block_id);
+          if (snippet) out.block_snippet = snippet;
+        }
         return out;
       }),
     };

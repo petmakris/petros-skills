@@ -298,6 +298,12 @@ RESPONSE_HTML = """<!DOCTYPE html>
   </div>
 </header>
 <main class="prose"></main>
+<section class="general-section">
+  <div id="general-comments"></div>
+  <button id="add-general" type="button" class="add-general-btn">
+    <span class="plus">+</span><span>General comment</span>
+  </button>
+</section>
 <footer class="actions">
   <span id="comment-count" class="comment-count"></span>
   <span id="submit-status"></span>
