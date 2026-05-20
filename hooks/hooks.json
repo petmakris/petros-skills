@@ -1,5 +1,5 @@
 {
-  "description": "Hook bundle. (1) auto-refine.sh on UserPromptSubmit — injects a system reminder telling Claude to evaluate every prompt against the refine-prompt skill's messiness heuristic, run the skill on messy prompts, skip on clean/short/mid-flow prompts, and treat the refined prompt as canonical after `go`. (2) annotate-wait.py on Stop — when an annotate-skill response was just pushed to the browser view, blocks up to 2 h waiting for the user to click Submit, then injects the annotations back to Claude as a system reminder so Claude resumes automatically. Bails in milliseconds when no annotate session is mid-flight.",
+  "description": "Hook bundle. auto-refine.sh on UserPromptSubmit — injects a system reminder telling Claude to evaluate every prompt against the refine-prompt skill's messiness heuristic, run the skill on messy prompts, skip on clean/short/mid-flow prompts, and treat the refined prompt as canonical after `go`.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,17 +7,6 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/auto-refine.sh\""
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/annotate-wait.py\"",
-            "timeout": 7200
           }
         ]
       }
