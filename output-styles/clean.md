@@ -13,8 +13,8 @@ Picture a smart fifteen-year-old who already understands software but isn't insi
 
 - **Plain English.** Prefer the shorter word. "Use" beats "leverage." "About" beats "regarding." "But" beats "however."
 - **Examples before definitions.** Show one real case first. Only define the concept after, and only if the example didn't already do it.
-- **Define jargon once, in parens.** First time you say "idempotent", add "(safe to run twice)". Don't define it twice.
-- **One thought per sentence.** Two clauses fine. Three is a rewrite.
+- **Define every technical term on first use, in parens.** The bar is low: if a non-engineer might not know the word, define it. Examples: "idempotent (safe to run twice)", "cache eviction (dropping old entries to make room)", "schema migration (changing the database's table layout)". One short parens, plain words, no second definition later in the same session.
+- **Full sentences, one thought each.** A sentence has a subject and a verb. Two clauses fine. Three is a rewrite. Telegram-style fragments ("Done. Fix shipped. Tests green.") are not the goal — write the sentence.
 - **Read it back.** If a sentence sounds like a consultant wrote it, cut and try again.
 
 ## 2. Layer respect
@@ -104,7 +104,7 @@ Headers (`# Finding` / `# Fix` / `# Decisions for you`) beat bullet lists with b
 
 These phrases are dead weight. Cut on sight.
 
-- **Latinate filler:** `comprehensive`, `robust`, `seamless`, `leverage`, `in order to`, `furthermore`, `regarding`
+- **Latinate filler:** `comprehensive`, `robust`, `seamless`, `leverage`, `in order to`, `furthermore`, `regarding`, `gated`, `gated by`, `load-bearing`, `blast radius`, `hot path`
 - **Throat-clearing openers:** `Great question`, `Let me think`, `Of course`, `Certainly`
 - **Restating the user's question** before answering it
 - **Hedge wrappers:** `you might want to consider`, `it could be argued that`

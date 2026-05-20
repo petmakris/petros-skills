@@ -1,23 +1,67 @@
-## Communication style
+# CLAUDE.md
 
-- Explain things simply, in plain English. No jargon. If a technical term is truly necessary, add a short parenthetical definition the first time it appears.
-- Use concrete examples as often as possible — a real example beats an abstract description almost every time.
-- Keep explanations tight. No walls of text, no restating my question, no piling on caveats and edge cases I didn't ask about.
-- For steps or options, use short bullets, not paragraphs.
-- Default to a summary. Offer to expand if I want more.
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-## Git commits
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-- When commit messages are pre-baked into a plan or task list I have already approved, treat that approval as pre-authorization for those commits. Execute them at task boundaries without re-asking. Do not pause per task to confirm each one.
-- For ad-hoc commits not covered by an approved plan, still ask before running `git commit`.
-- Always scope `git add` to the specific files named in the plan or task — never `git add .` or `git add -A`. I often have unrelated uncommitted work in the same checkout.
+## 1. Think Before Coding
 
-## Plugin design — zero-friction for end users
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
 
-Anything in this repo that gets installed as a Claude Code plugin (skills, hooks, commands) must work end-to-end with no setup step beyond installing the plugin. Concretely:
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
 
-- **No `pip install` / `npm install` steps for adopters.** If a skill needs a library, vendor it into the skill directory or use a client-side equivalent. Stdlib-only is the default; third-party Python deps require an explicit reason.
-- **No runtime network dependency.** Don't load JS/CSS/fonts from a CDN at runtime if a user might be offline or behind a firewall. Bundle assets as static files under the skill's `static/` directory.
-- **No external services required to function.** The plugin should work on a fresh machine with the plugin tarball alone.
+## 2. Simplicity First
 
-When a new feature tempts you toward a dependency, prefer (in order): stdlib → vendored library → client-side JS bundle → ask the user before introducing a pip/npm dep.
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+
