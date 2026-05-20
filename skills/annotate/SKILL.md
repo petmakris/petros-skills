@@ -141,7 +141,7 @@ The annotation flow is iterative: the user submits, you respond, and if your rep
 When the user submits annotations (or submits with zero annotations as implicit approval), evaluate the reply you are about to write:
 
 - **Long-form** — addresses 2+ annotations, contains a plan or multi-paragraph analysis, or lists separable points → loop back to "How to push" with a fresh `response_id`. The annotation surface stays consistent across iterations.
-- **Short** — 1-line acknowledgement, single-fact answer, status update, tool-result narration, applying a `rewrite` silently → respond in terminal.
+- **Short** — 1-line acknowledgement, single-fact answer, status update, tool-result narration → respond in terminal.
 - **When in doubt** — route through the browser. The cost of an unneeded session is small; the cost of dumping a wall of text into terminal mid-conversation is annoying.
 
 The rule applies regardless of how the original session was opened (forward or postmortem mode) and regardless of whether the user submitted any annotations — what matters is the shape of your reply, not the shape of their feedback.

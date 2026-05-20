@@ -138,28 +138,20 @@ class AnnotateWaitTests(unittest.TestCase):
                  "selected_text": "Resolve marks on v2 pushes",
                  "comment": "I think it's too much"},
                 {"block_id": "b-3", "type": "approve", "selected_text": "", "comment": ""},
-                {"block_id": "b-4", "type": "rewrite",
-                 "selected_text": "old phrase",
-                 "replacement": "new phrase",
-                 "comment": "sounds better"},
             ],
         }
         out = hook._format_context(payload)
         # Pretty layout, not raw JSON.
         self.assertNotIn("\"selected_text\":", out)
         self.assertIn("resp-pretty", out)
-        self.assertIn("3 annotations", out)
+        self.assertIn("2 annotations", out)
         # Type labels + icons.
         self.assertIn("REJECT", out)
         self.assertIn("APPROVE", out)
-        self.assertIn("REWRITE", out)
         # Whole-block fallback for the empty-selected approve.
         self.assertIn("(whole block)", out)
-        # Rewrite replacement is shown.
-        self.assertIn("new phrase", out)
         # Free-text comments are shown.
         self.assertIn("I think it's too much", out)
-        self.assertIn("sounds better", out)
 
     def test_format_one_uses_block_snippet_when_present(self):
         # Snippet present → human label shows up as the target, b-id moves to
@@ -208,7 +200,7 @@ class AnnotateWaitTests(unittest.TestCase):
         payload = {
             "response_id": "resp-route",
             "annotations": [
-                {"block_id": "b-1", "type": "question",
+                {"block_id": "b-1", "type": "reject",
                  "selected_text": "foo", "comment": "explain"},
                 {"block_id": "b-2", "type": "comment",
                  "selected_text": "bar", "comment": "also explain"},

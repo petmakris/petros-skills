@@ -89,8 +89,6 @@ def _emit_additional_context(text: str) -> None:
 _TYPE_DISPLAY = {
     "approve":  ("✓", "APPROVE"),
     "reject":   ("✗", "REJECT"),
-    "question": ("?", "QUESTION"),
-    "rewrite":  ("✎", "REWRITE"),
     "comment":  ("💬", "COMMENT"),
 }
 
@@ -107,7 +105,6 @@ def _format_one(ann: dict) -> str:
     icon, label = _TYPE_DISPLAY.get(ann_type, ("•", ann_type.upper()))
     selected = _truncate(ann.get("selected_text", ""))
     comment = (ann.get("comment") or "").strip()
-    replacement = ann.get("replacement")
     block_id = ann.get("block_id", "")
     snippet = _truncate((ann.get("block_snippet") or "").strip(), 60)
 
@@ -127,8 +124,6 @@ def _format_one(ann: dict) -> str:
         header += f"  ({block_id})" if snippet else f"  ·{block_id}"
 
     lines = [header]
-    if replacement:
-        lines.append(f"          → {_truncate(replacement)}")
     if comment:
         lines.append(f'          "{comment}"')
     return "\n".join(lines)
