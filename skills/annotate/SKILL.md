@@ -130,6 +130,7 @@ On your next turn, **before** any other action:
    - `selected_text` = literal text the user highlighted, or absent if the annotation is block-scoped (the user clicked a hover-action button without highlighting first).
    - `comment` = free-text feedback. May be empty for `reject`.
    - Optional `prefix` and `suffix` (~20 chars each) disambiguate when the same `selected_text` appears multiple times in the block.
+   - `images` — optional array of `{token, path}` objects. When present and non-empty, `Read` each `path` before composing your reply so you can see the screenshots the user pasted. The `![paste-N]` markers inside `comment` show where in the user's text each image belongs; treat them as inline references when interpreting the comment. The path is on the local filesystem (under the session's `state_dir/images/`) — the standard `Read` tool ingests it directly as an image.
 
 5. Address each annotation in your next response. If the new response is also long-form, loop back through the browser — see "Continuing the annotation loop" below.
 
