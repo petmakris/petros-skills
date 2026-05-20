@@ -5,7 +5,7 @@ Personal cross-project Claude Code skills and a sandbox for experimentation.
 ## What's in here
 
 - `skills/` — individual skills, one directory each. `_template/` is a starting template (leading underscore sorts it to the top).
-- `hooks/` — plugin hooks: `dump-md.sh` (UserPromptSubmit) writes each turn as a clean markdown file; `annotate-wait.py` (Stop) blocks until the browser annotations come back when the `/annotate` skill is mid-flight.
+- `hooks/` — plugin hooks: `auto-refine.sh` (UserPromptSubmit) injects the refine-prompt evaluation reminder for every user message. The annotate skill's browser-submission wait is now an in-session `Monitor` watcher (no blocking Stop hook).
 - `output-styles/` — custom output styles shipped by the plugin.
 - `git-hooks/` — repo-local git hooks. `pre-commit-claude-scan` runs Claude over every staged diff to catch secrets / private paths before they're committed. Install with `./install-git-hooks`.
 - `.claude-plugin/` — plugin manifest (`plugin.json`) and local marketplace entry (`marketplace.json`).
@@ -59,8 +59,7 @@ To uninstall everywhere: `/plugin uninstall petros-skills@petros-skills`.
 
 ## Hooks
 
-- **`dump-md`** (`hooks/dump-md.sh`) — UserPromptSubmit hook. Injects a system instruction at the start of every turn telling Claude to write a clean markdown rendering of that turn (user prompt + Claude's prose) to `<cwd>/.claude/dumps/claude-<timestamp>.md`. Open the file in VS Code with markdown preview (Cmd+Shift+V) for a nicer version than the terminal output. One file per turn; `.claude/` is gitignored so the dumps stay out of version control.
-- **`annotate-wait`** (`hooks/annotate-wait.py`) — Stop hook. When the `/annotate` skill has just pushed a response to the browser, blocks for up to 30 minutes waiting for the user to submit annotations, then injects them back to Claude as a system reminder so Claude resumes automatically. Bails in milliseconds when no annotate session is mid-flight.
+- **`auto-refine`** (`hooks/auto-refine.sh`) — UserPromptSubmit hook. Injects a system reminder telling Claude to evaluate each user message against the `refine-prompt` skill's messiness heuristic, refine when speech-to-text-like, skip on clean or mid-flow prompts, and treat the approved refined prompt as canonical for the rest of the session.
 
 ## Git hooks (this repo only)
 
