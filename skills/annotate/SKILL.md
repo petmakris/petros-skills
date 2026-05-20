@@ -1,6 +1,6 @@
 ---
 name: annotate
-description: Render Claude responses as an interactive web page with span-based annotation. Two trigger paths — (1) auto: Claude routes its current response through the view when it contains 2+ distinct things the user might want to react to (plans, analyses, multi-paragraph answers, lists of findings); (2) postmortem: user manually invokes the skill ("annotate", "annotate that", "/annotate") after a big response has already landed, and the skill pushes the most recent prior assistant message through the same pipeline. In both cases the user reads in the browser, highlights any text, leaves free-text comments, and submits — Claude reads the annotations on the next turn.
+description: Render Claude responses as an interactive web page with span-based annotation. Three trigger paths — (1) auto: Claude routes its current response through the view when it contains 2+ distinct things the user might want to react to (plans, analyses, multi-paragraph answers, lists of findings); (2) postmortem: user manually invokes the skill ("annotate", "annotate that", "/annotate") after a big response has already landed, and the skill pushes the most recent prior assistant message through the same pipeline; (3) watcher event: a task-notification arrives whose first stdout line starts with `ANNOTATE_SUBMITTED` or `ANNOTATE_CANCELLED` — that's a previously-pushed response's watcher reporting in, and the skill must be re-invoked to parse the payload and respond. In all cases the user reads in the browser, highlights any text, leaves free-text comments, and submits — Claude reads structured annotations on the next turn.
 allowed-tools:
   - Bash
   - Read
@@ -47,7 +47,7 @@ When invoked this way, treat the user's message as the trigger only — **do not
 2. Use that text **verbatim**. No curating, no polishing, no rewording, no summarizing. What the user already saw in terminal must be what they see in the browser. The only transformation is markdown → styled HTML (handled by the renderer).
 3. Strip nothing except: the final `assistant:` / system metadata wrappers if any, and any per-turn-hook trailer (e.g. a trailing absolute path the dump hook used to append). Substantive prose, lists, code blocks, headings — preserved exactly.
 4. If your most recent prior assistant message is empty, trivial (a one-line acknowledgement), or contains only tool-call narration without standalone prose, do **not** push it. Instead, switch to **Mode C — armed for the session** (see below). Don't invent content; arm forward mode and reply once in terminal so the user knows annotate is on.
-5. From here on, follow the exact same flow as forward mode: `ensure_server.sh` → POST `/api/sessions` → write `meta.json` then `response.md` → announce the URL → end your turn. The Stop hook waits for submission identically.
+5. From here on, follow the exact same flow as forward mode: `ensure_server.sh` → POST `/api/sessions` → write `meta.json` then `response.md` → announce the URL → **start the watcher** (see "Arming the watcher" below) → end your turn.
 
 ## Mode C — Armed for the session (no prior message to annotate)
 
@@ -95,28 +95,101 @@ Save `url`, `response_dir`, `annotations_dir`, `state_dir` for the rest of this 
 ## How to push a response
 
 1. Compose the response as **plain markdown**. No frontmatter, no block IDs — the server assigns those.
-2. Write `meta.json` first: `{"response_id": "resp-<timestamp>", "title": "<short title>", "claude_session_id": "$CLAUDE_CODE_SESSION_ID"}`. The `claude_session_id` field is **required** — read it from the `CLAUDE_CODE_SESSION_ID` env var (exposed to all Bash tool calls). Without it, the Stop hook can't tell which Claude Code session created this dir and refuses to wait on it; without that filtering, two Claude Code instances running in the same cwd would cross-receive each other's annotations.
+2. Write `meta.json` first: `{"response_id": "resp-<timestamp>", "title": "<short title>", "claude_session_id": "$CLAUDE_CODE_SESSION_ID"}`. Read `claude_session_id` from the `CLAUDE_CODE_SESSION_ID` env var (exposed to all Bash tool calls). The field is no longer load-bearing for hook filtering (the hook is gone), but the renderer still surfaces it and the value remains useful for human auditing of session dirs.
 3. Then write the markdown to `<response_dir>/response.md`. Order matters: meta first, response second, so any incoming `GET /` between the two writes sees a consistent pair (the server reads both files per-request and falls through to the waiting page if `response.md` isn't there yet).
 4. Tell the user, in one short sentence: **"Response in browser → `<url>`. Submit when ready."**
-5. End your turn. Do not produce additional content.
+5. **Arm the watcher** (see "Arming the watcher" below). The Monitor runs in the background; your turn ends immediately. The user is free to chat. When they submit (or cancel) in the browser, you'll wake up with the annotations payload in your next turn — no user typing required.
+6. End your turn. Do not produce additional content.
 
-The plugin's Stop hook (`hooks/annotate-wait.py`) will block here, polling for
-`annotations.json` up to 2 hours. When the user clicks Submit, the hook
-injects the annotations payload as a system reminder so your next turn starts
-with them already in context — no user typing required.
+## Arming the watcher
+
+After writing `meta.json` and `response.md` and announcing the URL, start a long-lived `Monitor` keyed to this session's directories. Use `persistent: true` (annotations can sit for hours; non-persistent Monitor caps at 1 hour, and Bash background tasks cap at 10 minutes).
+
+The script:
+
+```bash
+ANN="<annotations_dir>/annotations.json"
+CANCELLED="<state_dir>/cancelled"
+SID="<sid>"
+RID="<response_id>"
+TITLE="<short title>"
+
+while [ ! -f "$ANN" ] && [ ! -f "$CANCELLED" ]; do
+  sleep 1
+done
+
+if [ -f "$ANN" ]; then
+  printf 'ANNOTATE_SUBMITTED sid=%s rid=%s title=%q\n' "$SID" "$RID" "$TITLE"
+  printf '%s\n' '---routing---'
+  printf '%s\n' 'If your reply addresses 2+ annotations, contains a plan, or lists separable points, push it back through the annotate browser by re-invoking the skill. If it is a short acknowledgement or single-fact answer, respond in terminal.'
+  printf '%s\n' '---annotations---'
+  cat "$ANN"
+else
+  printf 'ANNOTATE_CANCELLED sid=%s rid=%s title=%q\n' "$SID" "$RID" "$TITLE"
+fi
+```
+
+Substitute the five placeholders (`<annotations_dir>`, `<state_dir>`, `<sid>`, `<response_id>`, `<short title>`) with the values you have from the session-create response and `meta.json`.
+
+Call `Monitor` with `persistent: true`, the script above as `command`, and a short `description` like `"annotate-wait sid=<sid>"`.
+
+After arming the watcher, **also append a record to the pending registry** so you can find this session later if the user cancels from terminal:
+
+```bash
+mkdir -p ~/.claude/annotate
+REG="$HOME/.claude/annotate/pending-${CLAUDE_CODE_SESSION_ID}.json"
+python3 - "$REG" "$SID" "$RID" "$TITLE" "$STATE_DIR" "$ANN_DIR" <<'PY'
+import json, os, sys
+path, sid, rid, title, state_dir, ann_dir = sys.argv[1:]
+try:
+    data = json.load(open(path))
+except FileNotFoundError:
+    data = []
+data.append({"sid": sid, "rid": rid, "title": title,
+             "state_dir": state_dir, "annotations_dir": ann_dir})
+tmp = path + ".tmp"
+json.dump(data, open(tmp, "w"), indent=2)
+os.replace(tmp, path)
+PY
+```
+
+The registry persists across watchers within a single Claude Code session. It is *not* shared across sessions (keyed by `CLAUDE_CODE_SESSION_ID`).
+
+## Mode D — handling a watcher event
+
+When you receive a task-notification whose stdout starts with `ANNOTATE_SUBMITTED` or `ANNOTATE_CANCELLED`, you have woken from a previously-armed watcher.
+
+1. Parse the banner line to recover `sid`, `rid`, `title`.
+2. If `ANNOTATE_SUBMITTED`:
+   - Read the rest of the stdout: a `---routing---` block (the rule for whether your reply pushes back to browser), then `---annotations---` followed by the raw JSON.
+   - Follow the existing "How to read annotations" steps to apply each annotation.
+   - When composing your reply, apply the routing rule the watcher carried — if long-form, loop back through "How to push a response" with a fresh `response_id`; if short, respond in terminal.
+3. If `ANNOTATE_CANCELLED`:
+   - Acknowledge briefly in terminal: *"Annotate round for `<title>` cancelled."* — no more, no less.
+   - Do not re-engage the annotate flow unless the user asks.
+4. In both cases, **remove this session's entry from `~/.claude/annotate/pending-${CLAUDE_CODE_SESSION_ID}.json`** (the watcher is no longer pending). If the file is now empty, leave it as `[]` — don't delete it.
+
+## Terminal cancellation
+
+If the user says "scrap it" / "respond in terminal" / "stop annotating" / equivalent *while a watcher is armed* (the pending registry has entries):
+
+1. Read `~/.claude/annotate/pending-${CLAUDE_CODE_SESSION_ID}.json`.
+2. For each entry, write a `cancelled` marker into the entry's `state_dir`:
+   ```bash
+   printf '{"reason":"user-cancelled-terminal"}' > "$STATE_DIR/cancelled"
+   ```
+   The server's existing `_terminal_state` check only tests existence, so the body is optional but useful for debugging.
+3. The watcher loops detect the marker on their next 1-second tick and exit with `ANNOTATE_CANCELLED`. You'll get task-notifications for each.
+4. Handle each cancellation per Mode D and clean up the registry as that step instructs.
+5. Continue with whatever the user actually wanted.
 
 ## How to read annotations
 
 On your next turn, **before** any other action:
 
-1. If the Stop hook injected an `additionalContext` system reminder containing
-   the annotations payload, use it directly. Otherwise fall back to reading
-   `<annotations_dir>/annotations.json` from disk (it's the source of truth and
-   the hook may have truncated very large payloads).
-   - Exists → read it.
-   - Doesn't exist → user didn't submit, and the hook either timed out (2 h)
-     or the server went away. Treat the terminal message as implicit "looks
-     good" and continue.
+1. The annotations JSON is delivered as the body of the watcher's task-notification (see Mode D). The watcher reads `<annotations_dir>/annotations.json` once and emits it — that's the source of truth. If the notification body looks incomplete or you need to re-read it, the file is still on disk.
+   - File exists → read it if the notification body looks truncated.
+   - File doesn't exist → the watcher reported `ANNOTATE_CANCELLED` instead; see Mode D step 3.
 
 2. Verify `response_id` matches the response you pushed. If mismatch, re-push and warn the user.
 
@@ -136,7 +209,7 @@ On your next turn, **before** any other action:
 
 ## Continuing the annotation loop
 
-The annotation flow is iterative: the user submits, you respond, and if your reply is itself substantive the user should be able to annotate that too. The Stop hook (`hooks/annotate-wait.py`) injects a routing reminder alongside the annotations payload — this section is the canonical version of the rule it carries.
+The annotation flow is iterative: the user submits, you respond, and if your reply is itself substantive the user should be able to annotate that too. The watcher's stdout banner carries a one-line summary of the rule; this section is the canonical, full version.
 
 When the user submits annotations (or submits with zero annotations as implicit approval), evaluate the reply you are about to write:
 
@@ -155,7 +228,7 @@ If the user explicitly says "respond in terminal" or otherwise opts out, follow 
 - **You're producing v2 of a response** — write a new `response.md` with a fresh `response_id`. Don't migrate previous annotations forward.
 - **Server unreachable** — see "verify the server is alive". Restart and continue.
 - **Malformed `annotations.json`** — fall back to "no parseable annotations"; continue with terminal text.
-- **`cancelled` marker present** — the user clicked Cancel. The Stop hook exits silently; you get a normal next turn driven by whatever the user types. Don't try to re-engage the annotate flow unless the user asks.
+- **`cancelled` marker present** — the user clicked Cancel (or you wrote the marker yourself via "Terminal cancellation"). The watcher exits with `ANNOTATE_CANCELLED`; see Mode D step 3.
 
 ## Token budget
 
