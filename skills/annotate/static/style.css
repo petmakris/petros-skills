@@ -726,4 +726,91 @@ footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 13px;
   font-family: inherit;
 }
+
+/* === Paste strip (image attachments in comment editors) =============== */
+
+.paste-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: flex-start;
+}
+.paste-strip[data-empty="1"] { display: none; }
+
+.paste-thumb {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: flex-end;
+  justify-content: stretch;
+  flex-direction: column;
+}
+.paste-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.paste-thumb.no-thumb::before {
+  content: "🖼";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--text-dim);
+}
+.paste-label {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  line-height: 1;
+  text-align: center;
+  padding: 2px 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.paste-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.paste-thumb:hover .paste-remove { display: inline-flex; }
+.paste-remove:hover { background: rgba(0, 0, 0, 0.75); }
+
+.paste-error {
+  align-self: center;
+  font-size: 12px;
+  color: var(--type-reject-fg);
+  background: var(--type-reject-wash);
+  border: 1px solid var(--type-reject-bg);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
 .locked-action:hover { filter: brightness(1.1); }
