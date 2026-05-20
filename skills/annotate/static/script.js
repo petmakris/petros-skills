@@ -389,7 +389,11 @@
       ta.style.height = Math.min(ta.scrollHeight + 2, cap) + "px";
     };
 
-    preview.addEventListener("click", () => { ta.focus(); });
+    preview.addEventListener("click", () => {
+      wrap.classList.remove("preview-mode");
+      wrap.classList.add("edit-mode");
+      ta.focus();
+    });
     ta.addEventListener("focus", () => {
       wrap.classList.remove("preview-mode");
       wrap.classList.add("edit-mode");
