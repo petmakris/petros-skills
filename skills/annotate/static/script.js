@@ -435,6 +435,68 @@
     renderPreview();
     renderStrip();
 
+    ta.addEventListener("paste", async (ev) => {
+      const items = ev.clipboardData?.items;
+      if (!items) return;
+      let imageItem = null;
+      for (const it of items) {
+        if (it.kind === "file" && it.type.startsWith("image/")) {
+          imageItem = it;
+          break;
+        }
+      }
+      if (!imageItem) return; // fall through to default text paste
+      ev.preventDefault();
+      const blob = imageItem.getAsFile();
+      if (!blob) return;
+      const token = `paste-${pasteState.nextIndex++}`;
+      // Insert token at the caret immediately so the user has visual feedback
+      // while the upload is in flight. If upload fails we leave the token in
+      // place — orphan tokens are harmless — and show the error chip.
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const insertion = `![${token}]`;
+      ta.value = ta.value.slice(0, start) + insertion + ta.value.slice(end);
+      const caret = start + insertion.length;
+      ta.setSelectionRange(caret, caret);
+      annotations[id].comment = ta.value;
+      saveDrafts();
+      try {
+        const resp = await fetch(BASE + "api/upload", {
+          method: "POST",
+          headers: { "Content-Type": blob.type },
+          body: blob,
+        });
+        if (!resp.ok) {
+          showPasteError(`upload failed (${resp.status})`);
+          return;
+        }
+        const { path } = await resp.json();
+        pasteState.pastes.push({
+          token,
+          path,
+          thumbUrl: URL.createObjectURL(blob),
+        });
+        persistImages();
+        renderStrip();
+      } catch (err) {
+        showPasteError("upload failed (network)");
+      }
+    });
+
+    let errorChipTimer = null;
+    function showPasteError(msg) {
+      let chip = pasteStrip.querySelector(".paste-error");
+      if (!chip) {
+        chip = document.createElement("span");
+        chip.className = "paste-error";
+        pasteStrip.appendChild(chip);
+      }
+      chip.textContent = msg;
+      if (errorChipTimer) clearTimeout(errorChipTimer);
+      errorChipTimer = setTimeout(() => { chip.remove(); errorChipTimer = null; }, 4000);
+    }
+
     return card;
   }
 
