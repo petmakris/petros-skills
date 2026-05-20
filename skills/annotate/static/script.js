@@ -642,6 +642,7 @@
         };
         if (a.prefix !== undefined) out.prefix = a.prefix;
         if (a.suffix !== undefined) out.suffix = a.suffix;
+        if (Array.isArray(a.images) && a.images.length > 0) out.images = a.images;
         if (a.block_id) {
           const snippet = blockSnippet(a.block_id);
           if (snippet) out.block_snippet = snippet;
