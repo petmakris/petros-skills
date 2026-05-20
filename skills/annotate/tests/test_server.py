@@ -558,5 +558,55 @@ class ServerIdleShutdownTests(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class UploadTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.cwd = self.tmp / "proj"
+        self.cwd.mkdir()
+        self.proc, info = _start_server(self.home)
+        self.port = info["port"]
+        self.sess = _create_session(self.port, self.cwd)
+
+    def tearDown(self):
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _upload(self, body: bytes, content_type: str):
+        conn = http.client.HTTPConnection("localhost", self.port, timeout=2)
+        conn.request(
+            "POST", f"/s/{self.sess['sid']}/api/upload",
+            body=body,
+            headers={"Content-Type": content_type, "Content-Length": str(len(body))},
+        )
+        resp = conn.getresponse()
+        status = resp.status
+        data = resp.read().decode("utf-8")
+        conn.close()
+        return status, data
+
+    def test_upload_writes_image_and_returns_path(self):
+        png = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+            "0000000d49444154789c63000100000005000101a5f645400000000049454e44ae426082"
+        )
+        status, body = self._upload(png, "image/png")
+        self.assertEqual(status, 200, body)
+        payload = json.loads(body)
+        self.assertIn("path", payload)
+        self.assertEqual(payload["size"], len(png))
+        on_disk = Path(payload["path"])
+        self.assertTrue(on_disk.is_file())
+        self.assertEqual(on_disk.read_bytes(), png)
+        self.assertEqual(on_disk.suffix, ".png")
+        expected_parent = Path(self.sess["state_dir"]) / "images"
+        self.assertEqual(on_disk.parent, expected_parent)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 SHUTDOWN_AFTER_SECONDS = int(os.environ.get("ANNOTATE_SHUTDOWN_SECONDS", 24 * 60 * 60))
@@ -513,6 +514,9 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
             if rest == "/api/cancel":
                 self._handle_cancel(dirs)
                 return
+            if rest == "/api/upload":
+                self._handle_upload(dirs)
+                return
             self._send_text(404, "not found")
             return
         self._send_text(404, "not found")
@@ -605,6 +609,45 @@ class AnnotateHandler(http.server.BaseHTTPRequestHandler):
             json.dumps({"reason": "user-cancelled", "at": int(time.time())})
         )
         self._send_text(200, "ok")
+
+    _UPLOAD_EXT = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/gif": "gif",
+        "image/webp": "webp",
+    }
+    _UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+
+    def _handle_upload(self, dirs: dict) -> None:
+        ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        ext = self._UPLOAD_EXT.get(ctype)
+        if ext is None:
+            self._send_text(415, "unsupported media type")
+            return
+        length_hdr = self.headers.get("Content-Length")
+        if not length_hdr:
+            self._send_text(411, "length required")
+            return
+        try:
+            length = int(length_hdr)
+        except ValueError:
+            self._send_text(400, "invalid content-length")
+            return
+        if length <= 0 or length > self._UPLOAD_MAX_BYTES:
+            self._send_text(413, "payload too large")
+            return
+        body = self.rfile.read(length)
+        images_dir = dirs["state_dir"] / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        path = images_dir / f"{uuid.uuid4().hex}.{ext}"
+        path.write_bytes(body)
+        body_json = json.dumps({"path": str(path), "size": len(body)})
+        data = body_json.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
 
 class _ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
