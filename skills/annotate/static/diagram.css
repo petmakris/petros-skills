@@ -44,3 +44,17 @@
 .annotate-seq .step-row[data-card-focus] .arr-request,
 .annotate-seq .step-row[data-card-focus] .arr-event,
 .annotate-seq .step-row[data-card-focus] .arr-self { stroke-width: 2.4; }
+
+/* Mermaid-rendered diagram blocks (kind: "diagram"). The SVG carries its own
+   inline styling from mmdc; we only constrain its size and center it within
+   the card so wide diagrams scale down instead of overflowing. */
+.annotate-diagram {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.annotate-diagram-error {
+  display: block;
+  margin: 4px 0;
+}
