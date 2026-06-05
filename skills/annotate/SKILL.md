@@ -207,7 +207,7 @@ Three migration strategies considered:
 
 If the user clicks the `Incremental` header, the comment payload arrives with `step_id: "opt-incremental"`. Same rewrite contract as a diagram-step comment (SKILL.md §"Diagram block-rewrite contract"): fold the answer into the HTML — preserve surviving slugs, restructure freely otherwise.
 
-### Diagram block shape
+### Sequence diagram block shape
 
 A sequence-diagram block looks like this in `blocks.json`:
 
@@ -376,7 +376,7 @@ You wake here when a task-notification arrives whose first stdout line is one of
 1. Parse the banner: `skill`, `sid`, `event_id`.
 2. Read the event payload between the `---payload---` and `---end---` markers in the notification body. **If `type == "choice"`, jump to the `choice` subsection below.** Otherwise, fields are:
    - `block_id` — the block to update, or `null` for a general comment.
-   - `step_id` — for `kind: "sequence"` blocks: the step row the user clicked, or `null` for whole-diagram comments. Absent/null for markdown blocks.
+   - `step_id` — for `kind: "sequence"` blocks: the step row the user clicked, or `null` for whole-diagram comments. For `kind: "diagram"` blocks: always `null` (whole-diagram only in v1). Absent/null for markdown blocks.
    - `type` — `"comment"`, `"reject"`, `"choice"`, or `"dismiss"`.
    - `selected_options` — for `type: "choice"`: the option id(s) the user picked (a list). Absent otherwise.
    - `text` — the user's free-text feedback.
