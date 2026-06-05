@@ -327,7 +327,8 @@
   // derive one from the content (first heading, else first sentence/line).
   function blockTitle(blk) {
     if (blk.title && String(blk.title).trim()) return String(blk.title).trim();
-    if ((blk.kind || "markdown") === "sequence") {
+    const k = blk.kind || "markdown";
+    if (k === "sequence" || k === "diagram") {
       const t = blk.spec && blk.spec.title;
       return (t && String(t).trim()) || "Diagram";
     }
@@ -468,6 +469,13 @@
       content.addEventListener("click", (ev) => {
         onHoverAction(section, "comment", ev);
       });
+    } else if (kind === "diagram") {
+      // Server pre-rendered the Mermaid SVG; inject as-is. This is trusted
+      // server output and deliberately bypasses sanitizeFreeHtml so Mermaid's
+      // inline <style> survives. v1 has no per-node hit targets, so there is
+      // no step-click listener — whole-diagram comments come from the
+      // hover-actions strip (renderHoverActions does not skip "diagram").
+      content.innerHTML = blk.svg || "";
     } else if (kind === "choice") {
       renderChoice(section, content, blk);
     } else {
@@ -1226,7 +1234,7 @@
     }
     const content = section.querySelector(".block-content");
     if (content) {
-      if (newKind === "sequence") {
+      if (newKind === "sequence" || newKind === "diagram") {
         content.innerHTML = blk.svg || "";
       } else if (blockMd) {
         content.innerHTML = blockMd.render(blk.markdown || "");
