@@ -1,8 +1,8 @@
 ---
 name: refine-prompt
-description: Use when the user invokes /refine-prompt, or when a messy user message (likely a speech-to-text transcript) arrives with session consent granted. Two modes — Console mode (explicit invocation) refines clipboard/file/inline text inside a subagent and hands back a bare, copy-pasteable prompt without polluting the session or executing anything; Auto-refine mode (in-chat messy message) refines in place and executes after approval. Both ground references to the codebase and correct likely transcription errors.
+description: Use when the user invokes /refine-prompt, or when a messy user message (likely a speech-to-text transcript) arrives with session consent granted. Two modes — Console mode (explicit invocation) refines clipboard or inline text inside a subagent and hands back a bare, copy-pasteable prompt without polluting the session or executing anything; Auto-refine mode (in-chat messy message) refines in place and executes after approval. Both ground references to the codebase and correct likely transcription errors.
 user-invocable: true
-argument-hint: optional — bare invocation refines clipboard contents; pass a file path or inline text to refine that instead
+argument-hint: optional — bare invocation refines clipboard contents; pass inline text to refine that instead
 ---
 
 # Refine Prompt Skill
@@ -13,7 +13,7 @@ The skill has **two modes**, selected by how it was invoked:
 
 | Mode | Trigger | What it does |
 |---|---|---|
-| **Console mode** | Explicit `/refine-prompt [arg]` | Refines clipboard / file / inline text **inside a subagent**, returns the **bare** refined prompt to your clipboard via `pbcopy`. **Does not execute.** You paste it yourself as a fresh message. Keeps the messy input and all probing noise out of the main session. |
+| **Console mode** | Explicit `/refine-prompt [arg]` | Refines clipboard or inline text **inside a subagent**, returns the **bare** refined prompt to your clipboard via `pbcopy`. **Does not execute.** You paste it yourself as a fresh message. Keeps the messy input and all probing noise out of the main session. |
 | **Auto-refine mode** | A messy in-chat message + session consent | Refines the in-chat message **in place** and, after your `go`, runs it as the task. The original behavior. |
 
 The dividing line: **explicit invocation = "hand me clean text to paste"; auto-trigger = "I rambled in chat, clean it up and run it."** They never mix in one turn.
@@ -26,7 +26,7 @@ This is the path for "I have a big messy dictation, give me a clean prompt to pa
 
 ## Why it stays clean
 
-The messy input never enters the main session. The skill dispatches a **subagent** that reads the input itself (runs `pbpaste`, or `Read`s the file) and does the whole pipeline in its own context. The main session only ever holds the short `/refine-prompt` trigger and a one-line confirmation. The refined prompt is written back to the clipboard, so you paste it as your next message.
+The messy input never enters the main session. The skill dispatches a **subagent** that reads the input itself (runs `pbpaste`) and does the whole pipeline in its own context. The main session only ever holds the short `/refine-prompt` trigger and a one-line confirmation. The refined prompt is written back to the clipboard, so you paste it as your next message.
 
 Requires macOS (`pbpaste` / `pbcopy`).
 
@@ -35,18 +35,16 @@ Requires macOS (`pbpaste` / `pbcopy`).
 | Invocation | Input source |
 |---|---|
 | `/refine-prompt` (no arg) | The **clipboard** — the subagent runs `pbpaste`. This is the default, lowest-friction path. |
-| `/refine-prompt <path>` | The file at that path — the subagent `Read`s it. |
 | `/refine-prompt <inline text>` | The inline text itself (note: inline text is already in the chat, so it does not get the no-pollution benefit; it's a convenience fallback). |
 
 ## Subagent dispatch
 
-Dispatch one **general-purpose** subagent. Hand it the pipeline below and this contract. Do **not** read the clipboard or file from the main loop — that would pull the mess into the main context and defeat the entire purpose.
+Dispatch one **general-purpose** subagent. Hand it the pipeline below and this contract. Do **not** read the clipboard from the main loop — that would pull the mess into the main context and defeat the entire purpose.
 
 The subagent prompt must instruct it to:
 
 1. **Acquire the input.**
    - Clipboard mode: run `pbpaste`. If it returns empty/whitespace only, stop and report `{ "empty": true }`.
-   - File mode: `Read` the given path. If missing, report `{ "error": "<path> not found" }`.
    - Inline mode: use the text passed in the dispatch prompt.
 2. **Run the Pipeline** (normalize → segment → probe → classify → compose) against the codebase. Probing budget and the word-ambiguity rules apply exactly as written below.
 3. **Return one of two structured results:**
@@ -67,7 +65,7 @@ On success, the refined prompt is already on the clipboard. Emit a single confir
 
 Do **not** print the refined prompt in the main session (you reviewed nothing; the user reviews it in the input box before sending — that keeps the session cleanest). Do **not** execute it. The user's subsequent paste is a normal, clean message; the auto-refine heuristic will correctly ignore it.
 
-If the subagent reported empty clipboard / missing file, relay that plainly and stop.
+If the subagent reported an empty clipboard, relay that plainly and stop.
 
 ## Console-mode invariants
 
