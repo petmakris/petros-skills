@@ -2,6 +2,24 @@
 
 Personal cross-project Claude Code skills and a sandbox for experimentation.
 
+## ✨ Featured: `/annotate` — stop scrolling Claude's wall of text. Start arguing with it.
+
+Claude's best answers — rollout plans, design reviews, multi-step analyses — show up in your terminal as one long scroll. Want to push back on step 3? You re-type the context, hope Claude finds the right paragraph, and get a fresh wall of text back.
+
+**`/annotate` turns that monologue into a working session.** The response opens as a web page where every claim is its own card. Click one, leave a comment, and Claude rewrites *just that block* — in place, no reload, no re-pasting. The rest of the document stays put.
+
+![The /annotate view — live stats bar, structured blocks, click-to-comment](docs/img/annotate-hero.png)
+
+- **Live stats bar up top** — context window %, model, 5h / 7d rate-limit windows, and the session diff, mirrored straight from your terminal statusline. You watch the cost of the conversation while you read it.
+- **Comment on any block** — click, type, submit. Claude folds your answer back into the prose. Disagree? Hit reject. Irrelevant? Dismiss it and Claude re-threads the rest.
+- **Not just text** — responses render as sequence diagrams, comparison tables, and pick-one decision blocks when that beats prose. Project jargon gets hover-glossary definitions.
+
+![A sequence diagram rendered inline in an /annotate response](docs/img/annotate-diagram.png)
+
+- **Zero install** — a stdlib-only Python server. Nothing to `pip install`, nothing to configure. Run `/annotate` and it's there.
+
+Type `/annotate` after any big response, or just let it route long answers automatically. [Full skill docs →](skills/annotate/)
+
 ## What's in here
 
 - `skills/` — individual skills, one directory each. `_template/` is a starting template (leading underscore sorts it to the top).
