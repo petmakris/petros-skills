@@ -43,11 +43,33 @@ Typical fits: code flows, request/response protocols, event lifecycles, deployme
 **Do NOT use a sequence-diagram block for:**
 
 - Single-actor flows (a numbered list does the job).
-- Branching/decision logic where time isn't the dominant axis (flowcharts — not supported in v1).
-- Static structure: class hierarchies, data shapes, dependency graphs.
+- Branching/decision logic where time isn't the dominant axis — use a `kind: "diagram"` block (flowchart).
+- Static structure: class hierarchies, data shapes, dependency graphs, system architecture — use a `kind: "diagram"` block.
 - Anything that fits in 1–2 sentences.
 
 **One diagram per flow.** Diagrams are heavier than prose blocks — visually and token-wise. A response that explains one flow gets one diagram block; longer explanations get prose blocks framing it. Don't emit two diagrams unless they're genuinely two separate flows.
+
+### When to use a `kind: "diagram"` block (Mode A extension)
+
+Emit a `kind: "diagram"` block when content is clearer seen than read AND it is
+one of these shapes (the cases a sequence diagram does NOT cover):
+
+- **flowchart** — branching/decision logic, process flows, block diagrams.
+- **architecture** — system/service architecture, how components connect.
+- **state** — state machines, lifecycle transitions.
+- **er** — entity-relationship / data-model shapes.
+- **class** — class hierarchies, static structure.
+
+The block carries Mermaid source; the server renders it to SVG with `mmdc`.
+
+**Do NOT use a `kind: "diagram"` block for:**
+
+- Temporal actor↔actor flows — that's a `kind: "sequence"` block.
+- Anything that fits in 1–2 sentences, or a short list that reads fine as prose.
+
+**One diagram per concept.** Like sequence blocks, diagrams are heavier than
+prose — visually and token-wise. Frame the diagram with a short prose block; the
+diagram must add clarity, not decorate.
 
 ### When to use a `kind: "choice"` block (Mode A extension)
 
@@ -209,6 +231,22 @@ Arrow types are exactly three values:
 - `request` — actor↔actor interaction; direction follows `from`/`to`.
 - `event` — automatic / system-driven push.
 - `self` — self-action; requires `from === to`.
+
+### Diagram (Mermaid) block shape
+
+A `kind: "diagram"` block looks like this in `blocks.json`:
+
+    {"id": "section-N", "kind": "diagram", "spec": {
+      "type": "flowchart|architecture|state|er|class",
+      "title": "<short title>",
+      "source": "<mermaid source>"
+    }}
+
+`type` selects the diagram family (validated server-side); `source` is raw
+Mermaid. The server renders it to SVG via `mmdc` and themes it to the page. If
+the source is invalid or `mmdc` fails, the block shows a compact error pill
+instead of blanking the page. v1 has whole-diagram commenting only — there are
+no per-node hit targets, so comments arrive with `step_id: null`.
 
 ### Choice block shape
 
@@ -419,6 +457,14 @@ For `WEBCOMPANION_EVENT` payloads that target a `kind: "sequence"` block, the re
 Persist updates via `blocks.update_spec_block(doc, block_id, new_spec)` — returns `True` only on real change (canonical-JSON content hash). Then `save_atomic` as today. Watcher re-emit safety is preserved. (All these helpers live in `skills/annotate/blocks.py`; the server and tests import it aliased as `blocks_model`, but in SKILL.md it's always `blocks.`.)
 
 **Off-topic comments** (user comments on `s4` about something that really belongs in `s2`) follow the same "use judgment" rule as the markdown contract: rewrite the targeted step to be clearer about its actual topic, or rewrite the neighboring step, or both.
+
+**`kind: "diagram"` (Mermaid) blocks** have no per-step targeting in v1: a
+comment always arrives with `step_id: null` and applies to the whole diagram.
+Rewrite `spec.source` (and `spec.title` if warranted) to fold in the answer,
+then persist with `blocks.update_spec_block(doc, block_id, new_spec)` — the same
+content-hash-safe helper used for sequence specs — and `save_atomic`. To convert
+a diagram to/from prose, treat it as a kind change (drop `kind`/`spec`, set
+`markdown`) exactly as for other spec blocks.
 
 ## Re-apply safety
 
