@@ -11,6 +11,7 @@ from skills.annotate.diagrams.mermaid import (
     render,
     _postprocess,
 )
+from skills.annotate.server import _render_block_for_raw
 
 
 def _minimal_spec():
@@ -107,9 +108,6 @@ def test_postprocess_appends_to_existing_class():
 def test_postprocess_idempotent_when_already_tagged():
     raw = '<svg class="annotate-diagram mermaid" xmlns="http://www.w3.org/2000/svg"><g/></svg>'
     assert _postprocess(raw) == raw
-
-
-from skills.annotate.server import _render_block_for_raw
 
 
 @requires_mmdc

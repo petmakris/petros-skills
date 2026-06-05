@@ -459,7 +459,7 @@ def _render_block_for_raw(blk: dict, version: int) -> dict:
                 f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 36" '
                 f'class="annotate-diagram annotate-diagram-error" '
                 f'data-block-id="{html_escape(blk["id"])}" '
-                f'role="img" aria-label="diagram failed to render">'
+                f'role="img" aria-label="mermaid diagram failed to render">'
                 f'<rect x="0" y="0" width="360" height="36" rx="6" '
                 f'fill="#fde7e2" stroke="#e5b8af"/>'
                 f'<text x="14" y="22" font-size="12" font-weight="600" '
