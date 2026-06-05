@@ -1,0 +1,11 @@
+# Gradle / IntelliJ Platform Gradle plugin
+build/
+.gradle/
+.intellijPlatform/
+
+# IDE-local
+.idea/
+*.iml
+
+# Brainstorm / visual companion sessions
+.superpowers/

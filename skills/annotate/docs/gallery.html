@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>annotate — gallery of designed views</title>
+<link rel="stylesheet" href="../../_shared/web_companion/static/core.css">
+<link rel="stylesheet" href="../static/style.css">
+<link rel="stylesheet" href="../static/diagram.css">
+<link rel="stylesheet" href="../static/popover.css">
+<script>
+  document.documentElement.dataset.accent = "lavender";
+</script>
+<style>
+/* ---- Gallery layout wrapper (was .general-section, now gallery-only) ---- */
+.gallery-section {
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 56px 100px 56px;
+}
+/* ---- Gallery section dividers (gallery-only chrome) ---------------- */
+.gallery-divider {
+  margin: 36px 0 16px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.gallery-note {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin: 0 0 16px 0;
+  padding: 0 0 0 6px;
+  border-left: 2px solid var(--border);
+  font-style: italic;
+}
+
+/* ---- Mock: kind: "comparison" -------------------------------------- */
+.annotate-comparison {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13.5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.annotate-comparison caption {
+  caption-side: top;
+  text-align: left;
+  padding: 10px 12px 6px 12px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-strong);
+}
+.annotate-comparison th,
+.annotate-comparison td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.annotate-comparison thead th {
+  background: var(--surface-soft);
+  font-weight: 600;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+.annotate-comparison tbody th {
+  font-weight: 500;
+  color: var(--text-dim);
+  width: 28%;
+  background: var(--surface-soft);
+}
+.annotate-comparison tr:last-child th,
+.annotate-comparison tr:last-child td { border-bottom: none; }
+.annotate-comparison .verdict-row td { padding-top: 10px; padding-bottom: 10px; }
+.annotate-comparison .verdict {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.verdict.verdict-preferred {
+  color: #2f8a4f;
+  background: color-mix(in srgb, #2f8a4f 14%, transparent);
+  border: 1px solid color-mix(in srgb, #2f8a4f 30%, transparent);
+}
+.verdict.verdict-rejected {
+  color: var(--type-reject-fg);
+  background: color-mix(in srgb, var(--type-reject-fg) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--type-reject-fg) 30%, transparent);
+}
+.verdict.verdict-neutral {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+  border: 1px solid var(--border);
+}
+
+/* ---- Mock: kind: "table" ------------------------------------------- */
+.annotate-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13.5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.annotate-table caption {
+  caption-side: top;
+  text-align: left;
+  padding: 10px 12px 6px 12px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-strong);
+}
+.annotate-table th,
+.annotate-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.annotate-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-soft);
+  font-weight: 600;
+  color: var(--text-strong);
+  font-size: 12.5px;
+  text-align: left;
+}
+.annotate-table tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-soft) 40%, transparent); }
+.annotate-table td.mono,
+.annotate-table th.mono {
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+.annotate-table td.center,
+.annotate-table th.center { text-align: center; }
+.annotate-table td.right,
+.annotate-table th.right { text-align: right; }
+
+/* ---- Mock: kind: "callout" ----------------------------------------- */
+.annotate-callout {
+  margin: 14px 0;
+  padding: 12px 16px 12px 14px;
+  border-radius: 8px;
+  border-left: 4px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.annotate-callout > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-strong);
+}
+.annotate-callout .callout-icon { font-size: 16px; line-height: 1; }
+.annotate-callout .body { color: var(--text); }
+.annotate-callout .body p { margin: 0.25em 0; }
+.annotate-callout code {
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.annotate-callout.variant-warning {
+  border-left-color: #d49a18;
+  background: color-mix(in srgb, #d49a18 11%, transparent);
+}
+.annotate-callout.variant-warning header { color: #b07c10; }
+
+.annotate-callout.variant-info {
+  border-left-color: #3a78d8;
+  background: color-mix(in srgb, #3a78d8 11%, transparent);
+}
+.annotate-callout.variant-info header { color: #2960b8; }
+
+.annotate-callout.variant-tip {
+  border-left-color: #2faa92;
+  background: color-mix(in srgb, #2faa92 11%, transparent);
+}
+.annotate-callout.variant-tip header { color: #1c8a73; }
+
+.annotate-callout.variant-danger {
+  border-left-color: var(--type-reject-fg);
+  background: color-mix(in srgb, var(--type-reject-fg) 12%, transparent);
+}
+.annotate-callout.variant-danger header { color: var(--type-reject-fg); }
+
+.annotate-callout.variant-success {
+  border-left-color: #2f8a4f;
+  background: color-mix(in srgb, #2f8a4f 11%, transparent);
+}
+.annotate-callout.variant-success header { color: #237039; }
+</style>
+</head>
+<body data-response-id="gallery-demo">
+
+<header class="page-header">
+  <div class="header-title">
+    <span class="header-emoji">📝</span>
+    <span class="header-text">annotate — view gallery</span>
+    <span class="header-respid">gallery-demo</span>
+  </div>
+  <div class="header-actions">
+    <button class="done-btn" disabled>Done</button>
+  </div>
+</header>
+
+<main class="prose">
+
+  <h1>Gallery of designed views</h1>
+
+  <p style="margin: 8px 0 16px 0; font-size: 13px;">
+    <a href="#mockups" style="color: var(--accent); text-decoration: underline; font-weight: 600;">
+      → Jump to redesign mockups (comment-card v2)
+    </a>
+  </p>
+
+  <p class="gallery-note">
+    Static demo. Stylesheets are the real ones from <code>annotate/static/</code>.
+    Implemented views ({version badge, collapsible block, page-level composer}) reuse production CSS.
+    The comparison / table / callout sections below are <strong>examples of HTML Claude can now
+    write directly inside a markdown block</strong> — markdown-it runs with <code>html: true</code>,
+    a client-side sanitizer scrubs script/handler vectors, and any element tagged with
+    <code>data-annotate-id="..."</code> becomes a clickable sub-unit. The styles for the example
+    visuals live inline in this file as a starter palette; Claude can reuse them or invent its own.
+  </p>
+
+  <div class="gallery-divider">Implemented — markdown block, default state</div>
+
+  <section class="block" data-block-id="b-0" data-version="1" data-kind="markdown">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <p>
+        A vanilla markdown block — same as the bulk of annotate output today.
+        Hover anywhere on the block to see the action icons in the top-right
+        (rendered statically below since this is a non-interactive demo).
+      </p>
+    </div>
+  </section>
+
+  <div class="gallery-divider">Implemented — markdown block with version badge (v2)</div>
+
+  <section class="block" data-block-id="b-1" data-version="2" data-kind="markdown">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <p>
+        This block has been rewritten once after a comment, so the version badge
+        appears in the top-left corner. Before this branch it lived top-right
+        and overlapped the action icons.
+      </p>
+    </div>
+    <span class="version-badge" title="Block has been rewritten">v2</span>
+  </section>
+
+  <div class="gallery-divider">Implemented — markdown block, collapsed</div>
+
+  <section class="block collapsed" data-block-id="b-2" data-version="1" data-kind="markdown">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Expand block">▸</button>
+    <div class="block-content">
+      <p>
+        This block is collapsed. Its body is hidden; the chevron in the left
+        gutter expands it. State persists per response_id + block_id in
+        localStorage so reloads keep your reading position.
+      </p>
+    </div>
+  </section>
+
+  <div class="gallery-divider">Example — comparison table (free HTML in a markdown block)</div>
+
+  <p class="gallery-note">
+    Two- or three-column weigh-up of options across a fixed set of axes.
+    The columns and cells carry <code>data-annotate-id</code> so users can click
+    a column header or a specific cell to comment on just that piece — the click
+    handler resolves to the closest <code>data-annotate-id</code> ancestor.
+  </p>
+
+  <section class="block" data-block-id="b-3" data-version="1" data-kind="comparison">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <table class="annotate-comparison">
+        <caption>Migration strategies</caption>
+        <thead>
+          <tr>
+            <th></th>
+            <th data-annotate-id="col-bigbang">Big-bang cutover</th>
+            <th data-annotate-id="col-incremental">Incremental dual-write</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Cost</th>
+            <td data-annotate-id="bigbang-cost">Low</td>
+            <td data-annotate-id="incremental-cost">Medium</td>
+          </tr>
+          <tr>
+            <th>Risk</th>
+            <td data-annotate-id="bigbang-risk">High — single irreversible window</td>
+            <td data-annotate-id="incremental-risk">Low</td>
+          </tr>
+          <tr>
+            <th>Effort</th>
+            <td data-annotate-id="bigbang-effort">2 weeks</td>
+            <td data-annotate-id="incremental-effort">6 weeks</td>
+          </tr>
+          <tr>
+            <th>Reversibility</th>
+            <td data-annotate-id="bigbang-reversibility">None</td>
+            <td data-annotate-id="incremental-reversibility">Each step revertible</td>
+          </tr>
+          <tr class="verdict-row">
+            <th></th>
+            <td data-annotate-id="bigbang-verdict"><span class="verdict verdict-rejected">✗ rejected</span></td>
+            <td data-annotate-id="incremental-verdict"><span class="verdict verdict-preferred">✓ preferred</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="gallery-divider">Example — data table (free HTML in a markdown block)</div>
+
+  <p class="gallery-note">
+    Generic tabular data — endpoint inventories, decision matrices, status grids.
+    Rows carry <code>data-annotate-id</code> so users can comment on a specific row.
+  </p>
+
+  <section class="block" data-block-id="b-4" data-version="1" data-kind="table">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <table class="annotate-table">
+        <caption>API endpoints</caption>
+        <thead>
+          <tr>
+            <th class="mono">Method</th>
+            <th class="mono">Path</th>
+            <th class="center">Auth</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-annotate-id="ep-list-users">
+            <td class="mono">GET</td>
+            <td class="mono">/users</td>
+            <td class="center">✓</td>
+            <td>paginated, cursor-based</td>
+          </tr>
+          <tr data-annotate-id="ep-create-user">
+            <td class="mono">POST</td>
+            <td class="mono">/users</td>
+            <td class="center">✓</td>
+            <td>admin only</td>
+          </tr>
+          <tr data-annotate-id="ep-get-user">
+            <td class="mono">GET</td>
+            <td class="mono">/users/:id</td>
+            <td class="center">✓</td>
+            <td>—</td>
+          </tr>
+          <tr data-annotate-id="ep-health">
+            <td class="mono">GET</td>
+            <td class="mono">/health</td>
+            <td class="center">—</td>
+            <td>public</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="gallery-divider">Example — callout boxes (free HTML in a markdown block)</div>
+
+  <p class="gallery-note">
+    Highlighted side-note. Without <code>data-annotate-id</code> on inner elements,
+    clicks fall through to whole-block commenting — which is usually what you want for a callout.
+  </p>
+
+  <section class="block" data-block-id="b-5" data-version="1" data-kind="callout">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <aside class="annotate-callout variant-warning" data-block-id="b-5">
+        <header><span class="callout-icon">⚠</span><span>Snapshot before migrating</span></header>
+        <div class="body">
+          <p>The migration drops the legacy <code>tokens</code> table. Take a database snapshot before running step 3 — there is no automated rollback.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="block" data-block-id="b-6" data-version="1" data-kind="callout">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <aside class="annotate-callout variant-info" data-block-id="b-6">
+        <header><span class="callout-icon">ⓘ</span><span>Note</span></header>
+        <div class="body">
+          <p>The watcher reports back via <code>WEBCOMPANION_EVENT</code> on stdout — the first line of the task notification carries the payload.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="block" data-block-id="b-7" data-version="1" data-kind="callout">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <aside class="annotate-callout variant-tip" data-block-id="b-7">
+        <header><span class="callout-icon">💡</span><span>Tip</span></header>
+        <div class="body">
+          <p>If you want the document to stay short, collapse blocks you've already read — the chevron in the left gutter is persistent and reload-stable.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="block" data-block-id="b-8" data-version="1" data-kind="callout">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <aside class="annotate-callout variant-danger" data-block-id="b-8">
+        <header><span class="callout-icon">⛔</span><span>Danger</span></header>
+        <div class="body">
+          <p>Do not run <code>blocks.drop_unused_terms</code> on a partially-written document — atomic write order matters (meta first, then blocks).</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="block" data-block-id="b-9" data-version="1" data-kind="callout">
+    <button type="button" class="block-collapse-toggle" title="Collapse / expand block" aria-label="Collapse block">▾</button>
+    <div class="block-content">
+      <aside class="annotate-callout variant-success" data-block-id="b-9">
+        <header><span class="callout-icon">✓</span><span>Success</span></header>
+        <div class="body">
+          <p>All 107 tests pass after the badge + collapse + submitted-card changes landed on <code>annotate-richer-blocks</code>.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+</main>
+
+<section class="gallery-section">
+  <div class="gallery-divider" style="margin-left: 56px; margin-right: 56px;">Implemented — page-level composer (non-block comment)</div>
+
+  <div class="general-composer">
+    <textarea class="general-input" rows="2">For the comparison kind, columns &gt; 3 feels noisy. Should we cap or just warn?</textarea>
+    <div class="general-composer-bar">
+      <span class="general-status">sent — Claude is responding…</span>
+      <button class="general-send-btn" type="button">Send</button>
+    </div>
+  </div>
+</section>
+
+<section class="gallery-section" style="margin-top: 48px;">
+  <div class="gallery-divider" style="margin-left: 56px; margin-right: 56px;">Bug — current draft state (× leaks into textarea, preview-mode is obsolete)</div>
+
+  <div style="padding: 0 56px;">
+    <div class="comment-card" data-type="comment" style="max-width: 320px;">
+      <button class="card-close" data-type="comment" type="button" aria-label="Remove" title="Remove">×</button>
+      <div class="editor-wrap edit-mode">
+        <textarea placeholder="Add a comment…"></textarea>
+      </div>
+      <div class="card-submit-row">
+        <button class="card-submit-btn" type="button">Submit</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Mockup CSS for the three redesign variants ────────────────────────── -->
+<style>
+  .mockup-row {
+    display: flex;
+    gap: 32px;
+    padding: 16px 56px 48px 56px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .mockup-cell {
+    flex: 1 1 300px;
+    max-width: 340px;
+  }
+  .mockup-cell h4 {
+    margin: 0 0 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .mockup-cell .desc {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+
+  /* ── Variant A — header bar ───────────────────────────── */
+  .cc-v2-a {
+    position: relative;
+    background: var(--type-comment-wash);
+    border-radius: 10px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .cc-v2-a[data-type="reject"] { background: var(--type-reject-wash); }
+  .cc-v2-a .cc-head {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px 8px 14px;
+    gap: 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--text-dim) 14%, transparent);
+  }
+  .cc-v2-a .cc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Monaspace Radon', ui-monospace, monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--type-comment-fg);
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--type-comment-fg) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--type-comment-fg) 30%, transparent);
+  }
+  .cc-v2-a[data-type="reject"] .cc-chip {
+    color: var(--type-reject-fg);
+    background: color-mix(in srgb, var(--type-reject-fg) 14%, transparent);
+    border-color: color-mix(in srgb, var(--type-reject-fg) 30%, transparent);
+  }
+  .cc-v2-a .cc-chip .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--type-comment-fg);
+  }
+  .cc-v2-a[data-type="reject"] .cc-chip .dot { background: var(--type-reject-fg); }
+  .cc-v2-a .cc-spacer { flex: 1; }
+  .cc-v2-a .cc-close {
+    width: 24px; height: 24px;
+    border: none; background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 16px; line-height: 1;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .cc-v2-a .cc-close:hover {
+    background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+    color: var(--text-strong);
+  }
+  .cc-v2-a .cc-quote {
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--text-dim);
+    padding: 10px 14px 0 14px;
+    border-left: 2px solid var(--type-comment-fg);
+    margin: 10px 14px 0 14px;
+    padding-left: 8px;
+  }
+  .cc-v2-a[data-type="reject"] .cc-quote { border-left-color: var(--type-reject-fg); }
+  .cc-v2-a .cc-body { padding: 12px 14px 0 14px; }
+  .cc-v2-a textarea {
+    display: block;
+    width: 100%;
+    min-height: 84px;
+    resize: none;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 12px 14px;
+    font-family: 'Monaspace Radon', ui-monospace, monospace;
+    font-size: 13.5px;
+    line-height: 1.7;
+    box-sizing: border-box;
+  }
+  .cc-v2-a .cc-foot {
+    display: flex; justify-content: flex-end;
+    padding: 10px 14px 14px 14px;
+  }
+  .cc-v2-a .cc-submit {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  /* ── Variant B — outside close, no header ──────────────── */
+  .cc-v2-b-wrap {
+    position: relative;
+    padding-right: 32px;  /* room for the floating × */
+  }
+  .cc-v2-b {
+    position: relative;
+    background: var(--type-comment-wash);
+    border-radius: 10px;
+    padding: 14px 16px 12px 16px;
+  }
+  .cc-v2-b[data-type="reject"] { background: var(--type-reject-wash); }
+  .cc-v2-b-tab {
+    position: absolute;
+    top: 0; left: 14px;
+    background: var(--type-comment-fg);
+    color: var(--accent-fg);
+    font-family: 'Monaspace Radon', ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 3px 10px;
+    border-radius: 4px 4px 0 0;
+    line-height: 1;
+  }
+  .cc-v2-b-wrap[data-type="reject"] .cc-v2-b-tab { background: var(--type-reject-fg); }
+  .cc-v2-b-close {
+    position: absolute;
+    top: 6px; right: 0;
+    width: 24px; height: 24px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px; line-height: 1;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .cc-v2-b-close:hover { background: var(--surface); color: var(--text-strong); }
+  .cc-v2-b .cc-quote {
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--text-dim);
+    padding-left: 8px;
+    margin: 0 0 10px 0;
+    border-left: 2px solid var(--type-comment-fg);
+  }
+  .cc-v2-b[data-type="reject"] .cc-quote { border-left-color: var(--type-reject-fg); }
+  .cc-v2-b textarea {
+    display: block; width: 100%;
+    min-height: 84px; resize: none;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 12px 14px;
+    font-family: 'Monaspace Radon', ui-monospace, monospace;
+    font-size: 13.5px; line-height: 1.7;
+    box-sizing: border-box;
+  }
+  .cc-v2-b .cc-foot {
+    display: flex; justify-content: flex-end;
+    margin-top: 10px;
+  }
+  .cc-v2-b .cc-submit {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  /* ── Variant C — footer-only controls, accent bar ─────── */
+  .cc-v2-c {
+    position: relative;
+    background: var(--type-comment-wash);
+    border-radius: 10px;
+    padding: 14px 16px 12px 18px;
+    border-left: 3px solid var(--type-comment-fg);
+  }
+  .cc-v2-c[data-type="reject"] {
+    background: var(--type-reject-wash);
+    border-left-color: var(--type-reject-fg);
+  }
+  .cc-v2-c .cc-quote {
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--text-dim);
+    padding-left: 8px;
+    margin: 0 0 10px 0;
+    border-left: 2px solid color-mix(in srgb, var(--text-dim) 35%, transparent);
+  }
+  .cc-v2-c textarea {
+    display: block; width: 100%;
+    min-height: 88px; resize: none;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 12px 14px;
+    font-family: 'Monaspace Radon', ui-monospace, monospace;
+    font-size: 13.5px; line-height: 1.7;
+    box-sizing: border-box;
+  }
+  .cc-v2-c .cc-foot {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+    gap: 10px;
+  }
+  .cc-v2-c .cc-foot .cc-type-label {
+    font-family: 'Monaspace Radon', ui-monospace, monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--type-comment-fg);
+  }
+  .cc-v2-c[data-type="reject"] .cc-type-label { color: var(--type-reject-fg); }
+  .cc-v2-c .cc-foot .cc-grow { flex: 1; }
+  .cc-v2-c .cc-cancel {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .cc-v2-c .cc-cancel:hover { color: var(--text-strong); border-color: var(--text-dim); }
+  .cc-v2-c .cc-submit {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    padding: 7px 18px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+</style>
+
+<section class="gallery-section" style="margin-top: 8px;" id="mockups">
+  <div class="gallery-divider" style="margin-left: 56px; margin-right: 56px;">Redesign mockups — three directions for the new comment card</div>
+
+  <div class="mockup-row">
+    <!-- Variant A -->
+    <div class="mockup-cell">
+      <h4>Variant A — header bar</h4>
+      <div class="cc-v2-a" data-type="comment">
+        <div class="cc-head">
+          <span class="cc-chip"><span class="dot"></span>comment</span>
+          <span class="cc-spacer"></span>
+          <button class="cc-close" type="button" aria-label="Remove">×</button>
+        </div>
+        <div class="cc-quote">…both bugs (wholesale rewrites inflating versions, and byte-level churn inflating versions) die at the source…</div>
+        <div class="cc-body">
+          <textarea placeholder="Add a comment…">Can we make the hash inspect HTML attribute order too?</textarea>
+        </div>
+        <div class="cc-foot">
+          <button class="cc-submit" type="button">Submit</button>
+        </div>
+      </div>
+      <div class="cc-v2-a" data-type="reject" style="margin-top: 16px;">
+        <div class="cc-head">
+          <span class="cc-chip"><span class="dot"></span>reject</span>
+          <span class="cc-spacer"></span>
+          <button class="cc-close" type="button" aria-label="Remove">×</button>
+        </div>
+        <div class="cc-body" style="padding-top: 14px;">
+          <textarea placeholder="Tell me what's wrong…">This conflates rendering and storage — they should stay split.</textarea>
+        </div>
+        <div class="cc-foot">
+          <button class="cc-submit" type="button">Submit</button>
+        </div>
+      </div>
+      <p class="desc"><strong>Type chip on a header bar.</strong> × lives in its own row, never near the textarea. Quote sits indented below the bar. Most visually structured of the three; reads like a small dialog.</p>
+    </div>
+
+    <!-- Variant B -->
+    <div class="mockup-cell">
+      <h4>Variant B — outside close, no header (chosen)</h4>
+      <div class="cc-v2-b-wrap" data-type="comment">
+        <button class="cc-v2-b-close" type="button" aria-label="Remove">×</button>
+        <div class="cc-v2-b" data-type="comment">
+          <div class="cc-quote">…both bugs (wholesale rewrites inflating versions, and byte-level churn inflating versions) die at the source…</div>
+          <textarea placeholder="Add a comment…">Can we make the hash inspect HTML attribute order too?</textarea>
+          <div class="cc-foot">
+            <button class="cc-submit" type="button">Submit</button>
+          </div>
+        </div>
+      </div>
+      <div class="cc-v2-b-wrap" data-type="reject" style="margin-top: 16px;">
+        <button class="cc-v2-b-close" type="button" aria-label="Remove">×</button>
+        <div class="cc-v2-b" data-type="reject">
+          <textarea placeholder="Tell me what's wrong…">This conflates rendering and storage — they should stay split.</textarea>
+          <div class="cc-foot">
+            <button class="cc-submit" type="button">Submit</button>
+          </div>
+        </div>
+      </div>
+      <p class="desc"><strong>Close in the gutter, no header chrome.</strong> × moves entirely outside the card into the right margin. Type is signaled by the existing background wash (comment-wash / reject-wash) and the quote's coloured left border. Card interior is just quote + textarea + submit.</p>
+    </div>
+
+    <!-- Variant C -->
+    <div class="mockup-cell">
+      <h4>Variant C — accent rail + footer-only controls (recommended)</h4>
+      <div class="cc-v2-c" data-type="comment">
+        <div class="cc-quote">…both bugs (wholesale rewrites inflating versions, and byte-level churn inflating versions) die at the source…</div>
+        <textarea placeholder="Add a comment…">Can we make the hash inspect HTML attribute order too?</textarea>
+        <div class="cc-foot">
+          <span class="cc-type-label">comment</span>
+          <span class="cc-grow"></span>
+          <button class="cc-cancel" type="button">Cancel</button>
+          <button class="cc-submit" type="button">Submit</button>
+        </div>
+      </div>
+      <div class="cc-v2-c" data-type="reject" style="margin-top: 16px;">
+        <textarea placeholder="Tell me what's wrong…">This conflates rendering and storage — they should stay split.</textarea>
+        <div class="cc-foot">
+          <span class="cc-type-label">reject</span>
+          <span class="cc-grow"></span>
+          <button class="cc-cancel" type="button">Cancel</button>
+          <button class="cc-submit" type="button">Submit</button>
+        </div>
+      </div>
+      <p class="desc"><strong>Accent rail + footer controls.</strong> Type signaled by a 3px coloured rail on the left + a small label in the footer. The × becomes a proper "Cancel" button next to Submit — where the eye expects actions. Textarea is genuinely unobstructed. Quote optional, sits at the top with neutral border.</p>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

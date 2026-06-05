@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -eu
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "Installing shims from $SCRIPT_DIR ..."
+
+# Warn if a shim about to be overwritten was already dangling. Usually this
+# means the repo was moved without re-running this script, so the previous
+# target no longer exists. ln -sf would silently fix it — printing the prior
+# bad target makes the drift visible instead of hiding it.
+relink() {
+  local src="$1"
+  local dst="$2"
+  if [ -L "$dst" ] && [ ! -e "$dst" ]; then
+    echo "  ⚠ was dangling: $dst -> $(readlink "$dst")"
+  fi
+  ln -sf "$src" "$dst"
+  echo "  Linked $dst -> $src"
+}
+
+# 1. Ensure ~/.claude exists
+mkdir -p "$HOME/.claude"
+
+# 2. Symlink global CLAUDE.md
+relink "$SCRIPT_DIR/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+
+# 3. Symlink output styles
+mkdir -p "$HOME/.claude/output-styles"
+for style in "$SCRIPT_DIR"/output-styles/*.md; do
+  [ -e "$style" ] || continue
+  name="$(basename "$style")"
+  relink "$style" "$HOME/.claude/output-styles/$name"
+done
+
+# 3b. Symlink statusline
+relink "$SCRIPT_DIR/statusline.sh" "$HOME/.claude/statusline.sh"
+
+# 4. Remove stale skill symlinks that pointed into env/shims/claude/.
+#    Real files or symlinks pointing elsewhere are left alone.
+SKILLS_DIR="$HOME/.claude/skills"
+ENV_CLAUDE_PREFIX="$HOME/projects/env/shims/claude/"
+removed_any=0
+for name in clean refine-prompt humanize; do
+  link="$SKILLS_DIR/$name"
+  if [ -L "$link" ]; then
+    target="$(readlink "$link")"
+    case "$target" in
+      "$ENV_CLAUDE_PREFIX"*)
+        rm -f "$link"
+        echo "  Removed stale symlink ~/.claude/skills/$name (was -> $target)"
+        removed_any=1
+        ;;
+    esac
+  fi
+done
+if [ "$removed_any" = "0" ]; then
+  echo "  No stale skill symlinks to clean up."
+fi
+
+echo "Done."

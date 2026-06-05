@@ -1,0 +1,742 @@
+/* Annotate skill — response typography and block-level annotation UI.
+   Skill-agnostic tokens, fonts, header, comment cards, etc. live in core.css. */
+
+/* Unify the page column. core.css ships a wide 1400px content-max for diff
+   views; the annotate reading column is narrower, so override the shared
+   tokens here. Header, general composer, prose, and footer all derive their
+   width and gutter from these, keeping every container the same width and
+   their content left-aligned. */
+:root {
+  --content-max: 1040px;
+  --content-gutter: 24px;
+}
+
+/* === Response content (prose) ======================================== */
+main.prose {
+  flex: 1;
+  padding: 26px var(--content-gutter) 80px var(--content-gutter);
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto;
+}
+main.prose h1 { color: var(--text-strong); margin-top: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.022em; }
+main.prose h2 { color: var(--text-strong); margin-top: 1.4em; font-size: 21px; font-weight: 700; letter-spacing: -0.022em; }
+main.prose h3 {
+  color: var(--accent);
+  margin-top: 1.6em;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+main.prose p, main.prose li, main.prose blockquote {
+  position: relative;
+  padding: 4px 140px 4px 6px;
+  border-radius: 3px;
+  transition: background-color 120ms ease;
+}
+main.prose h1, main.prose h2, main.prose h3,
+main.prose h4, main.prose h5, main.prose h6 {
+  padding-right: 140px;
+  transition: background-color 120ms ease;
+  border-radius: 3px;
+}
+main.prose [data-block-id]:hover { background: var(--hover-tint); }
+main.prose blockquote p:hover { background: transparent; }
+/* Diagram blocks own their hover + engaged-type styling in diagram.css —
+   suppress the prose-block tint and the engaged-type ::before bar here.
+   All four background states (idle/hover × engaged/un-engaged) are
+   explicitly transparented; otherwise the engaged-type :hover rules
+   further down still beat the plain idle override. */
+main.prose section.block[data-kind="sequence"],
+main.prose section.block[data-kind="sequence"]:hover,
+main.prose section.block[data-kind="sequence"][data-engaged-type],
+main.prose section.block[data-kind="sequence"][data-engaged-type]:hover {
+  background: transparent;
+}
+main.prose section.block[data-kind="sequence"]::before { display: none; }
+main.prose pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 12px 140px 12px 14px;
+  border-radius: 3px;
+  transition: background-color 120ms ease;
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13.5px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+/* Inline code only — must not match <code> inside <pre>. */
+main.prose :not(pre) > code {
+  background: var(--surface);
+  padding: 1px 6px; border-radius: 3px;
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+}
+main.prose pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  white-space: pre;
+  display: block;
+}
+main.prose blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 16px;
+  margin: 1em 0;
+  color: var(--text-dim);
+}
+main.prose blockquote p { margin: 0.4em 0; padding: 0; }
+main.prose blockquote p:hover { background: transparent; }
+main.prose hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+main.prose ul, main.prose ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+main.prose li > ul, main.prose li > ol {
+  margin: 0.25em 0;
+}
+main.prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+main.prose a:hover { filter: brightness(1.1); }
+main.prose table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95em;
+}
+main.prose th, main.prose td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+main.prose th {
+  background: var(--surface);
+  font-weight: 600;
+}
+
+/* === Block-level annotation containers =============================== */
+[data-block-id] { position: relative; }
+
+[data-block-id][data-engaged-type] {
+  padding-left: 12px;
+  margin-left: -12px;
+  border-radius: 0 4px 4px 0;
+}
+[data-block-id][data-engaged-type]::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 4px; bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+}
+[data-block-id][data-engaged-type="reject"]              { background: var(--type-reject-wash); }
+[data-block-id][data-engaged-type="reject"]::before      { background: var(--type-reject-fg); }
+[data-block-id][data-engaged-type="comment"]             { background: var(--type-comment-wash); }
+[data-block-id][data-engaged-type="comment"]::before     { background: var(--type-comment-fg); }
+
+[data-block-id][data-engaged-type="reject"]:hover   { background: color-mix(in srgb, var(--type-reject-wash) 55%, var(--hover-tint)); }
+[data-block-id][data-engaged-type="comment"]:hover  { background: color-mix(in srgb, var(--type-comment-wash) 55%, var(--hover-tint)); }
+
+/* === Hover action buttons ============================================ */
+.hover-actions {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+[data-block-id]:hover .hover-actions,
+.hover-actions:hover,
+.hover-actions[data-visible="1"] { opacity: 1; pointer-events: auto; }
+.hover-actions button {
+  width: 26px; height: 26px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+/* Line-icon glyphs: stroke follows the button's `color`, so each action's
+   hover color (accent / reject / dismiss-red) drives the icon too. */
+.hover-actions button svg {
+  width: 15px; height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hover-actions button[data-type="comment"]:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.hover-actions button[data-type="reject"]:hover {
+  color: var(--type-reject-fg);
+  border-color: var(--type-reject-fg);
+  border-style: solid;
+  background: color-mix(in srgb, var(--type-reject-fg) 10%, transparent);
+}
+
+@media (hover: none) {
+  .hover-actions { opacity: 0.4; pointer-events: auto; }
+  [data-block-id]:focus-within .hover-actions { opacity: 1; }
+}
+
+/* === General composer (page-level comment) =========================== */
+/* core.css insets the textarea 56px; bring it to the shared gutter so the
+   composer's editable box left-aligns with the cards below it. */
+.general-composer {
+  padding-left: var(--content-gutter);
+  padding-right: var(--content-gutter);
+}
+
+/* === Footer submit actions =========================================== */
+footer.actions {
+  position: sticky; bottom: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px max(var(--content-gutter), calc((100% - var(--content-max)) / 2 + var(--content-gutter)));
+  display: flex; align-items: center; gap: 12px;
+}
+.actions-spacer { flex: 1; }
+.comment-count {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+footer.actions button {
+  background: var(--accent); color: var(--accent-fg);
+  border: none; padding: 8px 16px; border-radius: 5px;
+  font-weight: 600; cursor: pointer; font-size: 14px;
+}
+footer.actions button:hover { filter: brightness(1.1); }
+footer.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+#submit-status { color: var(--text-dim); font-size: 13px; }
+#submit-status.ok { color: #86efac; }
+#submit-status.err { color: #fca5a5; }
+
+/* === Per-comment submit button ======================================= */
+.card-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+.card-submit-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.card-submit-hint kbd {
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.card-submit-btn {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  padding: 6px 14px;
+  border-radius: 5px;
+  font-weight: 600;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 140ms ease;
+}
+.card-submit-btn:hover { filter: brightness(1.1); }
+.card-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* === Voice dictation mic button ===================================== */
+.voice-mic-btn {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.voice-mic-btn:hover { border-color: var(--accent); }
+.voice-mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.voice-mic-btn.listening {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-soft));
+  border-color: var(--accent);
+  animation: voice-pulse 1.1s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+/* === Card layout ==================================================== */
+section.block.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 1px rgba(20, 24, 40, .04), 0 4px 14px rgba(20, 24, 40, .08), 0 12px 32px rgba(20, 24, 40, .05);
+  margin: 0 0 12px;
+  overflow: hidden;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  cursor: pointer;
+  user-select: none;
+}
+.card-head:hover { background: var(--hover-tint); }
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+  letter-spacing: -0.01em;
+}
+.card-head-spacer { flex: 1; }
+.card-body {
+  position: relative;
+  padding: 2px 18px 16px 18px;
+  border-top: 1px solid var(--border);
+}
+/* The card owns the surface; neutralize the prose-era per-block tint/bar so
+   the whole card doesn't change colour on hover or when engaged. */
+main.prose section.block.card:hover { background: var(--surface); }
+section.block.card[data-engaged-type] { background: var(--surface); }
+section.block.card[data-engaged-type]::before { display: none; }
+/* Engaged state shows as a left accent bar on the card body instead. */
+.card-body { border-left: 3px solid transparent; }
+section.block.card[data-engaged-type="comment"] .card-body { border-left-color: var(--type-comment-fg); }
+section.block.card[data-engaged-type="reject"]  .card-body { border-left-color: var(--type-reject-fg); }
+
+/* Inside a card the wide right gutter (old hover-action room) is gone; tighten
+   per-element padding so prose fills the card. Hover actions float top-right. */
+.card-body p,
+.card-body li,
+.card-body blockquote { padding-right: 12px; }
+.card-body h1, .card-body h2, .card-body h3,
+.card-body h4, .card-body h5, .card-body h6 { padding-right: 12px; }
+.card-body pre { padding-right: 14px; }
+.card-body > .block-content > :first-child { margin-top: 8px; }
+
+/* === Block updating overlay ========================================= */
+section.block {
+  position: relative;
+}
+
+/* Dim + disable the underlying content while a rewrite is in flight. */
+section.block.is-updating > *:not(.updating-overlay) {
+  opacity: 0.42;
+  filter: saturate(0.7);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 180ms ease;
+}
+
+/* Suppress the floating hover-actions (✗ / 💬) for the block being rewritten. */
+section.block.is-updating .hover-actions {
+  display: none !important;
+}
+
+/* Warm tinted veil covering the block content, sits below the pill. */
+.updating-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(253, 243, 234, 0.55);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Centered pill: spinner + label + elapsed timer. */
+.updating-overlay .updating-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: #8a4d1e;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.06),
+    0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 2;
+}
+
+.updating-overlay .updating-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: updating-spin 0.85s linear infinite;
+}
+
+.updating-overlay .updating-timer {
+  color: color-mix(in srgb, var(--accent) 85%, #000);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+@keyframes updating-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* === Card collapse ================================================== */
+section.block.card.collapsed .card-body { display: none; }
+/* Collapsed cards are header-only; tint that bar gray so it reads as a
+   distinct, closed section against the white expanded cards. */
+section.block.card.collapsed .card-head { background: var(--surface-soft); }
+section.block.card.collapsed .card-head:hover { background: var(--surface-hover); }
+.card-chevron {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  width: 14px;
+  text-align: center;
+  flex: none;
+  transition: color 120ms ease;
+}
+.card-head:hover .card-chevron { color: var(--text-strong); }
+
+/* === Section · version pill ==========================================
+   Composite chip in the card header. Left segment = section number, right
+   segment = version. The version half lights up accent only once the block
+   has been rewritten (v > 1). */
+.section-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: stretch;
+  height: 18px;
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  user-select: none;
+}
+.section-pill .sp-sec,
+.section-pill .sp-ver {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+.section-pill .sp-sec { color: var(--text); }
+.section-pill .sp-ver { border-left: 1px solid var(--border); }
+.section-pill.bumped .sp-ver {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* ── Choice blocks ──────────────────────────────────────────────────────── */
+.choice-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.choice-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.choice-option:hover {
+  border-color: var(--accent);
+  background: var(--surface-soft);
+}
+.choice-option input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+  flex: none;
+}
+.choice-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.choice-option-label {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+.choice-option-desc {
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+.choice-submit-btn {
+  align-self: flex-start;
+  padding: 0.45rem 1rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.choice-submit-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* === Block search ===================================================== */
+.header-search {
+  position: relative;
+  width: 220px;
+}
+.header-search .search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 13px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.search-input {
+  width: 100%;
+  padding: 5px 28px 5px 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+.search-input::placeholder { color: var(--text-dim); }
+.search-kbd {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: 'Monaspace Radon', ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+/* Hide the kbd hint once the user is typing (input has focus). */
+.search-input:focus + .search-kbd { opacity: 0; }
+
+/* Clear (×) button — occupies the same right slot as the kbd hint, shown only
+   while there's a query. The wrapper gets .has-query from search.js. */
+.search-clear {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.search-clear:hover { background: var(--surface-hover); color: var(--text-strong); }
+.header-search.has-query .search-clear { display: inline-flex; }
+.header-search.has-query .search-kbd { display: none; }
+
+.search-hidden { display: none !important; }
+
+.search-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 6px 14px;
+}
+
+main.prose mark.search-hit {
+  background: var(--highlight);
+  color: var(--text-strong);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ── Statusline strip ─────────────────────────────────────────────────────
+   A thin row under the header mirroring the terminal statusline: live context
+   usage, model, rate limits, diff, cost. Populated by script.js from
+   /statusline; stays [hidden] until there's data so the page degrades cleanly
+   when no snapshot exists. */
+.statstrip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 7px max(var(--content-gutter), calc((100% - var(--content-max)) / 2 + var(--content-gutter)));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text);
+}
+.statstrip[hidden] { display: none; }
+.statstrip .sl-spacer { flex: 1 1 auto; }
+.statstrip .sl-seg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.statstrip .sl-lbl { color: var(--text-dim); font-weight: 500; }
+.statstrip .sl-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.statstrip .sl-sub {
+  color: var(--text-dim);
+  font-family: 'Monaspace Radon', ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+}
+.statstrip .sl-model { color: #7c3aed; font-weight: 700; }
+.statstrip .sl-badge {
+  font-family: 'Monaspace Radon', ui-monospace, Menlo, monospace;
+  font-weight: 700;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #7c3aed;
+  background: color-mix(in srgb, #7c3aed 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, #7c3aed 35%, var(--border));
+}
+.statstrip .sl-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+/* Context meter — a slim bar whose fill width is set inline by the client. */
+.statstrip .sl-bar {
+  width: 54px; height: 5px; border-radius: 3px;
+  background: color-mix(in srgb, var(--text-dim) 25%, transparent);
+  overflow: hidden;
+}
+.statstrip .sl-bar > i { display: block; height: 100%; border-radius: 3px; background: currentColor; }
+.statstrip .sl-add { color: #2e9e5b; font-family: 'Monaspace Radon', ui-monospace, Menlo, monospace; }
+.statstrip .sl-del { color: #c1432f; font-family: 'Monaspace Radon', ui-monospace, Menlo, monospace; }
+/* Pressure tones, applied to the whole segment so dot/bar/value share a color. */
+.statstrip .tone-ok   { color: #2e9e5b; }
+.statstrip .tone-warn { color: #c98a14; }
+.statstrip .tone-hot  { color: #c1432f; }
+
+/* ── Dismiss affordance ───────────────────────────────────────────────── */
+.hover-actions button[data-type="dismiss"] {
+  color: var(--text-dim);
+}
+.hover-actions button[data-type="dismiss"]:hover {
+  color: #c1432f; /* matches the diagram error-pill red used elsewhere */
+}
+
+/* ── Page-wide single-flight lock ─────────────────────────────────────── */
+/* BUSY: an event is in flight. EDITING: one comment card is open. In both,
+   every affordance that can submit to Claude is disabled. Passive reading,
+   scrolling, and block search stay live (they are not gated here). */
+.busy-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  /* Lock ribbon: pinned flush to the top of the screen while the page is
+     locked, so it stays visible no matter how far the user scrolls. */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--text);
+  font-size: 14px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.busy-banner .busy-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: busy-spin 0.8s linear infinite;
+  flex: none;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+body.is-busy .hover-actions,
+body.is-busy .general-composer,
+body.is-busy .choice-submit-btn,
+body.is-busy .card-submit-btn,
+body.is-editing .hover-actions {
+  pointer-events: none;
+  opacity: 0.4;
+}
+/* The currently-open editor stays usable while EDITING (only OTHER
+   affordances are frozen); BUSY freezes everything including open cards. */
+body.is-busy .comment-card {
+  pointer-events: none;
+  opacity: 0.5;
+}

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Annotate skill — token cost</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#0a0a0a; --ink-soft:#1f1f1f; --muted:#5c5c5c;
+    --line:#e3e2dd; --rule:#0a0a0a;
+    --win:#1f6f4a; --win-bg:#eaf3ee; --win-bd:#bcdcc9;
+    --lose:#b8442a; --lose-bg:#f8ebe6; --lose-bd:#eccabd;
+    --chip:#f5f4f0; --chip-bd:#e0dfd8;
+    --shadow:0 1px 2px rgba(10,10,10,.05), 0 4px 14px rgba(10,10,10,.06);
+    --shadow-sm:0 1px 2px rgba(10,10,10,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+    font-size:15.5px;line-height:1.58}
+  .wrap{max-width:740px;margin:0 auto;padding:56px 30px 88px}
+
+  .eyebrow{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--ink);background:#fff;
+    border:1.5px solid var(--ink);border-radius:999px;padding:4px 12px;
+    box-shadow:var(--shadow-sm);margin-bottom:18px}
+  h1{font-size:31px;line-height:1.12;font-weight:800;letter-spacing:-.022em;margin:0 0 12px}
+  .lede{color:var(--muted);font-size:16px;margin:0;max-width:60ch}
+
+  h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);margin:48px 0 16px;display:flex;align-items:center;gap:12px}
+  h2::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  p{margin:0 0 13px}
+  code{background:var(--chip);border:1px solid var(--chip-bd);padding:.5px 5px;border-radius:5px;
+    font-family:"SF Mono",Menlo,monospace;font-size:12.5px}
+
+  /* pills */
+  .pill{display:inline-flex;align-items:center;font-size:11px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.04em;padding:3px 10px;border-radius:999px;
+    box-shadow:var(--shadow-sm);white-space:nowrap}
+  .pill.win{color:var(--win);background:var(--win-bg);border:1px solid var(--win-bd)}
+  .pill.lose{color:var(--lose);background:var(--lose-bg);border:1px solid var(--lose-bd)}
+  .tag{display:inline-block;font-weight:700;border-radius:6px;padding:0 6px;font-size:.92em}
+  .tag.win{color:var(--win);background:var(--win-bg);border:1px solid var(--win-bd)}
+  .tag.lose{color:var(--lose);background:var(--lose-bg);border:1px solid var(--lose-bd)}
+  .chip{font-family:"SF Mono",Menlo,monospace;font-size:12px;background:var(--chip);
+    border:1px solid var(--chip-bd);border-radius:6px;padding:2px 7px;white-space:nowrap;
+    box-shadow:var(--shadow-sm)}
+
+  /* TL;DR */
+  .tldr{background:#fff;border:1.5px solid var(--ink);border-radius:14px;
+    box-shadow:var(--shadow);padding:24px 26px;margin-bottom:8px}
+  .tldr-h{font-size:18px;font-weight:600;line-height:1.42;margin:0 0 16px;letter-spacing:-.01em}
+  .tldr ul{margin:0;padding:0;list-style:none}
+  .tldr li{position:relative;padding:11px 0 11px 22px;font-size:14.5px;
+    border-top:1px solid var(--line)}
+  .tldr li:first-child{border-top:none}
+  .tldr li::before{content:"";position:absolute;left:2px;top:18px;width:7px;height:7px;
+    border-radius:50%;background:var(--ink)}
+
+  /* table card */
+  .table-card{border:1.5px solid var(--ink);border-radius:14px;overflow:hidden;
+    box-shadow:var(--shadow);margin:6px 0 14px}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  thead th{background:var(--ink);color:#fff;text-align:left;font-weight:600;
+    font-size:11px;text-transform:uppercase;letter-spacing:.07em;padding:11px 16px}
+  thead th.r{text-align:right}
+  tbody td{padding:12px 16px;border-top:1px solid var(--line);vertical-align:top}
+  tbody tr:nth-child(even){background:#faf9f6}
+  td.r{text-align:right}
+  .note{color:var(--muted);font-size:13px;margin-top:2px}
+
+  /* regimes */
+  .regime{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:4px 0}
+  .rcard{background:#fff;border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);padding:18px 20px;transition:transform .12s ease,box-shadow .12s ease}
+  .rcard:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(10,10,10,.06),0 10px 26px rgba(10,10,10,.10)}
+  .rhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .rhead h3{margin:0;font-size:15.5px;font-weight:700}
+  .rcard p{margin:0;font-size:13.5px;color:var(--muted)}
+
+  ul.caveats{margin:6px 0;padding:0;list-style:none}
+  ul.caveats li{position:relative;padding:9px 0 9px 22px;font-size:14.5px;border-top:1px solid var(--line)}
+  ul.caveats li:first-child{border-top:none}
+  ul.caveats li::before{content:"";position:absolute;left:3px;top:16px;width:6px;height:6px;
+    border:1.5px solid var(--ink);border-radius:50%}
+
+  .foot{color:var(--muted);font-size:12.5px;margin-top:30px;padding-top:16px;border-top:1px solid var(--line)}
+  @media(max-width:600px){.regime{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="eyebrow">Token-cost analysis</span>
+  <h1>Does the annotate skill cost more tokens than vanilla Claude Code?</h1>
+  <p class="lede">Short answer: it depends on whether you iterate. One-shot = more. Back-and-forth = less.</p>
+
+  <div class="tldr">
+    <p class="tldr-h">There is no single number. Annotate's cost flips on <strong>how many times you interact with a response.</strong></p>
+    <ul>
+      <li><strong>One-shot response</strong> (read it, move on) — <span class="tag lose">~30–60% more</span> &nbsp;You pay setup + JSON wrapping with nothing to amortize them against.</li>
+      <li><strong>Iterative session</strong> (comment → revise → repeat) — <span class="tag win">cheaper, and it compounds</span> &nbsp;Break-even ≈ 4–8 comments; ~50% cheaper by 15+.</li>
+      <li><strong>One fixed tax</strong> — the first time annotate triggers per session it loads its <code>SKILL.md</code> (<span class="chip">~7.4k tokens</span>) into context. Paid once, then cached.</li>
+    </ul>
+  </div>
+
+  <h2>Where the tokens go</h2>
+  <div class="table-card">
+    <table>
+      <thead><tr><th>Cost</th><th>Paid when</th><th class="r">Size</th></tr></thead>
+      <tbody>
+        <tr><td>Skill definition loads into context</td><td>Once per session, on first trigger</td><td class="r"><span class="chip">~7,400 in</span></td></tr>
+        <tr><td>Per-push setup — server, session, 2 JSON files, watcher</td><td>Each response pushed</td><td class="r"><span class="chip">~430 in / 1,035 out</span></td></tr>
+        <tr><td>JSON wrapping of your prose</td><td>Each push</td><td class="r"><span class="chip">content × ~1.12</span></td></tr>
+        <tr><td><strong>Per comment</strong> — notification + <strong>full re-read of <code>blocks.json</code></strong> + rewrite one block</td><td>Each click in browser</td><td class="r"><span class="chip">~280 in + doc + ~300 out</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">The re-read is the dominant input cost: the server has no block-update endpoint, so every comment pulls the <em>whole</em> document back into context. Prompt caching makes this cheap <strong>only if you click within ~5&nbsp;min</strong> (cache TTL).</p>
+
+  <h2>The two regimes</h2>
+  <div class="regime">
+    <div class="rcard">
+      <div class="rhead"><h3>One-shot</h3><span class="pill lose">Vanilla wins</span></div>
+      <p>Vanilla just emits text and stops. Annotate adds fixed setup + wrapping with no interactions to spread it over. ~30–60% more.</p>
+    </div>
+    <div class="rcard">
+      <div class="rhead"><h3>Iterative</h3><span class="pill win">Annotate wins</span></div>
+      <p>A click is an unambiguous reference. Terminal iteration re-emits context, re-prints state, and pays a “which paragraph?” tax. Annotate's per-edit cost stays flat.</p>
+    </div>
+  </div>
+  <p style="margin-top:15px">The win isn't the browser UI — it's <strong>per-edit compactness</strong>. Editing one block sends one block's diff; a terminal turn that “responds clearly” repeats surrounding context, and users ask for full re-prints to see current state. Annotate moves that state into the browser, so the re-emission tax disappears. Diagrams amplify the win: the SVG renders client-side and never enters context.</p>
+
+  <h2>Caveats to state honestly</h2>
+  <ul class="caveats">
+    <li><strong>Cache-dependent.</strong> Slow reader (&gt;5&nbsp;min between clicks) → the <code>blocks.json</code> re-read is billed at full price, roughly tripling per-comment input and pushing break-even out to ~12 comments. Annotate still wins on long sessions.</li>
+    <li><strong>Estimates ±20%.</strong> Actual cost varies with model verbosity and conversation history.</li>
+  </ul>
+
+  <p class="foot">Token figures are model-independent; billable comparisons assume Opus-class pricing where output ≈ 5× input (billable ≈ output×5 + input). Cache reads bill at ~10% of input. Figures derived from <code>skills/annotate/SKILL.md</code> and <code>server.py</code>.</p>
+
+</div>
+</body>
+</html>

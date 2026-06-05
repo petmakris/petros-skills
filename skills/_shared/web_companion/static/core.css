@@ -1,0 +1,551 @@
+/* web_companion shared core — skill-agnostic tokens, typography, shell UI */
+
+@font-face {
+  font-family: 'Monaspace Radon';
+  src: url('/static/fonts/MonaspaceRadon-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  src: url('/static/fonts/BricolageGrotesque-Variable.woff2') format('woff2-variations'),
+       url('/static/fonts/BricolageGrotesque-Variable.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --content-max: 1400px;
+  --content-gutter: 22px;
+
+  /* Graphite — deeper cool-neutral page so off-white cards lift with shadow,
+     darkened text for contrast, Apple-blue accent. Depth comes from the
+     bg/surface gap + card shadow, not heavier borders. */
+  --bg: #e4e7ed;
+  --surface: #f8f9fb;
+  --surface-soft: #eef0f4;
+  --border: #d4d8e0;
+  --surface-hover: #e4e7ed;
+  --text: #3a3d44;
+  --text-strong: #1d1d1f;
+  --text-dim: #83868f;
+  --accent: #0071e3;
+  --accent-fg: #ffffff;
+  --comment-bg: #eef0f4;
+  --highlight: #fde68a;
+  --selection: rgba(0, 113, 227, 0.18);
+  --hover-tint: #eceff4;
+
+  --type-reject-fg: #b91c1c;
+  --type-reject-bg: #ffe0e0;
+  --type-reject-wash: rgba(239, 68, 68, 0.06);
+  --type-comment-fg: #1e40af;
+  --type-comment-bg: #dbeafe;
+  --type-comment-wash: rgba(59, 130, 246, 0.06);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 15.5px;
+  line-height: 1.6;
+  letter-spacing: -0.003em;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+::selection { background: var(--selection); color: var(--text); }
+
+/* === Page header ====================================================== */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px max(var(--content-gutter), calc((100% - var(--content-max)) / 2 + var(--content-gutter)));
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--border);
+}
+.header-title {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 13px; font-weight: 600;
+  color: var(--text);
+}
+.header-emoji { font-size: 14px; }
+.header-respid {
+  font-family: 'Monaspace Radon', ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.header-actions { display: flex; gap: 4px; }
+
+/* === Done button ====================================================== */
+.done-btn {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.done-btn:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.done-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* === Updating indicator =============================================== */
+.updating-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* === Waiting / closed page =========================================== */
+.waiting { padding: 80px 48px; color: var(--text-dim); font-size: 16px; }
+
+/* === Cancel button =================================================== */
+.cancel-btn {
+  background: transparent;
+  color: var(--text-dim, #777);
+  border: 1px solid transparent;
+  margin-left: 8px;
+  cursor: pointer;
+}
+.cancel-btn:hover { color: #c00; border-color: #c00; }
+.cancel-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* === General composer (page-level comment) =========================== */
+.general-composer {
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto 8px auto;
+  padding: 16px 56px 0 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.general-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.general-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.general-input::placeholder { color: var(--text-dim); }
+.general-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.general-status {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.general-send-btn {
+  padding: 7px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+.general-send-btn:disabled { opacity: 0.4; cursor: default; }
+.general-send-btn:not(:disabled):hover { opacity: 0.88; }
+
+/* === Comment cards =================================================== */
+.inline-comments {
+  margin: 6px 0 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comment-card {
+  position: relative;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--surface-soft);
+}
+.comment-card[data-type="reject"]   { background: var(--type-reject-wash); }
+.comment-card[data-type="comment"]  { background: var(--type-comment-wash); }
+/* Close lives in the right gutter, outside the card body, so it can
+   never overlap the textarea. The card itself remains positioning
+   context (.comment-card { position: relative }). */
+.card-close {
+  position: absolute;
+  top: 6px;
+  right: -32px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.card-close:hover {
+  background: var(--surface);
+  color: var(--text-strong);
+}
+.card-close[data-type="reject"]:hover {
+  background: color-mix(in srgb, var(--type-reject-fg) 16%, transparent);
+  color: var(--type-reject-fg);
+  border-color: color-mix(in srgb, var(--type-reject-fg) 30%, transparent);
+}
+.card-close[data-type="comment"]:hover {
+  background: color-mix(in srgb, var(--type-comment-fg) 16%, transparent);
+  color: var(--type-comment-fg);
+  border-color: color-mix(in srgb, var(--type-comment-fg) 30%, transparent);
+}
+.comment-card .quote {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-dim);
+  padding-left: 8px;
+  margin-bottom: 8px;
+  border-left: 2px solid var(--border);
+}
+.comment-card .quote[data-type="reject"]   { border-left-color: var(--type-reject-fg); }
+.comment-card .quote[data-type="comment"]  { border-left-color: var(--type-comment-fg); }
+
+/* Step header — names the diagram row / sub-unit a comment targets, so a
+   stack of cards below a diagram is never ambiguous about which row is which. */
+.card-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.card-step-chip {
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent-fg);
+  background: var(--accent);
+  padding: 1px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.card-step-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+/* Ring the card while it's focused, to pair with its highlighted row. */
+.comment-card:focus-within {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* === Textarea / editor wrap ========================================== */
+.editor-wrap {
+  position: relative;
+}
+.comment-card textarea {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  resize: none;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  letter-spacing: -0.003em;
+  caret-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.02);
+  transition: border-color 120ms ease, box-shadow 160ms ease, background 160ms ease;
+  overflow-y: auto;
+}
+.comment-card textarea::placeholder {
+  color: var(--text-dim);
+  font-style: normal;
+}
+.comment-card textarea:hover {
+  border-color: color-mix(in srgb, var(--border) 50%, var(--text-dim));
+}
+.comment-card textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent),
+    inset 0 1px 0 rgba(0, 0, 0, 0.02);
+  background: var(--bg);
+}
+
+/* Custom resize handle */
+.editor-resize {
+  position: absolute;
+  left: 50%;
+  bottom: -3px;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 10px;
+  border-radius: 5px;
+  cursor: ns-resize;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease;
+  touch-action: none;
+}
+.editor-resize::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 22px;
+  height: 2px;
+  border-top: 2px solid color-mix(in srgb, var(--text-dim) 70%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--text-dim) 70%, transparent);
+  height: 6px;
+}
+.editor-wrap:hover .editor-resize,
+.editor-wrap:focus-within .editor-resize {
+  opacity: 1;
+}
+.editor-resize:hover {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* === Paste strip (image attachments) ================================= */
+.paste-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: flex-start;
+}
+.paste-strip[data-empty="1"] { display: none; }
+
+.paste-thumb {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: flex-end;
+  justify-content: stretch;
+  flex-direction: column;
+}
+.paste-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.paste-thumb.no-thumb::before {
+  content: "🖼";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--text-dim);
+}
+.paste-label {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  line-height: 1;
+  text-align: center;
+  padding: 2px 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.paste-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.paste-thumb:hover .paste-remove { display: inline-flex; }
+.paste-remove:hover { background: rgba(0, 0, 0, 0.75); }
+
+.paste-error {
+  align-self: center;
+  font-size: 12px;
+  color: var(--type-reject-fg);
+  background: var(--type-reject-wash);
+  border: 1px solid var(--type-reject-bg);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+/* === Toast ============================================================ */
+.toast {
+  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); padding: 10px 16px; border-radius: 6px;
+  font-size: 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+/* === First-time toast ================================================ */
+.first-time-toast {
+  position: fixed;
+  bottom: 84px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  max-width: 420px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  z-index: 9999;
+}
+.first-time-toast .kbd {
+  display: inline-block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+  margin: 0 1px;
+}
+.first-time-toast .dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.first-time-toast .dismiss:hover { color: var(--text); }
+
+/* === Locked overlay ================================================== */
+.locked-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(20, 22, 28, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: locked-fade-in 180ms ease;
+}
+@keyframes locked-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.locked-card {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 26px 28px 22px 28px;
+  max-width: 360px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+}
+.locked-icon {
+  font-size: 32px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.locked-icon[data-kind="submitted"] { color: #10b981; }
+.locked-icon[data-kind="stale"]     { color: #f59e0b; }
+.locked-icon[data-kind="cancelled"] { color: var(--text-dim); }
+.locked-title {
+  margin: 0 0 6px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.locked-message {
+  margin: 0 0 18px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.locked-action {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+.locked-action:hover { filter: brightness(1.1); }

@@ -1,0 +1,14 @@
+{
+  "name": "petros-skills",
+  "owner": {
+    "name": "Petros Makris"
+  },
+  "plugins": [
+    {
+      "name": "petros-skills",
+      "version": "0.1.0",
+      "source": "./",
+      "description": "Personal cross-project Claude Code skills and a sandbox for experimentation"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+/* sequence-diagram block styling — light theme only */
+
+.annotate-seq { display: block; width: 100%; height: auto; }
+
+.annotate-seq .actor-pill   { fill: var(--surface-soft); stroke: var(--accent); stroke-width: 1.2; }
+.annotate-seq .actor-label  { fill: var(--text-strong); font-weight: 600; font-size: 11px;
+                              font-family: inherit; }
+/* Lifelines: --border (#ebeae5) is too pale on white. Use a damped --text-dim. */
+.annotate-seq .lane         { stroke: color-mix(in srgb, var(--text-dim) 45%, transparent);
+                              stroke-dasharray: 3 4; stroke-width: 1; }
+
+.annotate-seq .phase-band   { fill: var(--surface); }
+.annotate-seq .phase-label  { fill: var(--text-dim); font-size: 9px;
+                              letter-spacing: 1.4px; font-weight: 700; }
+
+.annotate-seq .arrow-label  { fill: var(--text-strong); font-size: 11px; font-weight: 500;
+                              font-family: inherit; transition: fill .12s; }
+.annotate-seq .arrow-sub    { fill: var(--text-dim); font-size: 9.5px; font-style: italic; }
+.annotate-seq .legend-text  { fill: var(--text-dim); font-size: 10px; }
+
+/* Arrow strokes — saturated enough to read on a light background. */
+.annotate-seq .arr-request { stroke: #6d28d9; stroke-width: 1.6; fill: none; transition: stroke-width .12s; }
+.annotate-seq .arr-event   { stroke: #b45309; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; transition: stroke-width .12s; }
+.annotate-seq .arr-self    { stroke: #047857; stroke-width: 1.5; fill: none; transition: stroke-width .12s; }
+
+/* Per-step hover discoverability: thicken the arrow and tint the label.
+   No horizontal row wash — that read as a banding artifact on the chart. */
+.annotate-seq .row-bg   { fill: transparent; cursor: pointer; }
+.annotate-seq .step-row { cursor: pointer; }
+.annotate-seq .step-row:hover .arr-request,
+.annotate-seq .step-row:hover .arr-event,
+.annotate-seq .step-row:hover .arr-self   { stroke-width: 2.4; }
+.annotate-seq .step-row:hover .arrow-label { fill: var(--accent); }
+
+/* Engaged-type state (post-click, you have a draft on this step) stays as a
+   subtle row wash — distinguishes drafted steps without the hover-band feel. */
+.annotate-seq .step-row[data-engaged-type="comment"] .row-bg { fill: color-mix(in srgb, var(--type-comment-fg) 10%, transparent); }
+.annotate-seq .step-row[data-engaged-type="reject"]  .row-bg { fill: color-mix(in srgb, var(--type-reject-fg) 9%, transparent); }
+
+/* Card ↔ row link: while a step's comment card is focused or hovered, its row
+   lights up accent so the pairing is unmistakable. */
+.annotate-seq .step-row[data-card-focus] .row-bg { fill: color-mix(in srgb, var(--accent) 15%, transparent); }
+.annotate-seq .step-row[data-card-focus] .arrow-label { fill: var(--accent); }
+.annotate-seq .step-row[data-card-focus] .arr-request,
+.annotate-seq .step-row[data-card-focus] .arr-event,
+.annotate-seq .step-row[data-card-focus] .arr-self { stroke-width: 2.4; }

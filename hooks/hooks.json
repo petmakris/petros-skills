@@ -1,0 +1,25 @@
+{
+  "description": "Hook bundle. auto-refine.sh on UserPromptSubmit — injects a system reminder telling Claude to evaluate every prompt against the refine-prompt skill's messiness heuristic, run the skill on messy prompts, skip on clean/short/mid-flow prompts, and treat the refined prompt as canonical after `go`. progress_publish.py on PostToolUse — publishes a coarse, sanitized live-progress label for the annotate web companion, outside the model loop (zero tokens).",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/auto-refine.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/annotate/hooks/progress_publish.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

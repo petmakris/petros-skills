@@ -1,0 +1,44 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Claude Code local state
+.claude/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# Visual companion / superpowers brainstorm sessions
+.superpowers/
+
+# Petros-skills runtime data (annotate server session dirs)
+.claude/annotate/
+
+# Misc
+*.log
+.tmp/
+
+# Git worktrees
+.worktrees/
+
+# Playwright dev screenshots
+diagram-*.png

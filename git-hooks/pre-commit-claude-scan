@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run Claude over the staged diff to catch private or
+# sensitive content before it lands in the public repo. Blocks on FAIL.
+#
+# Bypass once:   git commit --no-verify
+# Skip scanner:  SKIP_CLAUDE_SCAN=1 git commit ...
+
+set -u
+
+if [ "${SKIP_CLAUDE_SCAN:-}" = "1" ]; then
+  exit 0
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "[pre-commit-claude-scan] 'claude' CLI not found on PATH — skipping scan." >&2
+  exit 0
+fi
+
+diff="$(git diff --cached)"
+if [ -z "$diff" ]; then
+  exit 0
+fi
+
+# Hard cap on diff size (~200KB) to stay well under argv limits and to avoid
+# burning tokens on enormous commits. Bigger diffs skip scanning with a warning.
+if [ "${#diff}" -gt 200000 ]; then
+  echo "[pre-commit-claude-scan] staged diff is ${#diff} bytes (> 200KB) — skipping scan." >&2
+  echo "[pre-commit-claude-scan] review manually or split the commit." >&2
+  exit 0
+fi
+
+prompt=$(cat <<'PROMPT'
+You are a pre-commit security scanner for a PUBLIC open-source GitHub repository.
+
+A git diff of staged changes follows. Your job: detect anything the author
+might regret pushing to a public repo.
+
+FAIL on:
+- API keys, tokens, passwords, OAuth secrets, AWS access keys, GitHub PATs,
+  Anthropic API keys (sk-ant-*), JWT secrets, signing keys
+- Hardcoded user home paths like /Users/<someone>/ or /home/<someone>/
+- Personal email addresses appearing in code or config (treat author-name
+  emails in LICENSE / package.json author fields as fine; treat random
+  pasted emails as not fine)
+- Internal company URLs, private IP ranges (10.*, 192.168.*, 172.16-31.*),
+  internal hostnames (anything ending in .internal, .corp, .local)
+- Production credentials, database connection strings with embedded passwords
+- Pasted chat transcripts, brainstorm sessions, or log dumps that look like
+  someone's private working notes
+- TODO/FIXME mentioning a specific colleague by name
+
+PASS on:
+- Public URLs: github.com, anthropic.com, claude.com, fonts.googleapis.com,
+  w3.org, openai.com, npmjs.com, etc.
+- localhost / 127.0.0.1 in dev tooling that runs a local server
+- The author's name in plugin manifests, package.json author fields, LICENSE
+- Documentation referencing $HOME or ~ as placeholders
+- Test fixtures using example.com or fake@example.com
+
+Output EXACTLY one of:
+
+PASS
+
+or
+
+FAIL: <one-line reason>
+<file:line if locatable, one per line>
+
+No markdown, no preamble, no explanation. Just PASS, or FAIL with brief reason.
+
+--- STAGED DIFF ---
+PROMPT
+)
+
+result="$(claude -p "$prompt
+$diff" 2>/dev/null)" || {
+  echo "[pre-commit-claude-scan] claude CLI returned non-zero — allowing commit." >&2
+  echo "[pre-commit-claude-scan] (treat as scan unavailable; review changes manually)" >&2
+  exit 0
+}
+
+# Trim leading whitespace for matching
+trimmed="${result#"${result%%[![:space:]]*}"}"
+
+case "$trimmed" in
+  PASS|PASS[[:space:]]*)
+    exit 0
+    ;;
+  FAIL*)
+    echo "" >&2
+    echo "Pre-commit Claude scan FAILED:" >&2
+    echo "" >&2
+    printf '%s\n' "$result" | sed 's/^/   /' >&2
+    echo "" >&2
+    echo "If this is a false positive:  git commit --no-verify" >&2
+    echo "Disable scanner one-off:      SKIP_CLAUDE_SCAN=1 git commit ..." >&2
+    exit 1
+    ;;
+  *)
+    echo "[pre-commit-claude-scan] unexpected scanner output — allowing commit." >&2
+    echo "[pre-commit-claude-scan] raw output (first 10 lines):" >&2
+    printf '%s\n' "$result" | head -10 | sed 's/^/   /' >&2
+    exit 0
+    ;;
+esac
