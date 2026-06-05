@@ -9,6 +9,7 @@ from skills.annotate.diagrams.mermaid import (
     SUPPORTED_TYPES,
     validate,
     render,
+    _postprocess,
 )
 
 
@@ -83,3 +84,26 @@ def test_render_raises_on_invalid_mermaid_source():
             "source": "this is not valid mermaid @@@ ->"}
     with pytest.raises(RenderError):
         render(spec, block_id="section-4")
+
+
+def test_postprocess_strips_prolog_and_adds_class_when_none():
+    raw = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"><g/></svg>'
+    result = _postprocess(raw)
+    assert not result.lstrip().startswith("<?xml")
+    assert 'class="annotate-diagram"' in result
+    # exactly one class attribute on the root svg
+    assert result.count('class="') == 1
+
+
+def test_postprocess_appends_to_existing_class():
+    raw = '<svg class="mermaid" xmlns="http://www.w3.org/2000/svg"><g/></svg>'
+    result = _postprocess(raw)
+    # appended, not duplicated: still a single class attribute on the root svg
+    assert result.count('class="') == 1
+    assert "annotate-diagram" in result
+    assert "mermaid" in result
+
+
+def test_postprocess_idempotent_when_already_tagged():
+    raw = '<svg class="annotate-diagram mermaid" xmlns="http://www.w3.org/2000/svg"><g/></svg>'
+    assert _postprocess(raw) == raw

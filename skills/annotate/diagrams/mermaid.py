@@ -83,8 +83,14 @@ _XML_PROLOG = re.compile(r"^\s*<\?xml[^>]*\?>\s*", re.IGNORECASE)
 
 
 def _postprocess(svg: str) -> str:
-    """Strip the XML prolog and tag the root <svg> with our CSS hook class."""
+    """Strip the XML prolog and tag the root <svg> with our CSS hook class.
+
+    If mmdc already emitted a class attribute on the root <svg>, append to it
+    rather than injecting a second (malformed) class attribute.
+    """
     svg = _XML_PROLOG.sub("", svg).strip()
-    if "annotate-diagram" not in svg:
-        svg = re.sub(r"<svg\b", '<svg class="annotate-diagram"', svg, count=1)
-    return svg
+    if re.search(r'<svg\b[^>]*class="[^"]*\bannotate-diagram\b', svg):
+        return svg  # already tagged
+    if re.search(r'<svg\b[^>]*class="', svg):
+        return re.sub(r'(<svg\b[^>]*class=")', r'\1annotate-diagram ', svg, count=1)
+    return re.sub(r"<svg\b", '<svg class="annotate-diagram"', svg, count=1)
