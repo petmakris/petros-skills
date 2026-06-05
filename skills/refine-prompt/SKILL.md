@@ -1,63 +1,124 @@
 ---
 name: refine-prompt
-description: Use when the user invokes /refine-prompt, or when a messy user message (likely a speech-to-text transcript) arrives with session consent granted. Transforms it into a high-quality coding prompt via normalize → probe → classify → compose, with explicit user approval before execution.
+description: Use when the user invokes /refine-prompt, or when a messy user message (likely a speech-to-text transcript) arrives with session consent granted. Two modes — Console mode (explicit invocation) refines clipboard/file/inline text inside a subagent and hands back a bare, copy-pasteable prompt without polluting the session or executing anything; Auto-refine mode (in-chat messy message) refines in place and executes after approval. Both ground references to the codebase and correct likely transcription errors.
 user-invocable: true
-argument-hint: pasted transcript text (optional — if omitted, operates on the previous user message, or asks the user to paste one)
+argument-hint: optional — bare invocation refines clipboard contents; pass a file path or inline text to refine that instead
 ---
 
 # Refine Prompt Skill
 
-Transforms low-quality transcripts (typically speech-to-text output) into high-quality agentic coding prompts. Runs a 5-step pipeline (normalize → segment → probe → classify → compose) followed by a 3-phase interactive flow (clarify → approve → execute).
+Transforms low-quality transcripts (typically speech-to-text output) into high-quality agentic coding prompts. It grounds references to the real codebase and corrects likely mistranscriptions.
 
-## When to invoke
+The skill has **two modes**, selected by how it was invoked:
 
-Run this skill in any of these situations:
+| Mode | Trigger | What it does |
+|---|---|---|
+| **Console mode** | Explicit `/refine-prompt [arg]` | Refines clipboard / file / inline text **inside a subagent**, returns the **bare** refined prompt to your clipboard via `pbcopy`. **Does not execute.** You paste it yourself as a fresh message. Keeps the messy input and all probing noise out of the main session. |
+| **Auto-refine mode** | A messy in-chat message + session consent | Refines the in-chat message **in place** and, after your `go`, runs it as the task. The original behavior. |
+
+The dividing line: **explicit invocation = "hand me clean text to paste"; auto-trigger = "I rambled in chat, clean it up and run it."** They never mix in one turn.
+
+---
+
+# Console mode (explicit `/refine-prompt`)
+
+This is the path for "I have a big messy dictation, give me a clean prompt to paste, without dumping the mess into this session."
+
+## Why it stays clean
+
+The messy input never enters the main session. The skill dispatches a **subagent** that reads the input itself (runs `pbpaste`, or `Read`s the file) and does the whole pipeline in its own context. The main session only ever holds the short `/refine-prompt` trigger and a one-line confirmation. The refined prompt is written back to the clipboard, so you paste it as your next message.
+
+Requires macOS (`pbpaste` / `pbcopy`).
+
+## Input resolution
+
+| Invocation | Input source |
+|---|---|
+| `/refine-prompt` (no arg) | The **clipboard** — the subagent runs `pbpaste`. This is the default, lowest-friction path. |
+| `/refine-prompt <path>` | The file at that path — the subagent `Read`s it. |
+| `/refine-prompt <inline text>` | The inline text itself (note: inline text is already in the chat, so it does not get the no-pollution benefit; it's a convenience fallback). |
+
+## Subagent dispatch
+
+Dispatch one **general-purpose** subagent. Hand it the pipeline below and this contract. Do **not** read the clipboard or file from the main loop — that would pull the mess into the main context and defeat the entire purpose.
+
+The subagent prompt must instruct it to:
+
+1. **Acquire the input.**
+   - Clipboard mode: run `pbpaste`. If it returns empty/whitespace only, stop and report `{ "empty": true }`.
+   - File mode: `Read` the given path. If missing, report `{ "error": "<path> not found" }`.
+   - Inline mode: use the text passed in the dispatch prompt.
+2. **Run the Pipeline** (normalize → segment → probe → classify → compose) against the codebase. Probing budget and the word-ambiguity rules apply exactly as written below.
+3. **Return one of two structured results:**
+   - **Success:** the **bare** refined prompt (S1 prose or S2 structured brief, per the shape rule) with **no** `**Refined prompt:**` header, **no** Assumptions block, **no** `Reply go` footer — just the prompt text — AND run `printf '%s' "<refined prompt>" | pbcopy` to place it on the clipboard. Confirm the pbcopy succeeded.
+   - **Blocking questions:** if the pipeline hit any blocking ambiguity (see Step 4 — almost always an unresolvable word/name/term), return the list of questions **and** the normalized input text, so the main loop can re-dispatch with answers without a second `pbpaste` (the clipboard may have changed by then).
+
+## Phase A — blocking clarifications (lean, conditional)
+
+If the subagent returns blocking questions, surface them to the user in a single batched message (numbered list), exactly as in the original Phase A. Wait for the answer, then **re-dispatch the subagent** passing the normalized input text it returned plus the user's answers, instructing it to skip re-reading the source and go straight to compose. Repeat only if something is still ambiguous.
+
+Blocking questions are rare and reserved for word/name/term ambiguity a wrong guess would silently poison (see the Pipeline). Everything non-blocking is resolved silently — there is no Assumptions block to review in console mode.
+
+## Output
+
+On success, the refined prompt is already on the clipboard. Emit a single confirmation line and nothing else:
+
+> ✓ Refined prompt copied to your clipboard — paste it as your next message.
+
+Do **not** print the refined prompt in the main session (you reviewed nothing; the user reviews it in the input box before sending — that keeps the session cleanest). Do **not** execute it. The user's subsequent paste is a normal, clean message; the auto-refine heuristic will correctly ignore it.
+
+If the subagent reported empty clipboard / missing file, relay that plainly and stop.
+
+## Console-mode invariants
+
+1. **The mess never enters the main loop.** The subagent acquires and processes the input; the main loop never runs `pbpaste` / `Read` on the source itself.
+2. **No execution.** Console mode produces text and stops. There is no `go` gate and no task hand-off — the user runs the prompt by pasting it.
+3. **Bare output only.** No header, no Assumptions, no footer. The clipboard holds exactly what the user would want as a prompt.
+4. **Word guesses are still blocking.** Console mode drops the *visible* Assumptions block, not the safety it represented: an unresolvable word/name/term still becomes a Phase A question, because a silent wrong substitution would poison a prompt the user is about to paste and run.
+
+---
+
+# Auto-refine mode (in-chat messy message)
+
+Unchanged original behavior, for when a rambling message arrives in the chat itself. This mode refines in place and executes after approval. It does **not** use a subagent and **does** show the full Phase B approval gate with Assumptions.
+
+## When auto-refine triggers
 
 | Trigger | Action |
 |---|---|
-| User runs `/refine-prompt <transcript text>` | Refine the inline argument |
-| User runs `/refine-prompt` with no argument | Refine the immediately preceding user message |
-| User runs `/refine-prompt` with no argument AND there is no prior user message to target | Ask the user to paste the transcript, then refine what they paste |
-| A user message matches the **Messiness heuristic** AND session consent is `always` | Silently run the skill on that message |
-| A user message matches the **Messiness heuristic** AND session consent is `ask-each-time` | Ask the user "refine this first? (yes/no)" before running |
-| A user message matches the **Messiness heuristic** AND session consent is `unset` | Emit the **First-messy-message prompt** (see Consent section) |
+| A user message matches the **Messiness heuristic** AND session consent is `always` | Silently run auto-refine on that message |
+| Messiness heuristic match AND consent is `ask-each-time` | Ask "refine this first? (yes/no)" before running |
+| Messiness heuristic match AND consent is `unset` | Emit the **First-messy-message prompt** (see Consent) |
 
-Do **not** auto-run the skill on:
-- Messages that are clearly clean prose (no heuristic hits)
-- Messages that are themselves commands or short confirmations (`go`, `yes`, `ok`, etc.)
-- Messages that are part of an in-progress `/refine-prompt` turn (clarification answers, approval replies)
-
-If the user explicitly invokes `/refine-prompt` on clean input, run it anyway — the pipeline usually no-ops and the output mirrors the input. The user asked.
+Do **not** auto-run on: clean prose, short confirmations (`go`, `yes`, `ok`), or messages that are part of an in-progress refine turn (clarification answers, approval replies).
 
 ## Messiness heuristic
 
-A message qualifies as "messy" when **at least two** of the following are true. Evaluate qualitatively — this is guidance for judgment, not a scorer to run literally.
+A message qualifies as "messy" when **at least two** of the following are true. Evaluate qualitatively — guidance for judgment, not a scorer.
 
-1. **Long without punctuation.** Length > 200 characters and contains fewer than 2 sentence-ending marks (`.`, `!`, `?`).
-2. **Filler words.** Contains tokens like `um`, `uh`, `like` (as filler, not comparative), `kind of`, `sort of`, `you know`, `basically`, `so basically`, `I mean`.
-3. **Word-level duplicates.** Immediate repetitions such as `the the`, `fix fix`, `we we should`, `and and`.
-4. **Vague references without antecedent.** Phrases like `that thing`, `the stuff we talked about`, `the one from before`, with no clear referent in the current conversation.
-5. **Transcription candidates.** Tokens that look like phonetic near-misses of plausible domain terms — a word whose sound is close to, but not exactly, an identifier, library, or framework name likely to appear in the project.
-6. **Missing verb or direct object.** An imperative-shaped request that lacks either the action or the target.
+1. **Long without punctuation.** Length > 200 characters and fewer than 2 sentence-ending marks.
+2. **Filler words.** `um`, `uh`, `like` (filler), `kind of`, `sort of`, `you know`, `basically`, `so basically`, `I mean`.
+3. **Word-level duplicates.** `the the`, `fix fix`, `we we should`, `and and`.
+4. **Vague references without antecedent.** `that thing`, `the stuff we talked about`, `the one from before`, no clear referent.
+5. **Transcription candidates.** Tokens that look like phonetic near-misses of plausible domain terms.
+6. **Missing verb or direct object.** Imperative-shaped request lacking the action or the target.
 
-A clean, well-formed request — even a long one — does **not** trigger the heuristic. The goal is to catch dictated streams of thought, not to second-guess careful writing.
+A clean, well-formed request — even a long one — does **not** trigger the heuristic.
 
 ## Consent and auto-trigger
 
-Consent is **session-scoped** — tracked in the conversation context, not persisted via the auto-memory system. It resets to `unset` at the start of every new conversation.
-
-### Consent states
+Consent is **session-scoped** — tracked in conversation context, not persisted to auto-memory. Resets to `unset` each new conversation.
 
 | State | Behavior |
 |---|---|
-| `unset` | Default at session start. On the first messy user message, emit the First-messy-message prompt below. |
-| `always` | Run the skill silently on every messy user message. |
+| `unset` | On the first messy message, emit the First-messy-message prompt. |
+| `always` | Run auto-refine silently on every messy message. |
 | `ask-each-time` | Ask "refine this first? (`yes`/`no`)" before each auto-run. |
-| `never` | Do not auto-run. The skill only executes on explicit `/refine-prompt` invocations. |
+| `never` | Never auto-run. Only explicit `/refine-prompt` (console mode) executes. |
 
 ### First-messy-message prompt
 
-When consent is `unset` and a messy message arrives, emit this message verbatim (substituting nothing):
+When consent is `unset` and a messy message arrives, emit verbatim:
 
 > That message looks like a rough transcript. I can run `/refine-prompt` on messages like this automatically so you don't have to invoke it each time.
 >
@@ -67,289 +128,119 @@ When consent is `unset` and a messy message arrives, emit this message verbatim 
 >
 > For this message specifically, want me to refine it now? (`go` / `skip`)
 
-Two decisions are captured at once:
+Maps `yes`/`ask`/`no` to consent `always`/`ask-each-time`/`never`; `go` runs auto-refine now on the triggering message, `skip` leaves it. If the reply addresses only one decision, act on it and leave consent `unset`.
 
-1. **Session policy** — maps the user's reply (`yes` / `ask` / `no`) to consent state `always` / `ask-each-time` / `never`.
-2. **One-off for the current message** — `go` runs the skill now on the triggering message; `skip` leaves it alone.
-
-If the reply addresses only one of the two (e.g., says `go` without picking a policy), act on what they answered and leave the other unchanged. Consent stays `unset` and the prompt will fire again on the next messy message.
-
-### Invariant
-
-`silently` in the `always` state refers only to skipping the *consent gate*. The **Phase B approval gate** in the Interactive Flow is never skipped. No refined prompt is ever executed without the user's explicit `go`.
-
-## Pipeline
-
-Run these five steps in order on every invocation (explicit or auto).
-
-### 1. Normalize
-
-Strip mechanical noise without interpretation:
-- Filler tokens (`um`, `uh`, `like`, `basically`, etc.)
-- Word-level duplicates (`the the` → `the`)
-- Repeated false starts (`I want to— actually let's—` → `let's`)
-- Run-on punctuation (`???` → `?`, missing capitalization after periods)
-
-Do **not** change meaning or rephrase at this step. This is purely mechanical.
-
-### 2. Segment intents
-
-Split the normalized text into distinct asks. A single request is one intent; conjunctions like `and also`, `oh and`, `plus`, `another thing` typically signal intent boundaries. Short connectives (`and then`) within a single logical task do not.
-
-### 3. Probe for domain grounding (budgeted)
-
-For each intent, identify concrete references and verify them against the codebase.
-
-**What counts as a reference:**
-- Identifiers: component, class, function, method, module, or variable names
-- File paths or path fragments
-- Design / decision document references (ADR numbers, RFC numbers, ticket IDs)
-- Domain terms drawn from the project's own vocabulary (subsystems, feature names, architectural modules)
-
-**How to verify:**
-- `Grep` for class/function/identifier names
-- `Glob` for file-name patterns
-- `Read` a small file only when the grep/glob result is ambiguous
-
-**Budget:** ~3–5 total tool calls per invocation (explicit or auto). Not per intent — per invocation. Probing is targeted disambiguation, never a codebase tour.
-
-**Resolution outcomes:**
-- **Clean match** → anchor the reference in the refined prompt with the real path or fully-qualified identifier it resolves to.
-- **Transcription near-miss, single clear candidate** (the transcript token is close to, but not exactly, exactly one identifier that actually exists) → correct the term in the refined prompt, note the correction in Assumptions.
-- **Transcription near-miss, multiple plausible candidates** (two or more identifiers sound close to the transcript token) → **blocking** clarification for Phase A. List the candidates and ask the user which word they meant.
-- **Multiple plausible matches** (e.g., a glob returns several candidates, a name is used by several modules) → **blocking** clarification for Phase A: list the candidates and ask the user to pick.
-- **No match for a named term** (identifier, proper noun, framework/library name, project-specific domain term, or any transcript token that is being used *as a name*) → **blocking** clarification for Phase A. Ask the user what word or name they meant. Do not guess.
-- **No match for a peripheral word** (a fuzzy verb, a vague scope qualifier, a hedge — not functioning as a name) → flag as a clarification candidate for Step 4.
-
-### 4. Classify ambiguities (tiered)
-
-For each unresolved thing from Step 3 or from the original transcript:
-
-- **Mild ambiguity** (safe to guess): the wrong guess would cost at most a round of review. → Include as a bullet under the `**Assumptions:**` block in the refined prompt. The user catches wrong guesses at the approval gate.
-- **Blocking ambiguity** (wrong guess would waste real work): → Becomes a clarification question in Phase A of the Interactive Flow.
-
-**Word/name/term ambiguity is always blocking — never an assumption.** If a specific word, name, or term appears in the transcript and you cannot determine which word or referent the user meant — from the conversation, the codebase, or the surrounding sentence — ask. Covers:
-- Transcription tokens where you can't tell what was actually said (near-misses with no clear winner, or unfamiliar tokens with no codebase match)
-- Domain terms, proper nouns, or feature names used without a clear antecedent in the conversation
-- Identifier-shaped tokens that don't resolve anywhere in the repo
-- Shorthand like "the service", "that thing", "the one from before" when the referent cannot be pinned down
-
-The reason is asymmetric cost: a wrong guess about a *word* poisons the refined prompt silently (the user may miss the substitution in Assumptions and discover it only after work is wasted). A missed word is a miscommunication, not a stylistic choice.
-
-For **non-word** ambiguities (e.g., "should this be one PR or three?", "include migration tests?", scope boundaries) — err toward Assumptions over Questions. The point of the skill is to reduce friction; peppering the user with six questions defeats it. Escalate a non-word ambiguity to a Question only when a wrong guess would be genuinely expensive.
-
-### 5. Compose refined prompt (adaptive shape)
-
-Pick the output shape based on intent count and length:
-
-| Condition | Shape |
-|---|---|
-| 1 intent, ≤ ~60 words of substantive content | **S1 — prose** |
-| > 1 intent, OR 1 intent with > ~60 words of substance | **S2 — structured brief** |
-
-See the Output Format section for exact templates.
-
-**Voice preservation:**
-- In **S1**, keep the user's phrasing where it's already clear. Good: `fix the bug where X`. Bad: `rectify the aforementioned defect`.
-- In **S2**, use neutral task language — the original prose doesn't survive decomposition anyway.
-
-## Interactive flow
-
-Three phases inside a single `/refine-prompt` turn (or a single auto-triggered invocation).
+## Auto-refine interactive flow
 
 ### Phase A — Clarifications (conditional)
-
-Skip entirely if Step 4 of the Pipeline produced no blocking ambiguities.
-
-Otherwise, emit a **single batched message** with a numbered list of all blocking questions. Example:
-
-> I need to clarify a couple things before I refine this:
->
-> 1. *"the service"* — do you mean the general service module, or a specific variant used by a particular subsystem?
-> 2. *"fix it"* — fix the known issue we discussed earlier, or something else?
->
-> Reply with a short answer to each.
-
-Wait for the user's reply. Do **not** proceed to Phase B until all blocking ambiguities are resolved. If the user's reply leaves one still ambiguous, ask again — but consolidate into the next batch rather than streaming one-off questions.
+Skip if no blocking ambiguities. Otherwise emit a single batched, numbered list of all blocking questions and wait. Do not proceed until resolved.
 
 ### Phase B — Show refined prompt (approval gate)
 
-Emit the refined prompt in this exact shell:
-
 > **Refined prompt:**
 >
-> <refined content — S1 or S2 — see Output Format>
+> <refined content — S1 or S2>
 >
 > **Assumptions:**
 > - <each mild ambiguity, one per line>
 >
 > Reply `go` to proceed, or edit above.
 
-If there are no assumptions, omit the `Assumptions:` block entirely. Don't say "None" — just leave it out.
+Omit the Assumptions block entirely if there are none.
 
 ### Phase C — Execution
 
-Three possible replies:
-
 | Reply | Action |
 |---|---|
-| `go` | Proceed with the refined prompt as the effective task. Downstream skills (brainstorming, debugging, TDD, etc.) trigger naturally from its content. Do **not** re-invoke refine-prompt. |
-| Edited version of the refined prompt | Replace the prompt with the user's edit. Proceed to execution without re-refining. |
-| `cancel` / `scrap it` / `stop` | Exit cleanly. No work started. Consent state is unchanged. |
-
-**Edit vs. scope change:** if the reply looks like a targeted correction to the existing refined prompt (fixing a value, swapping an identifier, tightening a criterion), treat it as an edit and proceed. If it introduces new scope not present in the refined prompt, treat it as a fresh message — potentially a new `/refine-prompt` candidate — rather than silently folding it into the current task.
+| `go` | Proceed with the refined prompt as the task. Downstream skills trigger naturally. Do not re-invoke refine-prompt. |
+| Edited prompt | Replace with the edit, proceed without re-refining. |
+| `cancel` / `scrap it` / `stop` | Exit cleanly. No work started. |
 
 ### Source-of-truth rule
+After `go`, the refined prompt **is** the task. Do not reinterpret the original transcript later. New scope = a fresh message.
 
-After `go`, the **refined prompt is the task**. Do not silently reinterpret the original messy transcript later in the session. If the user reopens scope, treat their new message as its own input — potentially another refine-prompt candidate.
+---
 
-## Output format
+# Pipeline (shared by both modes)
 
-Two templates. The Pipeline's Step 5 decision rule selects which to use.
+Run these five steps in order. In console mode they run inside the subagent; in auto-refine mode they run in the main loop.
+
+## 1. Normalize
+Strip mechanical noise without interpretation: filler tokens, word-level duplicates (`the the` → `the`), false starts, run-on punctuation. Do **not** change meaning or rephrase.
+
+## 2. Segment intents
+Split into distinct asks. `and also`, `oh and`, `plus`, `another thing` typically signal boundaries; short connectives (`and then`) within one task do not.
+
+## 3. Probe for domain grounding (budgeted)
+For each intent, identify concrete references and verify against the codebase.
+
+**References:** identifiers (component/class/function/method/module/variable names), file paths, design-doc/ADR/RFC/ticket IDs, project-specific domain terms.
+
+**How:** `Grep` for identifiers, `Glob` for file-name patterns, `Read` a small file only when grep/glob is ambiguous.
+
+**Budget:** ~3–5 total tool calls per invocation. Targeted disambiguation, never a codebase tour.
+
+**Resolution outcomes:**
+- **Clean match** → anchor the reference with its real path or fully-qualified identifier.
+- **Transcription near-miss, single clear candidate** → correct the term; in auto-refine mode note it under Assumptions, in console mode apply it silently.
+- **Transcription near-miss, multiple plausible candidates** → **blocking** Phase A question listing the candidates.
+- **Multiple plausible matches** → **blocking** Phase A question.
+- **No match for a named term** (identifier, proper noun, framework/library, project term, or any token used *as a name*) → **blocking** Phase A question. Do not guess.
+- **No match for a peripheral word** (fuzzy verb, vague scope qualifier, hedge — not a name) → clarification candidate for Step 4.
+
+## 4. Classify ambiguities (tiered)
+
+- **Mild ambiguity** (wrong guess costs at most a review round): in auto-refine mode include under `**Assumptions:**`; in console mode resolve silently (no Assumptions block exists there).
+- **Blocking ambiguity** (wrong guess wastes real work): becomes a Phase A question in either mode.
+
+**Word/name/term ambiguity is always blocking — never an assumption, in either mode.** If a specific word, name, or term appears and you cannot determine which word or referent was meant — from the conversation, codebase, or sentence — ask. A wrong guess about a *word* silently poisons the prompt; a missed word is a miscommunication, not a stylistic choice.
+
+For **non-word** ambiguities (one PR or three? include migration tests? scope boundaries) — err toward silent resolution / Assumptions over Questions. Escalate to a Question only when a wrong guess would be genuinely expensive.
+
+## 5. Compose refined prompt (adaptive shape)
+
+| Condition | Shape |
+|---|---|
+| 1 intent, ≤ ~60 words of substance | **S1 — prose** |
+| > 1 intent, OR 1 intent with > ~60 words | **S2 — structured brief** |
+
+**Voice:** in S1 keep the user's clear phrasing (`fix the bug where X`, not `rectify the aforementioned defect`); in S2 use neutral task language.
+
+**Output wrapping differs by mode:**
+- **Console mode:** emit the **bare** prompt only — no header, no Assumptions, no footer.
+- **Auto-refine mode:** wrap in the Phase B shell (header + optional Assumptions + `Reply go` footer).
 
 ### S1 — Prose
-
-Use when: 1 intent, ≤ ~60 words of substantive content.
-
-Template:
-
-```
-**Refined prompt:**
-
-<one to three sentences describing the task in the user's voice, with concrete references where probing resolved them>
-
-**Assumptions:**
-- <bullet per mild ambiguity; omit entire block if none>
-
-Reply `go` to proceed, or edit above.
-```
+One to three sentences describing the task in the user's voice, with concrete references where probing resolved them.
 
 ### S2 — Structured brief
-
-Use when: > 1 intent, OR 1 intent with > ~60 words of substance.
-
-Template:
-
 ```
-**Refined prompt:**
-
-**Goal:** <one-sentence summary of the overall ask>
+**Goal:** <one-sentence summary>
 
 **Tasks:**
-1. <first distinct intent, neutral task language>
-2. <second distinct intent>
-3. <etc.>
+1. <first intent>
+2. <second intent>
 
 **Context / anchors:**
-- Task N: <file path or codebase reference resolved by probing; "TBD during implementation" if not resolvable without ambiguity>
-
-**Assumptions:**
-- <bullet per mild ambiguity; omit entire block if none>
+- Task N: <resolved path/reference, or "TBD during implementation">
 
 **Acceptance:**
-- Task N: <one-line criterion per task — what "done" looks like>
-
-Reply `go` to proceed, or edit above.
+- Task N: <one-line "done" criterion>
 ```
+(In auto-refine mode, an `**Assumptions:**` block is added before `Acceptance`. In console mode it is omitted.)
 
-### Rules that apply to both shapes
+### Rules for both shapes
+- Never invent references. Unresolved → Assumptions (mild, non-word, auto-refine only) or Phase A question (blocking).
+- Omit empty sections. Never write "None" / "N/A".
+- Preserve voice in S1; neutral language in S2.
 
-- Always begin with the literal string `**Refined prompt:**` on its own line. This is the anchor downstream logic looks for.
-- Omit empty sections entirely. Never write "None" or "N/A".
-- Never invent references. If probing could not resolve something, either put it in Assumptions (mild) or raise it as a Question in Phase A (blocking) — do not fabricate a plausible-looking path.
-- Preserve user's voice in S1. Use neutral task language in S2.
+---
 
-## Examples
+# Invariants (all paths)
 
-### Example A — single intent → S1 prose
-
-Input:
-
-> um so the thing with the the data load when you navigate away it keeps going and doesn't stop can you like fix that
-
-Probing (Step 3): check whether the area under discussion has a "data load" identifier and a clear navigation / teardown seam. Quick confirmation, no deep navigation.
-
-Clarifications (Phase A): none — "keeps running after navigate-away" has a familiar missing-cleanup shape.
-
-Output (Phase B):
-
-```
-**Refined prompt:**
-
-Fix the bug where a data load keeps running after the user navigates away — the cleanup step isn't firing. Expected: work started by the view should stop when the user leaves it.
-
-**Assumptions:**
-- Refers to the component most recently discussed in this session; confirm if that's wrong
-
-Reply `go` to proceed, or edit above.
-```
-
-### Example B — multiple intents → S2 structured brief
-
-Input:
-
-> ok so a bunch of things, first the card spacing looks weird on mobile too tight, and also we should probably add a loading state while we're waiting for the server, and oh also can you check why the event logs don't show some entries sometimes
-
-Probing (Step 3): resolve which "card" — glob for likely matches → pick the single clear resolution and anchor its path. Skim the event-logging pipeline for Task 3 context.
-
-Clarifications (Phase A): none — three independent asks, all with clear actions.
-
-Output (Phase B):
-
-```
-**Refined prompt:**
-
-**Goal:** Three unrelated fixes.
-
-**Tasks:**
-1. Tighten the card spacing on mobile — currently too tight per user observation
-2. Add a loading state while waiting for a server response
-3. Investigate why some entries are intermittently missing from the event logs
-
-**Context / anchors:**
-- Task 1: resolved card-component path (located via glob)
-- Task 2: the view/container making the server request — specific target TBD during implementation
-- Task 3: event-logging pipeline
-
-**Assumptions:**
-- Tasks are independent — can be done in any order or separate PRs
-- Task 1 is mobile visual only, not desktop
-
-**Acceptance:**
-- Task 1: visual confirmation + no regression on desktop
-- Task 2: loading indicator visible between request dispatch and response
-- Task 3: reproducible test case identified, then fixed
-
-Reply `go` to proceed, or edit above.
-```
-
-### Example C — blocking ambiguity → Phase A clarification first
-
-Input:
-
-> deploy the thing we were working on
-
-Probing (Step 3): no concrete references in the transcript to anchor.
-
-Clarifications (Phase A, emitted because ambiguity is blocking):
-
-> I need to clarify before refining:
->
-> 1. *"the thing we were working on"* — which project/service? (I don't have a reference from this turn.)
-> 2. *"deploy"* — to which environment (staging / production)?
->
-> Reply with short answers and I'll refine.
-
-Phase B and C proceed only after the user answers.
-
-## Invariants
-
-These hold regardless of invocation path (explicit vs. auto) or consent state.
-
-1. **The approval gate is never skipped.** No refined prompt is executed without the user's explicit `go` (or edited-and-confirmed equivalent).
-2. **Probing is budgeted.** ~3–5 tool calls total per invocation (explicit or auto). Never a codebase tour.
-3. **No fabricated references, no guessed words.** If probing can't resolve a reference, it goes in Assumptions (mild, non-word only) or Phase A questions (blocking). Never invent a plausible-looking path. An unresolved word, name, or term always becomes a Phase A question — it is never filed under Assumptions as a guess.
-4. **Blocking ambiguities batch.** All Phase A questions appear in one message, not streamed one-by-one.
-5. **Consent is session-scoped.** Tracked only in conversation context. Never write it to auto-memory. Resets at every new session.
-6. **The refined prompt is the task.** After `go`, downstream behavior operates on the refined prompt — not on the original transcript.
-7. **Don't refine clean input.** If the Messiness heuristic doesn't match and the user didn't invoke explicitly, don't run.
+1. **Blocking ambiguities batch** into one Phase A message, never streamed.
+2. **Probing is budgeted** — ~3–5 tool calls total per invocation. Never a codebase tour.
+3. **No fabricated references, no guessed words.** An unresolved word/name/term is always a Phase A question, never a silent guess or a buried assumption.
+4. **Consent is session-scoped.** Never written to auto-memory; resets each session.
+5. **Don't refine clean input** in auto-refine mode. If the heuristic doesn't match and the user didn't invoke explicitly, don't run.
+6. **Console mode never executes; auto-refine never skips the `go` gate.** The mode is fixed at invocation and the two never blend within a turn.

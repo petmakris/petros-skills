@@ -73,7 +73,7 @@ To uninstall everywhere: `/plugin uninstall petros-skills@petros-skills`.
 
 - **`/annotate`** (`skills/annotate/`) — Long Claude responses (plans, analyses, lists of findings) get pushed to a local browser page where you highlight any text and leave free-text comments. The annotations come back to Claude on its next turn. Stdlib-only Python server, no installs.
 - **`/humanize`** (`skills/humanize/`) — Rewrite Claude-generated markdown so it reads like a long-time colleague wrote it. Manual only — invoked when you type `/humanize` or ask to "derobotize" something.
-- **`/refine-prompt`** (`skills/refine-prompt/`) — Turns messy speech-to-text transcripts into high-quality coding prompts via a normalize → probe → classify → compose pipeline, with explicit approval before execution.
+- **`/refine-prompt`** (`skills/refine-prompt/`) — Turns messy speech-to-text transcripts into high-quality coding prompts via a normalize → probe → classify → compose pipeline. Two modes: explicit `/refine-prompt` refines your clipboard (or a file/inline text) inside a subagent and copies a bare, paste-ready prompt back to the clipboard without polluting the session or executing it; the in-chat auto-refine path (via the `auto-refine` hook) refines a rambling message in place and runs it after you reply `go`.
 
 ## Hooks
 
