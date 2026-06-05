@@ -107,3 +107,24 @@ def test_postprocess_appends_to_existing_class():
 def test_postprocess_idempotent_when_already_tagged():
     raw = '<svg class="annotate-diagram mermaid" xmlns="http://www.w3.org/2000/svg"><g/></svg>'
     assert _postprocess(raw) == raw
+
+
+from skills.annotate.server import _render_block_for_raw
+
+
+@requires_mmdc
+def test_server_renders_diagram_block():
+    blk = {"id": "section-1", "kind": "diagram", "spec": _minimal_spec()}
+    out = _render_block_for_raw(blk, version=1)
+    assert out["kind"] == "diagram"
+    assert "<svg" in out["svg"]
+    assert out["spec"] == _minimal_spec()
+
+
+def test_server_diagram_render_failure_yields_error_pill():
+    # Unknown type → mermaid.validate raises → server catches → error pill,
+    # never an exception that blanks /raw. (No mmdc needed: validation fails first.)
+    blk = {"id": "section-9", "kind": "diagram", "spec": {"type": "gantt", "source": "x"}}
+    out = _render_block_for_raw(blk, version=1)
+    assert out["kind"] == "diagram"
+    assert "diagram render failed" in out["svg"]
