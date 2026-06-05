@@ -1223,9 +1223,9 @@
   function updateBlockContent(section, blk, srvVer) {
     const newKind = blk.kind || "markdown";
     const oldKind = section.dataset.kind || "markdown";
-    // A markdown↔sequence flip needs a fresh section: the diagram click
-    // listener and hover wiring are bound at creation, so an in-place
-    // innerHTML swap would leave them inconsistent with the new kind.
+    // A kind flip (markdown↔sequence/diagram/choice) needs a fresh section:
+    // the diagram click listener and hover wiring are bound at creation, so an
+    // in-place innerHTML swap would leave them inconsistent with the new kind.
     if (newKind !== oldKind || newKind === "choice") {
       const fresh = createBlockSection(blk);
       clearUpdatingOverlay(section);
