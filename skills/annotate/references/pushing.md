@@ -76,7 +76,7 @@ Save `url`, `localhost_url`, `response_dir`, `state_dir`, `events_dir`, `consume
 ## How to push a response
 
 1. Compose the response as a **list of plain-markdown blocks**.  Each block is one logical unit (a paragraph, a heading + its prose, one bullet, one code block).  Aim for blocks of 3-15 lines — small enough that the user can read one at a time, large enough to carry a self-contained thought.
-2. Write `meta.json` first:
+2. Write `meta.json` first (at `<response_dir>/meta.json`):
    ```json
    {"response_id": "resp-<unix-timestamp>",
     "title": "<short title>",
