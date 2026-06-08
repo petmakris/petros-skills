@@ -64,4 +64,16 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+---
+
+## Android phone: POCO X5 Pro 5G (model 22101320G, MIUI, Android 14)
+
+Connects via adb (`adb devices` → transport works when USB debugging is on). Build Android with raw SDK tools (aapt2/javac/d8/apksigner), NOT Gradle — JDK 25 is installed and breaks AGP.
+
+**MIUI gotchas (learned the hard way):**
+- **Never `adb uninstall` then reinstall.** Fresh adb installs fail with `INSTALL_FAILED_USER_RESTRICTED` unless "Install via USB" is on (needs Mi account + SIM). In-place update (`adb install -r`) is allowed. Recovery for a fresh install: `adb push` the APK to `/sdcard/Download` and tap it in the Files app.
+- **`adb_wifi_enabled` (wireless debugging) is locked by MIUI** — writes rejected even from a privileged adb shell. App-level WiFi-debugging toggle is impossible on this device (works on AOSP/Pixel).
+
+**Debug Toggles app** (`~/projects/env/apps/android-debug-toggle`): single home-screen icon "USB Debug" that flips `Settings.Global.adb_enabled` via `WRITE_SECURE_SETTINGS`. After any fresh install, re-grant once: `adb shell pm grant com.petros.debugtoggle android.permission.WRITE_SECURE_SETTINGS` (persists across reboots + updates, not fresh installs). See its README.md for build/install steps.
+
 
