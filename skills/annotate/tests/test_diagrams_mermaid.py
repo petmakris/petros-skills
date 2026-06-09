@@ -68,6 +68,25 @@ def test_render_flowchart_returns_svg():
 
 
 @requires_mmdc
+def test_render_uses_svg_text_not_foreignobject():
+    """Node labels must be native SVG <text>, never HTML <foreignObject>.
+
+    foreignObject labels carry no baked geometry — they re-layout against the
+    host page's CSS when this SVG is inlined into the annotate page, overflowing
+    the node boxes mmdc measured at render time (the clipped-text bug). Rendering
+    with htmlLabels:false locks label geometry in SVG user-space so the diagram
+    looks identical in any host document.
+    """
+    spec = {"type": "flowchart", "title": "Demo",
+            "source": "flowchart TD\n"
+                      "  A[Story + StoryObjectives authored content] --> B[Manual tutorial]\n"
+                      "  B -->|persistMessages hook| C[Out-of-band Judge background job]"}
+    svg = render(spec, block_id="section-1")
+    assert "<foreignObject" not in svg, "labels rendered as HTML foreignObject — they will clip when embedded"
+    assert "<text" in svg
+
+
+@requires_mmdc
 def test_render_state_diagram_returns_svg():
     spec = {"type": "state", "title": "S",
             "source": "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running"}

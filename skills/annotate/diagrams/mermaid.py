@@ -59,11 +59,21 @@ def render(spec: dict[str, Any], block_id: str) -> str:
     with tempfile.TemporaryDirectory() as td:
         in_path = os.path.join(td, "in.mmd")
         out_path = os.path.join(td, "out.svg")
+        cfg_path = os.path.join(td, "config.json")
         with open(in_path, "w", encoding="utf-8") as f:
             f.write(source)
+        # Force native SVG <text> labels instead of mermaid's default HTML
+        # <foreignObject> labels. foreignObject labels carry no baked geometry —
+        # they re-layout against the host page's CSS when this SVG is inlined into
+        # the annotate card, overflowing the node boxes mmdc measured at render
+        # time (text clips at the box edge). <text> labels lock geometry in SVG
+        # user-space so the diagram renders identically in any host document.
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            f.write('{"htmlLabels": false, "flowchart": {"htmlLabels": false}}')
         try:
             proc = subprocess.run(
-                [mmdc, "-i", in_path, "-o", out_path, "-t", "neutral", "-b", "transparent"],
+                [mmdc, "-i", in_path, "-o", out_path, "-c", cfg_path,
+                 "-t", "neutral", "-b", "transparent"],
                 capture_output=True,
                 text=True,
                 timeout=RENDER_TIMEOUT_S,
