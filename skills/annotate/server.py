@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -190,6 +191,7 @@ class Handlers:
             f'  <textarea id="general-input" class="general-input" rows="2"'
             f'    placeholder="Comment on the whole response (not a specific block)…"></textarea>'
             f'  <div class="general-composer-bar">'
+            f'    <span class="general-hint"><kbd>⌘</kbd><kbd>↩</kbd> to send</span>'
             f'    <span id="general-status" class="general-status" aria-live="polite"></span>'
             f'    <button id="general-send" type="button" class="general-send-btn" disabled>Send</button>'
             f'  </div>'
@@ -323,6 +325,13 @@ class Handlers:
         }
         if comment_type == "choice":
             evt["selected_options"] = list(selected_options)
+        # Optional context the client attaches to block comments: a snapshot
+        # snippet of the block at comment time, and prefix/suffix to pin down
+        # which occurrence of selected_text was highlighted. Pass them through
+        # so Claude sees them; ignore anything that isn't a string.
+        for key in ("block_snippet", "prefix", "suffix"):
+            if isinstance(payload.get(key), str):
+                evt[key] = payload[key]
         eid = events_module.append(Path(dirs["events_dir"]), evt)
         _send_json(h, 202, {"event_id": eid, "status": "queued"})
 
@@ -372,6 +381,11 @@ class Handlers:
         _send_json(h, 200, {
             "blocks": versions,
             "watcher_seen_at": hb,
+            # Heartbeat age computed server-side so client clocks don't
+            # matter. None until a watcher has written its first heartbeat.
+            # The client treats a stale age as "Claude's session is gone"
+            # and unlocks the page instead of waiting on an ack forever.
+            "watcher_age_s": (int(time.time()) - hb) if hb else None,
             "finished": _is_terminal(state_dir),
             "response_id": doc.response_id,
             "consumed_events": consumed,

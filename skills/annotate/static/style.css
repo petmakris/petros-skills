@@ -210,6 +210,19 @@ main.prose th {
   padding-left: var(--content-gutter);
   padding-right: var(--content-gutter);
 }
+.general-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.general-hint kbd {
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 
 /* === Footer submit actions =========================================== */
 footer.actions {
@@ -726,8 +739,26 @@ main.prose mark.search-hit {
 }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
 
+/* Dead-watcher warning: the Claude session behind this page is gone (no
+   heartbeat). Same ribbon position as the busy banner, warning tone. */
+.watcher-dead-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, #f59e0b 55%, var(--border));
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  background: color-mix(in srgb, #f59e0b 14%, var(--surface));
+  color: var(--text);
+  font-size: 14px;
+}
+
 body.is-busy .hover-actions,
-body.is-busy .general-composer,
 body.is-busy .choice-submit-btn,
 body.is-busy .card-submit-btn,
 body.is-editing .hover-actions {

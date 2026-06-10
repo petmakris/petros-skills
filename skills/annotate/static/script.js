@@ -968,7 +968,13 @@
         input.value = "";
         try { localStorage.removeItem(KEY); } catch {}
         sync();
-        if (statusEl) statusEl.textContent = "sent — Claude is responding…";
+        // The server queues events, so a send while Claude is mid-update is
+        // safe — but say so, instead of implying an immediate response.
+        if (statusEl) {
+          statusEl.textContent = document.body.classList.contains("is-busy")
+            ? "queued — Claude will get to it after the current update…"
+            : "sent — Claude is responding…";
+        }
       }).catch(() => {
         sendBtn.disabled = false;
         if (statusEl) statusEl.textContent = "send failed — try again";
@@ -976,8 +982,10 @@
     }
 
     input.addEventListener("input", sync);
+    // Same chord as the block cards: Enter is a newline, ⌘/Ctrl+Enter sends.
+    // Plain-Enter-to-send once cost a user a multi-line answer mid-compose.
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); }
     });
     sendBtn.addEventListener("click", send);
   })();
@@ -1142,8 +1150,42 @@
       .catch(() => { /* swallow — next tick retries */ });
   }
 
+  // A heartbeat older than this means the watcher (and the Claude session
+  // that owns it) is dead, not slow — the watcher writes every ~1s, including
+  // while it blocks on an ack.
+  const WATCHER_DEAD_AFTER_S = 15;
+
+  // The session behind this page died mid-event (crash, closed terminal).
+  // Without this, the unacked event keeps busy=true forever and the page
+  // stays locked with a spinner that lies. Show the truth and unlock.
+  function setWatcherDead(dead) {
+    let banner = document.getElementById("watcher-dead-banner");
+    if (dead) {
+      if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "watcher-dead-banner";
+        banner.className = "watcher-dead-banner";
+        const label = document.createElement("span");
+        label.textContent =
+          "Claude's session is gone — your last submission was not processed. " +
+          "Re-run annotate from a Claude session to pick this page back up.";
+        banner.append(label);
+        const header = document.querySelector(".page-header");
+        if (header) header.insertAdjacentElement("afterend", banner);
+        else document.body.insertBefore(banner, document.body.firstChild);
+      }
+    } else if (banner) {
+      banner.remove();
+    }
+  }
+
   function onPollDelta(data) {
-    setBusy(data.busy);
+    const watcherDead = typeof data.watcher_age_s === "number"
+      && data.watcher_age_s > WATCHER_DEAD_AFTER_S;
+    setWatcherDead(watcherDead);
+    // A dead watcher means no ack is ever coming — don't keep the page
+    // locked on its behalf.
+    setBusy(data.busy && !watcherDead);
     refreshStatusline();
     // 1. Clear spinners for comments Claude finished processing.
     handleConsumedEvents(data.consumed_events);

@@ -15,6 +15,36 @@ def test_load_missing_returns_empty(tmp_path):
     assert doc.blocks == []
 
 
+def test_load_drops_empty_markdown_blocks(tmp_path):
+    # A real push once shipped a 0-char untitled block; the page rendered a
+    # blank card. Empty markdown blocks are noise — load() filters them so
+    # they never render and disappear on the next save (self-healing).
+    path = tmp_path / "blocks.json"
+    path.write_text(json.dumps({
+        "response_id": "r-e", "title": "t", "blocks": [
+            {"id": "section-1", "title": "A", "markdown": "real content"},
+            {"id": "section-2", "markdown": ""},
+            {"id": "section-3", "title": "ghost", "markdown": "   \n  "},
+        ],
+    }))
+    doc = load(path)
+    assert [b["id"] for b in doc.blocks] == ["section-1"]
+
+
+def test_load_keeps_spec_blocks_without_markdown(tmp_path):
+    # kind blocks (sequence/diagram/choice) carry a spec, not markdown —
+    # the empty-markdown filter must not eat them.
+    path = tmp_path / "blocks.json"
+    path.write_text(json.dumps({
+        "response_id": "r-s", "title": "t", "blocks": [
+            {"id": "section-1", "kind": "sequence",
+             "spec": {"actors": [], "steps": []}},
+        ],
+    }))
+    doc = load(path)
+    assert [b["id"] for b in doc.blocks] == ["section-1"]
+
+
 def test_save_and_load_round_trip(tmp_path):
     path = tmp_path / "blocks.json"
     doc = BlocksDoc(response_id="r-1", title="t", blocks=[

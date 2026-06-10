@@ -22,6 +22,8 @@ You wake here when a task-notification arrives whose first stdout line is one of
    - `selected_options` — for `type: "choice"`: the option id(s) the user picked (a list). Absent otherwise.
    - `text` — the user's free-text feedback.
    - `selected_text` — the span they highlighted, or `null` if the comment is block-scoped.
+   - `block_snippet` — optional: a short plain-text snapshot of the block as the user saw it when commenting (useful when the block has since been rewritten).
+   - `prefix` / `suffix` — optional: surrounding context that pins down *which* occurrence of `selected_text` was highlighted when it appears more than once in the block.
    - For `type == "dismiss"`: `block_id` is the block to remove; `text` is empty and ignored. Jump to the `dismiss` subsection below.
    - `images` — array of `{token, path}` entries (or empty).  When non-empty, `Read` each `path` before composing your rewrite so you see the screenshots.
 3. **Apply the block-rewrite contract** (see "Block-rewrite contract" below).
@@ -150,4 +152,9 @@ If the user says "scrap it" / "respond in terminal" / "stop annotating" / equiva
 
 ## Page-wide single-flight lock
 
-The browser page is single-flight: while any submitted event is unacked, the page is locked (all comment / reject / dismiss affordances disabled, a "Claude is updating…" banner shown), and only one comment editor can be open at a time. The lock is server-authoritative — `/poll` reports `busy: true` until you write the event's `.ack`. Practical consequence for you: **always write the `<consumed_dir>/<event_id>.ack` when you finish handling an event**, even on a no-op or malformed payload — otherwise the page stays locked forever.
+The browser page is single-flight: while any submitted event is unacked, the page is locked (block comment / reject / dismiss affordances disabled, a "Claude is updating…" banner shown), and only one comment editor can be open at a time. The lock is server-authoritative — `/poll` reports `busy: true` until you write the event's `.ack`. Practical consequence for you: **always write the `<consumed_dir>/<event_id>.ack` when you finish handling an event**, even on a no-op or malformed payload — otherwise the page stays locked until the user is told your session died.
+
+Two deliberate softenings of the lock:
+
+- The **general composer stays usable while busy** — its submissions queue server-side and the watcher delivers them one at a time, so you may receive a second `WEBCOMPANION_EVENT` notification while (or right after) handling the first. Handle them in order; each gets its own ack.
+- The client watches the watcher heartbeat (`watcher_age_s` in `/poll`). If the heartbeat goes stale (the Claude session died mid-event), the page **unlocks itself** and shows a "Claude's session is gone" warning instead of spinning forever. Events submitted in that state stay queued on disk; a freshly armed watcher for the same session directories will re-emit them.

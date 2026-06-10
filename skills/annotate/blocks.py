@@ -43,10 +43,17 @@ def load(path: Path) -> BlocksDoc:
         raw = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return BlocksDoc()
+    # Drop markdown blocks with no content — a blank card is pure noise (one
+    # real push shipped a 0-char untitled block). Spec blocks (kind set) carry
+    # their content in `spec`, so they pass regardless of markdown.
+    blocks = [
+        b for b in (raw.get("blocks") or [])
+        if b.get("kind") or (b.get("markdown") or "").strip()
+    ]
     return BlocksDoc(
         response_id=raw.get("response_id", ""),
         title=raw.get("title", ""),
-        blocks=list(raw.get("blocks") or []),
+        blocks=blocks,
         glossary=list(raw.get("glossary") or []),
     )
 
