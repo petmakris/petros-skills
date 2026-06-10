@@ -25,6 +25,39 @@ The block carries Mermaid source; the server renders it to SVG with `mmdc`.
 prose — visually and token-wise. Frame the diagram with a short prose block; the
 diagram must add clarity, not decorate.
 
+## Authoring rules — keep the graph legible (apply before emitting)
+
+`mmdc` renders exactly the graph you describe; it will not rescue bad topology. A
+diagram that reads as broken is almost always one of these mistakes, not a render
+bug. Check each before emitting:
+
+- **No self-loops.** `A --> A` renders as a dangling teardrop with the label in a
+  detached floating box — it always looks broken. To express "this repeats every
+  turn / happens continuously", put that as the **label on the meaningful
+  transition** (`SEL -->|"re-inject every turn"| Manual`), or add a separate small
+  node, or a `note`. Never point a node at itself unless the diagram IS a state
+  machine where the self-transition is the actual subject.
+- **One dominant direction.** Pick `TD` (top-down) for pipelines/flows or `LR` for
+  wide fan-outs, and let every arrow flow that way. Don't mix upstream and
+  downstream arrows into the same node from opposite sides.
+- **Minimize crossings.** Order sibling nodes left-to-right in the order their
+  edges occur so arrows don't cross. If two edges must cross, that's usually a sign
+  the node order is wrong — reorder before accepting the crossing.
+- **Bound the size.** Aim for ≤ ~10 nodes. If it's bigger, split into two diagrams
+  or collapse a cluster into one node — a dense graph is less clear than prose.
+- **Quote labels, break with `<br/>`.** Wrap any node/edge label containing spaces,
+  punctuation, `:`/`+`/`()` or an apostrophe in double quotes
+  (`A["selectLiveObjectives<br/>live-objective selector"]`). Keep node text to ≤ 2
+  short lines; push detail into the framing prose block, not the node.
+- **Fan-out, not back-edges, for shared producers.** When one node feeds several
+  consumers (a selector feeding manual/live/judge), draw three forward edges to the
+  three consumers — don't loop an edge back up or reuse one node as both source and
+  sink in a way that forces a reverse arrow.
+
+If you catch yourself reaching for a self-loop or a back-edge to show "repeatedly"
+or "each turn", stop and convert it to an edge label — that single rule prevents the
+most common ugly diagram.
+
 ## Block shape
 
 A `kind: "diagram"` block looks like this in `blocks.json`:
