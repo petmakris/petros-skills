@@ -33,6 +33,17 @@ for style in "$SCRIPT_DIR"/output-styles/*.md; do
   relink "$style" "$HOME/.claude/output-styles/$name"
 done
 
+# Prune style symlinks whose source was deleted from the repo (e.g. ghostwrite).
+# The loop above only adds/refreshes; it never removes, so a deleted style would
+# leave a dangling link behind. Drop any symlink here that no longer resolves.
+for link in "$HOME"/.claude/output-styles/*.md; do
+  [ -L "$link" ] || continue
+  if [ ! -e "$link" ]; then
+    echo "  Removed stale output style $(basename "$link") (was -> $(readlink "$link"))"
+    rm -f "$link"
+  fi
+done
+
 # 3b. Symlink statusline
 relink "$SCRIPT_DIR/statusline.sh" "$HOME/.claude/statusline.sh"
 
