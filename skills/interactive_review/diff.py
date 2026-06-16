@@ -13,6 +13,7 @@ Line anchors used by the rest of the skill have the form:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -131,11 +132,51 @@ def files_to_json(files: list[FileChange]) -> list[dict]:
     return out
 
 
-def fetch_pr_diff(pr_ref: str) -> tuple[str, dict]:
-    diff = subprocess.check_output(["gh", "pr", "diff", pr_ref, "--patch"], text=True)
+def _pr_meta(pr_ref: str, cwd: str | None = None) -> dict:
     meta_json = subprocess.check_output(
         ["gh", "pr", "view", pr_ref, "--json", "title,headRefName,baseRefName,author,url,headRefOid"],
-        text=True,
+        text=True, cwd=cwd,
     )
-    meta = json.loads(meta_json)
+    return json.loads(meta_json)
+
+
+def _rev_exists(ref: str, cwd: str | None = None) -> bool:
+    try:
+        subprocess.check_output(["git", "rev-parse", "--verify", ref],
+                                text=True, stderr=subprocess.DEVNULL, cwd=cwd)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _local_git_diff(meta: dict, cwd: str | None = None) -> str:
+    """Fallback for PRs too large for `gh pr diff` (GitHub caps at 300 files).
+
+    Builds the diff locally with three-dot semantics against the PR's base,
+    excluding generated bulk files (overridable via INTERACTIVE_REVIEW_LOCAL_EXCLUDE,
+    a comma-separated list of pathspec globs; default excludes *.json).
+    """
+    base = meta.get("baseRefName") or "master"
+    base_ref = f"origin/{base}" if _rev_exists(f"origin/{base}", cwd) else base
+    head = next((h for h in (meta.get("headRefName"), meta.get("headRefOid"), "HEAD")
+                 if h and _rev_exists(h, cwd)), "HEAD")
+    exclude_env = os.environ.get("INTERACTIVE_REVIEW_LOCAL_EXCLUDE", "*.json")
+    excludes = [g.strip() for g in exclude_env.split(",") if g.strip()]
+    args = ["git", "-c", "color.ui=false", "diff", "--no-color",
+            f"{base_ref}...{head}", "--", "."]
+    args += [f":(exclude){g}" for g in excludes]
+    return subprocess.check_output(args, text=True, cwd=cwd)
+
+
+def fetch_pr_diff(pr_ref: str, cwd: str | None = None) -> tuple[str, dict]:
+    meta = _pr_meta(pr_ref, cwd)
+    try:
+        diff = subprocess.check_output(
+            ["gh", "pr", "diff", pr_ref, "--patch"], text=True,
+            stderr=subprocess.DEVNULL, cwd=cwd,
+        )
+    except subprocess.CalledProcessError:
+        # gh refuses diffs over 300 files (HTTP 406). Fall back to local git,
+        # filtered to non-generated files.
+        diff = _local_git_diff(meta, cwd)
     return diff, meta

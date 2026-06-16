@@ -289,7 +289,7 @@ class Handlers:
         if not isinstance(pr_ref, str) or not pr_ref:
             raise ValueError("payload missing 'pr' (PR number, URL, or branch)")
         try:
-            diff_text, meta = diff_module.fetch_pr_diff(pr_ref)
+            diff_text, meta = diff_module.fetch_pr_diff(pr_ref, dirs.get("_cwd"))
         except Exception as e:
             raise ValueError(f"gh pr fetch failed: {e}") from e
         files = diff_module.parse_unified_diff(diff_text)
