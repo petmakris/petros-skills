@@ -112,11 +112,16 @@ main.prose table {
   border-collapse: collapse;
   margin: 1em 0;
   font-size: 0.95em;
+  max-width: 100%;
 }
 main.prose th, main.prose td {
   border: 1px solid var(--border);
   padding: 6px 12px;
   text-align: left;
+  /* `anywhere` (not `break-word`) so long unbreakable tokens — file paths,
+     UUIDs, inline code — shrink the cell's min-content width and let the
+     table fit the card instead of overflowing past its clipped edge. */
+  overflow-wrap: anywhere;
 }
 main.prose th {
   background: var(--surface);
