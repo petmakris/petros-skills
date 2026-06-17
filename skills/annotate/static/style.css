@@ -112,16 +112,19 @@ main.prose table {
   border-collapse: collapse;
   margin: 1em 0;
   font-size: 0.95em;
+  /* display:block turns the table itself into the scroll container. Prose
+     cells still wrap to fit the card; when an unbreakable token (file path,
+     UUID, inline code) makes the grid wider than the card, it scrolls
+     horizontally instead of being clipped by the card's overflow:hidden. */
+  display: block;
+  width: fit-content;
   max-width: 100%;
+  overflow-x: auto;
 }
 main.prose th, main.prose td {
   border: 1px solid var(--border);
   padding: 6px 12px;
   text-align: left;
-  /* `anywhere` (not `break-word`) so long unbreakable tokens — file paths,
-     UUIDs, inline code — shrink the cell's min-content width and let the
-     table fit the card instead of overflowing past its clipped edge. */
-  overflow-wrap: anywhere;
 }
 main.prose th {
   background: var(--surface);
