@@ -10,6 +10,7 @@ from skills.annotate.diagrams.mermaid import (
     validate,
     render,
     _postprocess,
+    _strip_init_directives,
 )
 from skills.annotate.server import _render_block_for_raw
 
@@ -127,6 +128,41 @@ def test_postprocess_appends_to_existing_class():
 def test_postprocess_idempotent_when_already_tagged():
     raw = '<svg class="annotate-diagram mermaid" xmlns="http://www.w3.org/2000/svg"><g/></svg>'
     assert _postprocess(raw) == raw
+
+
+def test_postprocess_appends_to_single_quoted_class():
+    # mmdc may emit single-quoted attributes; must append, not inject a second
+    # (duplicate) class attribute.
+    raw = "<svg class='mermaid' xmlns='http://www.w3.org/2000/svg'><g/></svg>"
+    result = _postprocess(raw)
+    assert result.count("class=") == 1
+    assert "annotate-diagram" in result
+    assert "mermaid" in result
+
+
+def test_postprocess_strips_script_tags():
+    # The SVG is injected as innerHTML; any <script> must be excised regardless
+    # of how it got there.
+    raw = ('<svg xmlns="http://www.w3.org/2000/svg">'
+           '<script>alert(1)</script><g/></svg>')
+    result = _postprocess(raw)
+    assert "<script" not in result
+    assert "alert(1)" not in result
+
+
+def test_strip_init_directives_removes_security_override():
+    src = '%%{init: {"securityLevel":"loose"}}%%\nflowchart TD\n  A-->B'
+    out = _strip_init_directives(src)
+    assert "init" not in out
+    assert "securityLevel" not in out
+    assert "A-->B" in out
+
+
+def test_strip_init_directives_removes_multiple():
+    src = '%%{init: {"theme":"dark"}}%%\n%%{wrap}%%\ngraph TD\n A-->B'
+    out = _strip_init_directives(src)
+    assert "%%{" not in out
+    assert "A-->B" in out
 
 
 @requires_mmdc

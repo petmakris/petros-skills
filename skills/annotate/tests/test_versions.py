@@ -54,6 +54,40 @@ def test_sequence_block_uses_canonical_spec(tmp_path):
     assert versions == {"b-0": 1}
 
 
+def test_diagram_spec_change_bumps(tmp_path):
+    """Regression: diagram content lives in `spec`, not `markdown`. A spec edit
+    (e.g. rewriting the Mermaid source) must bump the version, or the client
+    never refetches the updated SVG."""
+    vp = tmp_path / "versions.json"
+    derive_versions(vp, [
+        {"id": "b-0", "kind": "diagram", "spec": {"type": "flowchart", "source": "A-->B"}}
+    ])
+    versions = derive_versions(vp, [
+        {"id": "b-0", "kind": "diagram", "spec": {"type": "flowchart", "source": "A-->C"}}
+    ])
+    assert versions == {"b-0": 2}
+
+
+def test_diagram_spec_unchanged_no_bump(tmp_path):
+    vp = tmp_path / "versions.json"
+    spec = {"type": "flowchart", "source": "A-->B"}
+    derive_versions(vp, [{"id": "b-0", "kind": "diagram", "spec": spec}])
+    versions = derive_versions(vp, [{"id": "b-0", "kind": "diagram", "spec": dict(spec)}])
+    assert versions == {"b-0": 1}
+
+
+def test_choice_spec_change_bumps(tmp_path):
+    """Choice content also lives in `spec`; a spec edit must bump the version."""
+    vp = tmp_path / "versions.json"
+    derive_versions(vp, [
+        {"id": "b-0", "kind": "choice", "spec": {"options": [{"id": "o1", "label": "A"}]}}
+    ])
+    versions = derive_versions(vp, [
+        {"id": "b-0", "kind": "choice", "spec": {"options": [{"id": "o1", "label": "B"}]}}
+    ])
+    assert versions == {"b-0": 2}
+
+
 def test_kind_change_bumps(tmp_path):
     vp = tmp_path / "versions.json"
     derive_versions(vp, [{"id": "b-0", "markdown": "hi"}])

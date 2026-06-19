@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # tool_name -> coarse, human-friendly label. The ONLY strings that can ever
@@ -60,10 +61,23 @@ def _in_flight_ids(events_dir: Path, consumed_dir: Path) -> set[str]:
 
 
 def _atomic_write(path: Path, text: str) -> None:
+    # Unique temp name per writer (mkstemp), not a fixed `<name>.tmp`: this hook
+    # can fire concurrently for the same in-flight event (parallel tool calls),
+    # and a shared temp name lets two writers truncate the same file so one
+    # `replace` hits FileNotFoundError. Mirrors web_companion.atomic, inlined
+    # here because the hook runs standalone without the repo on sys.path.
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def main() -> None:

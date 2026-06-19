@@ -575,6 +575,8 @@
     if (section.querySelector(".updating-overlay")) return;
     const overlay = document.createElement("div");
     overlay.className = "updating-overlay";
+    overlay.setAttribute("role", "status");
+    overlay.setAttribute("aria-live", "polite");
     const pill = document.createElement("div");
     pill.className = "updating-pill";
     const spinner = document.createElement("span");
@@ -755,9 +757,15 @@
       const up = () => {
         handle.removeEventListener("pointermove", move);
         handle.removeEventListener("pointerup", up);
+        handle.removeEventListener("pointercancel", up);
+        try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
       };
       handle.addEventListener("pointermove", move);
       handle.addEventListener("pointerup", up);
+      // pointercancel fires if capture is lost (e.g. the card is replaced by a
+      // poll-driven update mid-drag); without this the move listener would leak
+      // on a detached node, pinning the textarea/wrap closures.
+      handle.addEventListener("pointercancel", up);
     });
     handle.addEventListener("dblclick", () => {
       delete wrap.dataset.userSized;
@@ -1054,6 +1062,8 @@
         banner = document.createElement("div");
         banner.id = "busy-banner";
         banner.className = "busy-banner";
+        banner.setAttribute("role", "status");
+        banner.setAttribute("aria-live", "polite");
         const spin = document.createElement("span");
         spin.className = "busy-spinner";
         const label = document.createElement("span");
@@ -1165,6 +1175,8 @@
         banner = document.createElement("div");
         banner.id = "watcher-dead-banner";
         banner.className = "watcher-dead-banner";
+        banner.setAttribute("role", "alert");
+        banner.setAttribute("aria-live", "assertive");
         const label = document.createElement("span");
         label.textContent =
           "Claude's session is gone — your last submission was not processed. " +

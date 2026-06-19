@@ -116,7 +116,7 @@ def _canonical_spec(spec: dict[str, Any]) -> str:
 
 
 def update_spec_block(doc: BlocksDoc, block_id: str, new_spec: dict[str, Any]) -> bool:
-    """Update a sequence block's spec. Returns True if content changed.
+    """Update a spec-bearing block's spec (sequence/diagram/choice). Returns True if changed.
 
     No version field is mutated — versions are derived in versions.py.
     Canonical-JSON compare so reordered keys are a no-op.

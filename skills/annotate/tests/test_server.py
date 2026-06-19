@@ -367,6 +367,72 @@ class ServerStartupTests(unittest.TestCase):
         self.assertEqual(resp.status, 400)
         conn.close()
 
+    def test_submit_rejects_image_path_outside_images_dir(self):
+        """A client-supplied image path outside <state_dir>/images/ is rejected
+        (422) — stops a hostile client naming an arbitrary file for Claude to
+        read as a 'pasted image'."""
+        response_dir = Path(self.sess["response_dir"])
+        _write_blocks(response_dir, "resp-img", "T", [
+            {"id": "b-0", "markdown": "some text"},
+        ])
+        payload = {
+            "block_id": "b-0",
+            "type": "comment",
+            "text": "see attached",
+            "images": [{"token": "paste-1", "path": "/etc/passwd"}],
+        }
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("POST", self.base + "/api/submit", body=json.dumps(payload),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 422)
+        conn.close()
+        self.assertEqual(len(list(Path(self.sess["events_dir"]).glob("*.json"))), 0)
+
+    def test_submit_accepts_image_path_under_images_dir(self):
+        response_dir = Path(self.sess["response_dir"])
+        _write_blocks(response_dir, "resp-img2", "T", [
+            {"id": "b-0", "markdown": "some text"},
+        ])
+        images_dir = Path(self.sess["state_dir"]) / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        img_path = images_dir / "abc.png"
+        img_path.write_bytes(b"\x89PNG")
+        payload = {
+            "block_id": "b-0",
+            "type": "comment",
+            "text": "see attached",
+            "images": [{"token": "paste-1", "path": str(img_path)}],
+        }
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("POST", self.base + "/api/submit", body=json.dumps(payload),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 202)
+        conn.close()
+        self.assertEqual(len(list(Path(self.sess["events_dir"]).glob("*.json"))), 1)
+
+    def test_submit_rejects_nonexistent_image_under_images_dir(self):
+        """A path inside images/ that isn't a real file (never uploaded) is
+        rejected — uploads always precede the submit that echoes the path."""
+        response_dir = Path(self.sess["response_dir"])
+        _write_blocks(response_dir, "resp-img3", "T", [
+            {"id": "b-0", "markdown": "some text"},
+        ])
+        ghost = Path(self.sess["state_dir"]) / "images" / "never-uploaded.png"
+        payload = {
+            "block_id": "b-0",
+            "type": "comment",
+            "text": "see attached",
+            "images": [{"token": "paste-1", "path": str(ghost)}],
+        }
+        conn = http.client.HTTPConnection("localhost", self.info["port"], timeout=2)
+        conn.request("POST", self.base + "/api/submit", body=json.dumps(payload),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 422)
+        conn.close()
+
     def test_submit_returns_409_when_terminal(self):
         (Path(self.sess["state_dir"]) / "finished").write_text("")
         payload = {"type": "comment", "text": "too late"}

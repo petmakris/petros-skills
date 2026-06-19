@@ -33,6 +33,13 @@ from skills._shared.web_companion.atomic import write_text_atomic
 _INTER_TAG_WS = re.compile(r">\s+<")
 _TRAILING_WS = re.compile(r"[ \t]+$", re.MULTILINE)
 
+# Kinds whose content lives in `spec`, not `markdown`. Their hash must key on
+# the canonical spec — otherwise a spec edit (e.g. rewriting a diagram's
+# Mermaid source) leaves the hash unchanged, the version chain never grows,
+# and the client never refetches the updated block. Keep in sync with
+# server._render_block_for_raw, which renders these from `spec`.
+_SPEC_KINDS = ("sequence", "diagram", "choice")
+
 
 def _canonical_spec(spec: dict[str, Any]) -> str:
     """Stable JSON serialization — must match blocks._canonical_spec."""
@@ -56,7 +63,7 @@ def _normalize_markdown(s: str) -> str:
 def _block_hash(blk: dict[str, Any]) -> str:
     """SHA1 of (kind, normalized-content)."""
     kind = blk.get("kind") or "markdown"
-    if kind == "sequence":
+    if kind in _SPEC_KINDS:
         body = _canonical_spec(blk.get("spec") or {})
     else:
         body = _normalize_markdown(blk.get("markdown") or "")

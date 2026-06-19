@@ -55,7 +55,12 @@ def render(spec: dict[str, Any], block_id: str) -> str:
     if not mmdc:
         raise RenderError("mmdc (mermaid-cli) not found on PATH")
 
-    source = spec["source"]
+    # Neutralize inline init directives before render. A `%%{init: {...}}%%`
+    # directive in the source can override the config below — including
+    # `securityLevel` — so source text could re-enable script-bearing SVG that
+    # we then inject as innerHTML. Strip every directive; theme/background are
+    # already fixed via CLI flags, so nothing legitimate is lost.
+    source = _strip_init_directives(spec["source"])
     with tempfile.TemporaryDirectory() as td:
         in_path = os.path.join(td, "in.mmd")
         out_path = os.path.join(td, "out.svg")
@@ -68,8 +73,13 @@ def render(spec: dict[str, Any], block_id: str) -> str:
         # the annotate card, overflowing the node boxes mmdc measured at render
         # time (text clips at the box edge). <text> labels lock geometry in SVG
         # user-space so the diagram renders identically in any host document.
+        #
+        # securityLevel:"strict" is mermaid's default, but we pin it explicitly:
+        # the rendered SVG is injected into the page as innerHTML, so a config or
+        # mmdc default that ever relaxed it would open script injection.
         with open(cfg_path, "w", encoding="utf-8") as f:
-            f.write('{"htmlLabels": false, "flowchart": {"htmlLabels": false}}')
+            f.write('{"securityLevel": "strict", "htmlLabels": false,'
+                    ' "flowchart": {"htmlLabels": false}}')
         try:
             proc = subprocess.run(
                 [mmdc, "-i", in_path, "-o", out_path, "-c", cfg_path,
@@ -80,7 +90,11 @@ def render(spec: dict[str, Any], block_id: str) -> str:
             )
         except subprocess.TimeoutExpired as e:
             raise RenderError(f"mmdc timed out after {RENDER_TIMEOUT_S}s") from e
-        if proc.returncode != 0 or not os.path.exists(out_path):
+        # Require a non-empty file: returncode 0 with a zero-byte out.svg
+        # (seen on some mmdc edge cases) would otherwise render as a silent
+        # blank diagram instead of the inline error pill.
+        if (proc.returncode != 0 or not os.path.exists(out_path)
+                or os.path.getsize(out_path) == 0):
             detail = (proc.stderr or proc.stdout or "").strip()
             raise RenderError(f"mmdc failed: {detail or 'no output produced'}")
         with open(out_path, "r", encoding="utf-8") as f:
@@ -90,6 +104,17 @@ def render(spec: dict[str, Any], block_id: str) -> str:
 
 
 _XML_PROLOG = re.compile(r"^\s*<\?xml[^>]*\?>\s*", re.IGNORECASE)
+_INIT_DIRECTIVE = re.compile(r"%%\{.*?\}%%", re.DOTALL)
+_SCRIPT_TAG = re.compile(r"<script\b.*?</script\s*>", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_init_directives(source: str) -> str:
+    """Remove mermaid `%%{ ... }%%` directives (e.g. init) from source.
+
+    These can override the render config — including securityLevel — so they
+    are stripped before render. Non-greedy so multiple directives each match.
+    """
+    return _INIT_DIRECTIVE.sub("", source)
 
 
 def _postprocess(svg: str) -> str:
@@ -99,8 +124,12 @@ def _postprocess(svg: str) -> str:
     rather than injecting a second (malformed) class attribute.
     """
     svg = _XML_PROLOG.sub("", svg).strip()
-    if re.search(r'<svg\b[^>]*class="[^"]*\bannotate-diagram\b', svg):
+    # Defense in depth: this SVG is injected as innerHTML. With securityLevel
+    # strict + directives stripped, mmdc never emits <script>, but excise any
+    # that slip through so a single regression can't become script execution.
+    svg = _SCRIPT_TAG.sub("", svg)
+    if re.search(r"""<svg\b[^>]*class=["'][^"']*\bannotate-diagram\b""", svg):
         return svg  # already tagged
-    if re.search(r'<svg\b[^>]*class="', svg):
-        return re.sub(r'(<svg\b[^>]*class=")', r'\1annotate-diagram ', svg, count=1)
+    if re.search(r"""<svg\b[^>]*class=["']""", svg):
+        return re.sub(r"""(<svg\b[^>]*class=["'])""", r"\1annotate-diagram ", svg, count=1)
     return re.sub(r"<svg\b", '<svg class="annotate-diagram"', svg, count=1)

@@ -8,6 +8,7 @@
   let fuse = null;
   let countEl = null;
   let observer = null;
+  let indexDirty = false;
 
   function prose() { return document.querySelector("main.prose"); }
 
@@ -139,6 +140,7 @@
     // Apply the current query and reflect whether the box is non-empty, so the
     // clear (×) button and the "/" hint can swap via CSS.
     function refresh() {
+      if (indexDirty) { buildIndex(); indexDirty = false; }
       applyFilter(input.value);
       const wrap = input.closest(".header-search");
       if (wrap) wrap.classList.toggle("has-query", input.value.trim().length > 0);
@@ -175,9 +177,17 @@
     if (root) {
       let t = null;
       observer = new MutationObserver(() => {
+        // The content changed, so the fuse index is stale. Mark it dirty and
+        // rebuild lazily on the next keystroke. Only re-run the live filter
+        // while a query is active — with an empty box there is nothing to
+        // re-highlight, and rebuilding every poll tick would be wasted work
+        // (and would wipe any in-progress text selection in a block).
+        indexDirty = true;
+        if (!input.value.trim()) return;
         clearTimeout(t);
         t = setTimeout(() => {
           buildIndex();
+          indexDirty = false;
           applyFilter(input.value);
         }, 120);
       });
