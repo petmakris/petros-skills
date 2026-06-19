@@ -255,8 +255,33 @@
 
   // ── Block loading and rendering ────────────────────────────────────────────
 
+  // Syntax-highlight fenced code via highlight.js. Returning a full
+  // `<pre><code class="hljs …">` makes markdown-it use it verbatim (it only
+  // wraps when the hook returns a non-<pre> string), so `code.hljs` gets the
+  // theme background from code-theme.css. hljs.highlight() HTML-escapes its
+  // input; an empty return falls back to markdown-it's own escaped rendering
+  // (e.g. if highlight.min.js failed to load).
+  function highlightFence(str, lang) {
+    if (typeof window.hljs !== "object" || !window.hljs) return "";
+    let inner;
+    try {
+      if (lang && hljs.getLanguage(lang)) {
+        inner = hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
+      } else if (str.length > 20000) {
+        return ""; // skip ~35-grammar auto-detect on a huge untagged fence
+      } else {
+        inner = hljs.highlightAuto(str).value; // Claude often omits the lang tag
+      }
+    } catch (_) {
+      return "";
+    }
+    const cls = "hljs" + (lang ? " language-" + lang.replace(/[^\w-]/g, "") : "");
+    return '<pre><code class="' + cls + '">' + inner + "</code></pre>";
+  }
+
   const blockMd = (typeof window.markdownit === "function")
-    ? window.markdownit({ html: true, linkify: true, typographer: false, breaks: false })
+    ? window.markdownit({ html: true, linkify: true, typographer: false,
+                          breaks: false, highlight: highlightFence })
     : null;
 
   // Conservative sanitizer for HTML that lands in a block via markdown-it

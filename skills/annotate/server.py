@@ -231,7 +231,12 @@ class Handlers:
         head = ('<link rel="stylesheet" href="/static/style.css">'
                 '<link rel="stylesheet" href="/static/diagram.css">'
                 '<link rel="stylesheet" href="/static/popover.css">'
+                '<link rel="stylesheet" href="/static/code-theme.css">'
                 '<script src="/static/popover.js" defer></script>'
+                # highlight.js must execute before script.js (which builds the
+                # markdown-it instance with the highlight hook). Both are defer,
+                # so document order is execution order — keep this line first.
+                '<script src="/static/highlight.min.js" defer></script>'
                 '<script src="/static/script.js" defer></script>'
                 '<script src="/static/fuse.min.js" defer></script>'
                 '<script src="/static/search.js" defer></script>'

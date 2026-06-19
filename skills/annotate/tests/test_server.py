@@ -152,6 +152,11 @@ class ServerStartupTests(unittest.TestCase):
         # Markdown content is not inlined — JS fetches /raw.
         self.assertNotIn("Dual-write", body)
         self.assertIn('class="page-header"', body)
+        # Syntax-highlighting assets are wired in, and highlight.js loads before
+        # script.js (which builds the markdown-it highlight hook).
+        self.assertIn('href="/static/code-theme.css"', body)
+        self.assertLess(body.index('/static/highlight.min.js'),
+                        body.index('/static/script.js'))
 
     def test_root_serves_closed_when_cancelled_marker_present(self):
         response_dir = Path(self.sess["response_dir"])

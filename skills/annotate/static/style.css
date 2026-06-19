@@ -54,16 +54,42 @@ main.prose section.block[data-kind="sequence"][data-engaged-type]:hover {
   background: transparent;
 }
 main.prose section.block[data-kind="sequence"]::before { display: none; }
+/* The <pre> is a bare, corner-clipping wrapper; the visible surface is the
+   inner code element (dark theme via code-theme.css, light fallback below). */
 main.prose pre {
+  margin: 1em 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 100%;
+}
+/* Syntax-highlighted code (highlight.js). code-theme.css paints the dark
+   themed background/colors on code.hljs; this rule owns only the layout. */
+main.prose pre code.hljs {
+  display: block;
+  padding: 14px 16px;
+  overflow-x: auto;
+  /* No border-radius here — the parent <pre> clips to its own 8px radius. */
+  font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+/* Fallback when highlight.js is unavailable (failed to load): plain code keeps
+   the original light card so it stays readable on the light page. */
+main.prose pre code:not(.hljs) {
+  display: block;
   background: var(--surface);
   border: 1px solid var(--border);
-  padding: 12px 140px 12px 14px;
-  border-radius: 3px;
-  transition: background-color 120ms ease;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--text);
+  white-space: pre;
+  overflow-x: auto;
   font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13.5px;
-  overflow-x: auto;
-  max-width: 100%;
 }
 /* Inline code only — must not match <code> inside <pre>. */
 main.prose :not(pre) > code {
@@ -71,16 +97,6 @@ main.prose :not(pre) > code {
   padding: 1px 6px; border-radius: 3px;
   font-family: 'Monaspace Radon', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.92em;
-}
-main.prose pre code {
-  background: transparent;
-  padding: 0;
-  border-radius: 0;
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-  white-space: pre;
-  display: block;
 }
 main.prose blockquote {
   border-left: 3px solid var(--border);
@@ -171,7 +187,9 @@ main.prose th {
 .hover-actions[data-visible="1"] { opacity: 1; pointer-events: auto; }
 .hover-actions button {
   width: 26px; height: 26px;
-  background: transparent;
+  /* Solid surface (not transparent) so the buttons stay legible when they
+     float over a dark syntax-highlighted code block, not just light prose. */
+  background: var(--surface);
   border: 1px dashed var(--border);
   border-radius: 50%;
   cursor: pointer;
