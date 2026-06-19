@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -25,6 +26,8 @@ import java.util.Optional;
  */
 public class PrettifyJsonStringAction extends AnAction {
 
+    private static final Logger LOG = Logger.getInstance(PrettifyJsonStringAction.class);
+
     @Override
     public @NotNull ActionUpdateThread getActionUpdateThread() {
         return ActionUpdateThread.BGT;
@@ -32,9 +35,15 @@ public class PrettifyJsonStringAction extends AnAction {
 
     @Override
     public void update(@NotNull AnActionEvent e) {
-        PsiFile file = e.getData(CommonDataKeys.PSI_FILE);
-        Editor editor = e.getData(CommonDataKeys.EDITOR);
-        boolean enabled = file != null && editor != null && findTextBlockAtCaret(file, editor) != null;
+        boolean enabled;
+        try {
+            PsiFile file = e.getData(CommonDataKeys.PSI_FILE);
+            Editor editor = e.getData(CommonDataKeys.EDITOR);
+            enabled = file != null && editor != null && findTextBlockAtCaret(file, editor) != null;
+        } catch (Throwable t) {
+            LOG.warn("[PrettifyJSON] update() threw", t);
+            enabled = false;
+        }
         e.getPresentation().setEnabledAndVisible(enabled);
     }
 
@@ -48,6 +57,7 @@ public class PrettifyJsonStringAction extends AnAction {
         }
         PsiLiteralExpression literal = findTextBlockAtCaret(file, editor);
         if (literal == null) {
+            HintManager.getInstance().showInformationHint(editor, "Put the caret inside a \"\"\" text block");
             return;
         }
         if (!(literal.getValue() instanceof String content)) {
