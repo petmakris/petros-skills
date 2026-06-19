@@ -1,87 +1,9 @@
-// Lightweight JSON helpers that mirror the regex-based extractors used in the
-// IntelliJ plugin. We don't use a full JSON parser because the SSE payloads
-// are small, well-formed snippets emitted by the same server we already trust;
-// the regex approach is faster and matches the Java side bit-for-bit.
-
-/**
- * Decode a JSON string literal body (everything between the outer quotes).
- * Handles standard escapes plus \uXXXX. Matches the Java unescapeJsonString.
- */
-export function unescapeJsonString(s: string): string {
-    let out = "";
-    for (let i = 0; i < s.length; i++) {
-        const c = s.charAt(i);
-        if (c !== "\\" || i + 1 >= s.length) {
-            out += c;
-            continue;
-        }
-        const next = s.charAt(++i);
-        switch (next) {
-            case "n":
-                out += "\n";
-                break;
-            case "r":
-                out += "\r";
-                break;
-            case "t":
-                out += "\t";
-                break;
-            case "b":
-                out += "\b";
-                break;
-            case "f":
-                out += "\f";
-                break;
-            case '"':
-                out += '"';
-                break;
-            case "\\":
-                out += "\\";
-                break;
-            case "/":
-                out += "/";
-                break;
-            case "u":
-                if (i + 4 < s.length) {
-                    out += String.fromCharCode(
-                        Number.parseInt(s.substring(i + 1, i + 5), 16)
-                    );
-                    i += 4;
-                } else {
-                    out += "\\" + next;
-                }
-                break;
-            default:
-                out += "\\" + next;
-                break;
-        }
-    }
-    return out;
-}
-
-export function jsonEscape(s: string): string {
-    return (
-        '"' +
-        s
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"')
-            .replace(/\n/g, "\\n")
-            .replace(/\r/g, "\\r")
-            .replace(/\t/g, "\\t") +
-        '"'
-    );
-}
-
-/** Extract a single string-or-number field from a flat JSON blob. */
-export function jsonField(json: string, key: string): string {
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(
-        '"' + escapedKey + '"\\s*:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|(\\d+))'
-    );
-    const m = re.exec(json);
-    if (!m) return "";
-    return m[1] !== undefined ? unescapeJsonString(m[1]) : m[2];
-}
+// Parsers for the interactive_review server's JSON responses.
+//
+// The server always emits well-formed JSON (Python json.dumps), so we parse
+// with the built-in JSON.parse rather than regex. Each parser is defensive
+// about shape (returns null/[] on anything unexpected) so a malformed or
+// unreachable server can never throw into the extension's event handlers.
 
 export interface ParsedSession {
     sid: string;
@@ -90,38 +12,89 @@ export interface ParsedSession {
     stateDir: string;
 }
 
-export function parseFirstSession(json: string): ParsedSession | null {
-    if (!json || !json.includes('"sid"')) return null;
-    return {
-        sid: jsonField(json, "sid"),
-        prRef: jsonField(json, "pr_ref"),
-        title: jsonField(json, "title"),
-        stateDir: jsonField(json, "state_dir"),
-    };
-}
-
 export interface ParsedThread {
     anchor: string;
     synthesis: string;
     version: number;
 }
 
+function asString(v: unknown): string {
+    return typeof v === "string" ? v : "";
+}
+
+function asNumber(v: unknown): number {
+    return typeof v === "number" ? v : 0;
+}
+
+function tryParse(body: string): unknown {
+    try {
+        return JSON.parse(body);
+    } catch {
+        return undefined;
+    }
+}
+
 /**
- * Parse the bulk threads.json shape:
- *   { "<anchor>": { "latest_synthesis": "...", "version": N, ... }, ... }
- * Matches the Java parseThreadsBulk regex form.
+ * First session from `GET /api/sessions?cwd=…`, which returns a JSON array of
+ * `{sid, pr_ref, title, state_dir}` sorted newest-first. Returns null if the
+ * list is empty, unparseable, or the first entry has no sid.
  */
-export function parseThreadsBulk(json: string): ParsedThread[] {
+export function parseFirstSession(body: string): ParsedSession | null {
+    const data = tryParse(body);
+    const first = Array.isArray(data) ? data[0] : undefined;
+    if (!first || typeof first !== "object") return null;
+    const o = first as Record<string, unknown>;
+    if (typeof o.sid !== "string" || o.sid === "") return null;
+    return {
+        sid: o.sid,
+        prRef: asString(o.pr_ref),
+        title: asString(o.title),
+        stateDir: asString(o.state_dir),
+    };
+}
+
+/**
+ * Parse `GET /s/<sid>/threads.json`, shaped as
+ *   `{ "<anchor>": { "latest_synthesis": "...", "version": N, ... }, ... }`.
+ */
+export function parseThreadsBulk(body: string): ParsedThread[] {
+    const data = tryParse(body);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return [];
     const out: ParsedThread[] = [];
-    const re =
-        /"([^"]+)"\s*:\s*\{[^}]*"latest_synthesis"\s*:\s*"((?:[^"\\]|\\.)*)"[^}]*"version"\s*:\s*(\d+)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(json)) !== null) {
+    for (const [anchor, raw] of Object.entries(data as Record<string, unknown>)) {
+        if (!raw || typeof raw !== "object") continue;
+        const o = raw as Record<string, unknown>;
         out.push({
-            anchor: m[1],
-            synthesis: unescapeJsonString(m[2]),
-            version: Number.parseInt(m[3], 10),
+            anchor,
+            synthesis: asString(o.latest_synthesis),
+            version: asNumber(o.version),
         });
     }
     return out;
+}
+
+/**
+ * Parse a `thread-changed` SSE data payload:
+ *   `{ "anchor": "...", "latest_synthesis": "...", "version": N }`.
+ * Returns null without a valid anchor.
+ */
+export function parseThreadEvent(data: string): ParsedThread | null {
+    const o = tryParse(data);
+    if (!o || typeof o !== "object") return null;
+    const r = o as Record<string, unknown>;
+    if (typeof r.anchor !== "string") return null;
+    return {
+        anchor: r.anchor,
+        synthesis: asString(r.latest_synthesis),
+        version: asNumber(r.version),
+    };
+}
+
+/** Parse a `thread-deleted` SSE data payload (`{ "anchor": "..." }`). */
+export function parseDeletedAnchor(data: string): string | null {
+    const o = tryParse(data);
+    if (o && typeof o === "object" && typeof (o as Record<string, unknown>).anchor === "string") {
+        return (o as Record<string, unknown>).anchor as string;
+    }
+    return null;
 }

@@ -24,7 +24,7 @@ src/
   extension.ts          activate/deactivate, command registration
   sessionClient.ts      HTTP + SSE client (no deps; uses node:http)
   sse.ts                pure SSE parser + line buffer (testable)
-  json.ts               regex-based JSON extractors (matches Java side)
+  json.ts               JSON.parse-based response parsers (defensive about shape)
   types.ts              shared types + parseAnchor
   markdown.ts           synthesis → MarkdownString rewriter (command: URIs)
   commentsController.ts vscode.comments thread management
@@ -32,6 +32,7 @@ src/
   statusBar.ts          StatusBarItem
 test/
   *.test.ts             node:test suites for pure modules
+  integration.ride.ts   end-to-end client run vs a live fake server (npm run test:integration)
 scripts/
   version.js            stamps package.json with 0.1.<git-rev-list-count>
 ```

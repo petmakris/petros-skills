@@ -18,7 +18,6 @@ import { ReviewSessionClient } from "./sessionClient";
 import { IReviewStatusBar } from "./statusBar";
 import { IReviewCommentsController } from "./commentsController";
 import { AnnotationsTreeProvider } from "./annotationsView";
-import { parseAnchor } from "./types";
 import { parseNavTarget } from "./markdown";
 
 let disposables: vscode.Disposable[] = [];
@@ -152,7 +151,6 @@ export function activate(context: vscode.ExtensionContext): void {
     client.start();
 
     disposables = [
-        client,
         statusBar,
         comments,
         tree,
@@ -164,6 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
         navigateCmd,
         gotoSymbolCmd,
         copyCmd,
+        // ReviewSessionClient exposes stop() rather than dispose().
         { dispose: () => client.stop() },
     ] as unknown as vscode.Disposable[];
 
@@ -194,15 +193,9 @@ function resolveServerUrl(): string | null {
         "server.json"
     );
     try {
-        const json = fs.readFileSync(file, "utf8");
-        const m = /"url"\s*:\s*"([^"]+)"/.exec(json);
-        return m ? m[1] : null;
+        const data = JSON.parse(fs.readFileSync(file, "utf8")) as { url?: unknown };
+        return typeof data.url === "string" ? data.url : null;
     } catch {
         return null;
     }
 }
-
-// parseAnchor isn't directly referenced here, but keeping the import so
-// future commands (e.g. "Reveal anchor in editor without opening a thread")
-// don't have to re-add it.
-void parseAnchor;

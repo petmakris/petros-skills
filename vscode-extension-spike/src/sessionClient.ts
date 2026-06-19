@@ -8,10 +8,10 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { URL } from "node:url";
 import {
-    jsonEscape,
     parseFirstSession,
     parseThreadsBulk,
-    jsonField,
+    parseThreadEvent,
+    parseDeletedAnchor,
 } from "./json";
 import { LineBuffer, SseParser } from "./sse";
 import type {
@@ -91,12 +91,7 @@ export class ReviewSessionClient {
         const s = this.current;
         if (!s) throw new Error("no session");
         this.markPending(anchor, true);
-        const body =
-            '{"anchor":' +
-            jsonEscape(anchor) +
-            ',"type":"comment","text":' +
-            jsonEscape(text) +
-            "}";
+        const body = JSON.stringify({ anchor, type: "comment", text });
         try {
             await this.postJson(`/s/${s.sid}/api/submit`, body);
         } catch (err) {
@@ -110,7 +105,7 @@ export class ReviewSessionClient {
     async deleteThread(anchor: string): Promise<void> {
         const s = this.current;
         if (!s) throw new Error("no session");
-        const body = '{"anchor":' + jsonEscape(anchor) + "}";
+        const body = JSON.stringify({ anchor });
         await this.postJson(`/s/${s.sid}/api/threads/delete`, body);
     }
 
@@ -249,7 +244,7 @@ export class ReviewSessionClient {
 
     private handleSseEvent(e: { name: string; data: string }): void {
         if (e.name === "thread-deleted") {
-            const anchor = jsonField(e.data, "anchor");
+            const anchor = parseDeletedAnchor(e.data);
             if (!anchor) return;
             this.cache.delete(anchor);
             this.markPending(anchor, false);
@@ -257,10 +252,9 @@ export class ReviewSessionClient {
             return;
         }
         if (e.name !== "thread-changed") return;
-        const anchor = jsonField(e.data, "anchor");
-        const synthesis = jsonField(e.data, "latest_synthesis");
-        const versionStr = jsonField(e.data, "version");
-        const version = versionStr ? Number.parseInt(versionStr, 10) : 0;
+        const event = parseThreadEvent(e.data);
+        if (!event) return;
+        const { anchor, synthesis, version } = event;
 
         // Server fires thread-changed on EVERY thread mutation, including the
         // user's own appended question (version bumps but synthesis unchanged).
