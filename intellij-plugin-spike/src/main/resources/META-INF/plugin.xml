@@ -23,4 +23,15 @@
                     icon="/icons/annotation_yellow.svg"
                     factoryClass="com.petros.ireview.AnnotationsToolWindowFactory"/>
     </extensions>
+
+    <actions>
+        <action id="com.petros.ireview.PrettifyJsonStringAction"
+                class="com.petros.ireview.PrettifyJsonStringAction"
+                text="Prettify JSON String"
+                description="Reformat the JSON inside the surrounding Java text block, preserving {{placeholders}}.">
+            <add-to-group group-id="EditMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt J"/>
+        </action>
+    </actions>
 </idea-plugin>
