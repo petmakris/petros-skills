@@ -104,6 +104,10 @@ Save `url`, `localhost_url`, `response_dir`, `state_dir`, `events_dir`, `consume
 6. **Arm the watcher** (see "Arming the watcher").  The Monitor runs in the background; your turn ends immediately.  The user can chat in terminal while the page is open.
 7. End your turn.
 
+## Code blocks
+
+Fenced code blocks are syntax-highlighted (highlight.js, Tokyo Night theme) and rendered as a dark card. **Tag the opening fence with the language** (```` ```python ````, ```` ```ts ````, ```` ```bash ````) for accurate coloring; an untagged fence is auto-detected, which is usually right but not guaranteed. Inline `` `code` `` stays a light chip — don't fence single identifiers.
+
 ## Inline HTML inside markdown blocks
 
 A markdown block can contain raw HTML when prose isn't enough — comparison tables, callout boxes, dense tabular data, anything you'd otherwise contort markdown into. The renderer (`markdown-it`) is configured with `html: true`; after render, a conservative client-side sanitizer strips `<script>`, `<iframe>`, `<style>`, `<form>`, `on*` event-handler attributes, and `javascript:` URLs. Everything else passes through.

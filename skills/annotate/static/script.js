@@ -255,8 +255,33 @@
 
   // ── Block loading and rendering ────────────────────────────────────────────
 
+  // Syntax-highlight fenced code via highlight.js. Returning a full
+  // `<pre><code class="hljs …">` makes markdown-it use it verbatim (it only
+  // wraps when the hook returns a non-<pre> string), so `code.hljs` gets the
+  // theme background from code-theme.css. hljs.highlight() HTML-escapes its
+  // input; an empty return falls back to markdown-it's own escaped rendering
+  // (e.g. if highlight.min.js failed to load).
+  function highlightFence(str, lang) {
+    if (typeof window.hljs !== "object" || !window.hljs) return "";
+    let inner;
+    try {
+      if (lang && hljs.getLanguage(lang)) {
+        inner = hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
+      } else if (str.length > 20000) {
+        return ""; // skip ~35-grammar auto-detect on a huge untagged fence
+      } else {
+        inner = hljs.highlightAuto(str).value; // Claude often omits the lang tag
+      }
+    } catch (_) {
+      return "";
+    }
+    const cls = "hljs" + (lang ? " language-" + lang.replace(/[^\w-]/g, "") : "");
+    return '<pre><code class="' + cls + '">' + inner + "</code></pre>";
+  }
+
   const blockMd = (typeof window.markdownit === "function")
-    ? window.markdownit({ html: true, linkify: true, typographer: false, breaks: false })
+    ? window.markdownit({ html: true, linkify: true, typographer: false,
+                          breaks: false, highlight: highlightFence })
     : null;
 
   // Conservative sanitizer for HTML that lands in a block via markdown-it
@@ -575,6 +600,8 @@
     if (section.querySelector(".updating-overlay")) return;
     const overlay = document.createElement("div");
     overlay.className = "updating-overlay";
+    overlay.setAttribute("role", "status");
+    overlay.setAttribute("aria-live", "polite");
     const pill = document.createElement("div");
     pill.className = "updating-pill";
     const spinner = document.createElement("span");
@@ -755,9 +782,15 @@
       const up = () => {
         handle.removeEventListener("pointermove", move);
         handle.removeEventListener("pointerup", up);
+        handle.removeEventListener("pointercancel", up);
+        try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
       };
       handle.addEventListener("pointermove", move);
       handle.addEventListener("pointerup", up);
+      // pointercancel fires if capture is lost (e.g. the card is replaced by a
+      // poll-driven update mid-drag); without this the move listener would leak
+      // on a detached node, pinning the textarea/wrap closures.
+      handle.addEventListener("pointercancel", up);
     });
     handle.addEventListener("dblclick", () => {
       delete wrap.dataset.userSized;
@@ -1054,6 +1087,8 @@
         banner = document.createElement("div");
         banner.id = "busy-banner";
         banner.className = "busy-banner";
+        banner.setAttribute("role", "status");
+        banner.setAttribute("aria-live", "polite");
         const spin = document.createElement("span");
         spin.className = "busy-spinner";
         const label = document.createElement("span");
@@ -1165,6 +1200,8 @@
         banner = document.createElement("div");
         banner.id = "watcher-dead-banner";
         banner.className = "watcher-dead-banner";
+        banner.setAttribute("role", "alert");
+        banner.setAttribute("aria-live", "assertive");
         const label = document.createElement("span");
         label.textContent =
           "Claude's session is gone — your last submission was not processed. " +

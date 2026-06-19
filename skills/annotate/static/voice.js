@@ -50,6 +50,10 @@
     if (base && !/\s$/.test(base)) base += " ";
 
     rec.onresult = (event) => {
+      // If a poll-driven reconcile rebuilt this comment card mid-dictation, the
+      // textarea we captured is detached — writing to it silently loses the
+      // transcript. Stop instead so the mic button resets cleanly.
+      if (!ta.isConnected) { try { rec.stop(); } catch (_) {} return; }
       // Rebuild the whole utterance each event (continuous keeps all results),
       // which is simplest and avoids double-counting finalized segments.
       let txt = "";

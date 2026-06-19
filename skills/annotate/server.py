@@ -44,6 +44,36 @@ CLOSED_HTML = """<!DOCTYPE html>
 """
 
 
+def _images_ok(images, state_dir: Path) -> bool:
+    """Every submitted image must point at a file under <state_dir>/images/.
+
+    Paths are minted server-side by uploads.py (uuid filename under that dir)
+    and echoed back by the client. Validating containment stops a hostile or
+    buggy client from naming an arbitrary path (e.g. /etc/passwd) that Claude
+    would then be told to read as a 'pasted image'. Empty list is fine.
+    """
+    if not isinstance(images, list):
+        return False
+    images_root = (state_dir / "images").resolve()
+    for img in images:
+        if not isinstance(img, dict):
+            return False
+        p = img.get("path")
+        if not isinstance(p, str) or not p:
+            return False
+        try:
+            resolved = Path(p).resolve()
+        except (OSError, ValueError):
+            return False
+        # Must be contained AND be a real file: the upload always lands the
+        # image before the submit echoes its path, so a path that doesn't
+        # resolve to a regular file under images/ is never a legitimate paste
+        # (and would only hand Claude a broken Read target).
+        if not resolved.is_relative_to(images_root) or not resolved.is_file():
+            return False
+    return True
+
+
 def _read_meta(response_dir: Path) -> dict:
     path = response_dir / "meta.json"
     if not path.exists():
@@ -201,7 +231,12 @@ class Handlers:
         head = ('<link rel="stylesheet" href="/static/style.css">'
                 '<link rel="stylesheet" href="/static/diagram.css">'
                 '<link rel="stylesheet" href="/static/popover.css">'
+                '<link rel="stylesheet" href="/static/code-theme.css">'
                 '<script src="/static/popover.js" defer></script>'
+                # highlight.js must execute before script.js (which builds the
+                # markdown-it instance with the highlight hook). Both are defer,
+                # so document order is execution order — keep this line first.
+                '<script src="/static/highlight.min.js" defer></script>'
                 '<script src="/static/script.js" defer></script>'
                 '<script src="/static/fuse.min.js" defer></script>'
                 '<script src="/static/search.js" defer></script>'
@@ -265,6 +300,9 @@ class Handlers:
             return
         if not isinstance(text, str):
             _send_text(h, 400, "bad text")
+            return
+        if not _images_ok(images, Path(dirs["state_dir"])):
+            _send_text(h, 422, "invalid image path(s)")
             return
         if comment_type == "dismiss":
             if block_id is None:

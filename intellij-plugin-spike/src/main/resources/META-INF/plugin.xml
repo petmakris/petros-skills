@@ -23,4 +23,19 @@
                     icon="/icons/annotation_yellow.svg"
                     factoryClass="com.petros.ireview.AnnotationsToolWindowFactory"/>
     </extensions>
+
+    <actions>
+        <action id="com.petros.ireview.PrettifyJsonStringAction"
+                class="com.petros.ireview.PrettifyJsonStringAction"
+                text="Prettify JSON String"
+                description="Reformat the JSON inside the surrounding Java text block, preserving {{placeholders}}.">
+            <add-to-group group-id="EditMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <!-- Bind the macOS keymaps directly: a $default shortcut has its `control`
+                 auto-translated to Cmd (⌘) on macOS, which landed on an already-taken
+                 ⌥⇧⌘L. Declaring on the Mac keymaps keeps `control` literal → ⌃⌥⇧L. -->
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift L"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="control alt shift L"/>
+        </action>
+    </actions>
 </idea-plugin>

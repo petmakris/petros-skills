@@ -15,6 +15,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.DefaultListModel;
 import javax.swing.Icon;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -59,6 +60,7 @@ public final class AnnotationsPanel {
     private final JLabel titleLabel = new JLabel("Review · idle");
     private final JLabel countLabel = new JLabel();
     private final JBTextField searchField = new JBTextField();
+    private final JButton openDiffButton = new JButton("Open PR diff in IDE", AllIcons.Actions.Diff);
     private final Map<String, Integer> seenVersions = new HashMap<>();
     private final JPanel root;
     /** Index of the row the mouse is currently over, or -1. Drives × visibility. */
@@ -149,8 +151,19 @@ public final class AnnotationsPanel {
         header.add(titleLabel, BorderLayout.WEST);
         header.add(countLabel, BorderLayout.EAST);
 
+        openDiffButton.setToolTipText("Diff every changed file against the PR base with the working tree "
+            + "on the right — the only diff shape the ask-+ gutter icon attaches to");
+        openDiffButton.addActionListener(e -> openPrDiff());
+        JPanel openRow = new JPanel(new BorderLayout());
+        openRow.setBorder(JBUI.Borders.empty(0, 8, 4, 8));
+        openRow.add(openDiffButton, BorderLayout.CENTER);
+
+        JPanel topStack = new JPanel(new BorderLayout());
+        topStack.add(header, BorderLayout.NORTH);
+        topStack.add(openRow, BorderLayout.SOUTH);
+
         JPanel headerWrap = new JPanel(new BorderLayout(0, 4));
-        headerWrap.add(header, BorderLayout.NORTH);
+        headerWrap.add(topStack, BorderLayout.NORTH);
         headerWrap.add(searchField, BorderLayout.SOUTH);
         headerWrap.setBorder(JBUI.Borders.emptyBottom(4));
 
@@ -200,6 +213,11 @@ public final class AnnotationsPanel {
         titleLabel.setText(client.currentSession()
             .map(s -> "Review · " + truncate(s.prRef(), 28))
             .orElse("Review · idle"));
+        openDiffButton.setEnabled(client.currentSession().isPresent());
+    }
+
+    private void openPrDiff() {
+        client.currentSession().ifPresent(s -> PrDiffOpener.open(project, s));
     }
 
     private void rebuild() {
