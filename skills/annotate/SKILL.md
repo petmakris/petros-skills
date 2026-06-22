@@ -57,6 +57,7 @@ Every block defaults to `kind: "markdown"` (plain markdown; may contain inline H
 | `sequence` | ≥2 named entities interacting **in temporal order**, where who-talks-to-whom matters (code flows, request/response, event lifecycles). | `references/block-kinds/sequence.md` |
 | `diagram` | Better seen than read AND non-temporal: flowchart, architecture, state machine, ER, class. Mermaid source → server renders SVG. | `references/block-kinds/diagram.md` |
 | `choice` | A decision point with 2–4 discrete options where the pick drives the next step. | `references/block-kinds/choice.md` |
+| `mockup` | A high-fidelity, interactive UI mock is clearer than prose or a static diagram — real `<style>`/`<script>`/Tailwind, hover, interaction. Renders in a sandboxed iframe. | `references/block-kinds/mockup.md` |
 
 One diagram per concept; frame it with a short prose block — a diagram must add clarity, not decorate. Each reference also states when **not** to use that kind.
 

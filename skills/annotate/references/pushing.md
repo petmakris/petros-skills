@@ -139,6 +139,8 @@ Three migration strategies considered:
 
 If the user clicks the `Incremental` header, the comment payload arrives with `step_id: "opt-incremental"`. Same rewrite contract as a diagram-step comment (`references/handling-events.md` § "Diagram block-rewrite contract"): fold the answer into the HTML — preserve surviving slugs, restructure freely otherwise.
 
+For a **high-fidelity** mock that needs `<style>`/`<script>`/Tailwind, hover, or interaction, use `kind: "mockup"` instead — it renders in a sandboxed iframe with the sanitizer lifted. The `data-annotate-id` region convention above is unchanged. See `references/block-kinds/mockup.md`.
+
 ## Glossary (terminology surface)
 
 `blocks.json` may include a sibling `glossary` array next to `blocks`:
