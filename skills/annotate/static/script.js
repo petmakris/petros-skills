@@ -210,6 +210,19 @@
         stepId = annotNode.dataset.annotateId;
       }
     }
+    openAnnotation(block, type, { stepId, selectedText, selection: sel });
+  }
+
+  // Open (or reuse) the inline comment editor for a block (optionally scoped to
+  // a sub-unit by stepId). Shared by hover-strip DOM clicks (which derive
+  // stepId from the event) and mockup iframe clicks (where a data-annotate-id
+  // slug is forwarded via postMessage). `selection`, when given, is cleared
+  // once the draft is created.
+  function openAnnotation(block, type, opts) {
+    opts = opts || {};
+    const stepId = opts.stepId != null ? opts.stepId : null;
+    const selectedText = opts.selectedText || "";
+    const sel = opts.selection || null;
     // Single input per target: if a draft already exists for this
     // (block, step), reuse it instead of stacking a second card. The 💬 / ✗
     // icons then just switch that one card's intent (comment ↔ reject) and
@@ -462,16 +475,27 @@
 
   window.addEventListener("message", (ev) => {
     const d = ev.data;
-    if (!d || d.type !== "annotate:height") return;
+    if (!d || (d.type !== "annotate:height" && d.type !== "annotate:click")) return;
+    // Authenticate by object identity: a sandboxed srcdoc frame's origin is the
+    // string "null" and must NOT be trusted. Find which still-connected mockup
+    // iframe actually sent this message.
     let target = null;
     for (const f of Array.from(mockupFrames)) {
       if (!f.isConnected) { mockupFrames.delete(f); continue; }  // prune stale
       if (f.contentWindow === ev.source) target = f;             // identity gate
     }
     if (!target) return;
-    const h = Number(d.h);
-    if (!Number.isFinite(h)) return;                             // ignore garbage
-    target.style.height = Math.min(Math.max(h, 20), 20000) + "px"; // clamp
+    if (d.type === "annotate:height") {
+      const h = Number(d.h);
+      if (!Number.isFinite(h)) return;                           // ignore garbage
+      target.style.height = Math.min(Math.max(h, 20), 20000) + "px"; // clamp
+      return;
+    }
+    // annotate:click — a click on a [data-annotate-id] region inside the mock.
+    // Opens a comment scoped to that slug, reusing the whole free-HTML contract.
+    if (typeof d.id !== "string" || !d.id.trim()) return;
+    const section = target.closest("section.block");
+    if (section) openAnnotation(section, "comment", { stepId: d.id });
   });
 
   const MOCKUP_CSP =
@@ -480,14 +504,21 @@
     "script-src 'unsafe-inline'; font-src data:; connect-src 'none'; " +
     "form-action 'none'; base-uri 'none'\">";
 
-  // Trusted, host-injected. Reports content height up so the host can size the
-  // iframe. Posts on observe, DOMContentLoaded, load, and late <img> loads.
+  // Trusted, host-injected. (1) Reports content height up so the host can size
+  // the iframe (on observe, DOMContentLoaded, load, and late <img> loads).
+  // (2) Forwards clicks on [data-annotate-id] regions up to the host so it can
+  // open a comment scoped to that sub-unit — iframe clicks don't bubble out.
   const MOCKUP_BRIDGE =
     "<scr" + "ipt>(function(){function p(){parent.postMessage(" +
     "{type:'annotate:height',h:document.documentElement.scrollHeight},'*');}" +
     "try{new ResizeObserver(p).observe(document.documentElement);}catch(e){}" +
     "document.addEventListener('DOMContentLoaded',p);" +
-    "window.addEventListener('load',p,true);p();})();</scr" + "ipt>";
+    "window.addEventListener('load',p,true);" +
+    "document.addEventListener('click',function(e){" +
+    "var el=e.target&&e.target.closest&&e.target.closest('[data-annotate-id]');" +
+    "if(el)parent.postMessage({type:'annotate:click'," +
+    "id:el.getAttribute('data-annotate-id')},'*');});" +
+    "p();})();</scr" + "ipt>";
 
   function renderMockup(content, blk) {
     const html = (blk.spec && blk.spec.html) || "";
