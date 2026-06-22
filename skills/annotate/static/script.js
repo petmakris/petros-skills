@@ -454,6 +454,60 @@
     content.appendChild(wrap);
   }
 
+  // ── Mockup kind: full-fidelity HTML in a sandboxed iframe ───────────────────
+  // Live registry of mockup iframes, so the single boot-level message handler
+  // can match an inbound postMessage to the iframe that sent it by object
+  // identity. The frame's origin is the string "null" and must NOT be trusted.
+  const mockupFrames = new Set();
+
+  window.addEventListener("message", (ev) => {
+    const d = ev.data;
+    if (!d || d.type !== "annotate:height") return;
+    let target = null;
+    for (const f of Array.from(mockupFrames)) {
+      if (!f.isConnected) { mockupFrames.delete(f); continue; }  // prune stale
+      if (f.contentWindow === ev.source) target = f;             // identity gate
+    }
+    if (!target) return;
+    const h = Number(d.h);
+    if (!Number.isFinite(h)) return;                             // ignore garbage
+    target.style.height = Math.min(Math.max(h, 20), 20000) + "px"; // clamp
+  });
+
+  const MOCKUP_CSP =
+    '<meta http-equiv="Content-Security-Policy" content="' +
+    "default-src 'none'; img-src data:; style-src 'unsafe-inline'; " +
+    "script-src 'unsafe-inline'; font-src data:; connect-src 'none'; " +
+    "form-action 'none'; base-uri 'none'\">";
+
+  // Trusted, host-injected. Reports content height up so the host can size the
+  // iframe. Posts on observe, DOMContentLoaded, load, and late <img> loads.
+  const MOCKUP_BRIDGE =
+    "<scr" + "ipt>(function(){function p(){parent.postMessage(" +
+    "{type:'annotate:height',h:document.documentElement.scrollHeight},'*');}" +
+    "try{new ResizeObserver(p).observe(document.documentElement);}catch(e){}" +
+    "document.addEventListener('DOMContentLoaded',p);" +
+    "window.addEventListener('load',p,true);p();})();</scr" + "ipt>";
+
+  function renderMockup(content, blk) {
+    const html = (blk.spec && blk.spec.html) || "";
+    if (!html) {
+      content.innerHTML = '<div class="mockup-missing">mockup unavailable</div>';
+      return;
+    }
+    const iframe = document.createElement("iframe");
+    iframe.className = "mockup-frame";
+    iframe.setAttribute("sandbox", "allow-scripts");   // NEVER allow-same-origin
+    iframe.setAttribute("scrolling", "no");
+    iframe.style.height = "60px";                       // placeholder until bridge reports
+    iframe.srcdoc =
+      '<!DOCTYPE html><html><head><meta charset="utf-8">' + MOCKUP_CSP +
+      "<style>html,body{margin:0;padding:0}</style></head><body>" +
+      html + MOCKUP_BRIDGE + "</body></html>";
+    mockupFrames.add(iframe);
+    content.appendChild(iframe);
+  }
+
   function createBlockSection(blk) {
     const section = document.createElement("section");
     section.className = "block card";
@@ -503,6 +557,10 @@
       content.innerHTML = blk.svg || "";
     } else if (kind === "choice") {
       renderChoice(section, content, blk);
+    } else if (kind === "mockup") {
+      // Trusted Claude HTML in a sandboxed iframe; deliberately bypasses
+      // sanitizeFreeHtml (the sandbox is the isolation boundary instead).
+      renderMockup(content, blk);
     } else {
       // Markdown path — markdown-it now allows inline HTML (`html: true`);
       // sanitize the rendered tree before glossary decoration.
@@ -1305,7 +1363,7 @@
     // A kind flip (markdown↔sequence/diagram/choice) needs a fresh section:
     // the diagram click listener and hover wiring are bound at creation, so an
     // in-place innerHTML swap would leave them inconsistent with the new kind.
-    if (newKind !== oldKind || newKind === "choice") {
+    if (newKind !== oldKind || newKind === "choice" || newKind === "mockup") {
       const fresh = createBlockSection(blk);
       clearUpdatingOverlay(section);
       section.replaceWith(fresh);
