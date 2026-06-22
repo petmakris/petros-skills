@@ -17,7 +17,7 @@
 - The frame CSP injected into every srcdoc is exactly: `default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`.
 - `SKILL.md` must stay under 120 lines (enforced by `tests/test_skill_structure.py::test_skill_md_exists_and_is_lean`).
 - Every `references/block-kinds/<kind>.md` file must be wired into the SKILL.md menu and vice-versa (enforced by `test_block_kind_menu_matches_reference_files`). The docs task must add the menu row and the file together.
-- Run Python tests from the repo root `/Users/petros.makris/projects/petros-skills` with `PYTHONPATH=.`.
+- Run Python tests from the repo root `~/projects/petros-skills` with `PYTHONPATH=.`.
 
 ## File Structure
 
@@ -71,7 +71,7 @@ def test_mockup_canonical_spec_no_bump_on_reorder(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_versions.py::test_mockup_spec_change_bumps -v`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_versions.py::test_mockup_spec_change_bumps -v`
 Expected: FAIL — `assert {"b-0": 1} == {"b-0": 2}` (mockup currently hashes on empty `markdown`, so the spec edit is invisible and the version never bumps).
 
 - [ ] **Step 3: Add `"mockup"` to the spec-kinds tuple**
@@ -88,7 +88,7 @@ _SPEC_KINDS = ("sequence", "diagram", "choice", "mockup")
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_versions.py -v`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_versions.py -v`
 Expected: PASS (all, including the two new tests).
 
 - [ ] **Step 5: Commit**
@@ -135,7 +135,7 @@ Add to the round-trip test class in `skills/annotate/tests/test_server.py` (same
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_server.py -k test_raw_forwards_spec_for_mockup_block -v`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_server.py -k test_raw_forwards_spec_for_mockup_block -v`
 Expected: FAIL with `KeyError: 'spec'` — the mockup currently falls into the markdown `else` branch, which emits `markdown` (absent) and no `spec`.
 
 - [ ] **Step 3: Add the mockup branch in `_render_block_for_raw`**
@@ -151,12 +151,12 @@ In `skills/annotate/server.py`, find the `elif kind == "choice":` branch (it rea
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_server.py -k mockup -v`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_server.py -k mockup -v`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full server + versions suites for regressions**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_server.py skills/annotate/tests/test_versions.py -q`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_server.py skills/annotate/tests/test_versions.py -q`
 Expected: PASS (no regressions; the `step_id`-against-markdown 422 test is untouched — Phase 2 owns that).
 
 - [ ] **Step 6: Commit**
@@ -251,7 +251,7 @@ main().catch((e) => { log(e.stack || String(e)); process.exit(1); });
 
 - [ ] **Step 2: Run the e2e to verify it fails**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && NODE_PATH=$(npm root -g) node skills/annotate/tests/e2e/mockup.e2e.cjs`
+Run: `cd ~/projects/petros-skills && NODE_PATH=$(npm root -g) node skills/annotate/tests/e2e/mockup.e2e.cjs`
 Expected: FAIL — no `iframe.mockup-frame` is found (mockup falls through to the markdown path today and renders nothing useful). If chromium/playwright is not installed, install per the repo's existing e2e setup (`npm i -g playwright && npx playwright install chromium`) before proceeding.
 
 - [ ] **Step 3: Add the height-message listener and frame registry (boot level)**
@@ -347,12 +347,12 @@ Append to `skills/annotate/static/style.css`:
 
 - [ ] **Step 8: Run the e2e to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && NODE_PATH=$(npm root -g) node skills/annotate/tests/e2e/mockup.e2e.cjs`
+Run: `cd ~/projects/petros-skills && NODE_PATH=$(npm root -g) node skills/annotate/tests/e2e/mockup.e2e.cjs`
 Expected: `PASS: mockup renders in sandboxed iframe and is sized by the bridge`.
 
 - [ ] **Step 9: Run the existing sanitizer + card-structure smoke tests for regressions**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_smoke_sanitizer.py skills/annotate/tests/test_smoke_card_structure.py -q`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_smoke_sanitizer.py skills/annotate/tests/test_smoke_card_structure.py -q`
 Expected: PASS (mockup leaves the markdown sanitizer path untouched).
 
 - [ ] **Step 10: Commit**
@@ -378,7 +378,7 @@ git commit -m "feat(annotate): render mockup kind in sandboxed iframe with heigh
 
 - [ ] **Step 1: Run the structure test to confirm the starting state is green**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_skill_structure.py -v`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_skill_structure.py -v`
 Expected: PASS. (After Step 2 adds the menu row but before Step 3 creates the file, `test_block_kind_menu_matches_reference_files` will FAIL — that is expected and fixed by Step 3.)
 
 - [ ] **Step 2: Add the menu row to `SKILL.md`**
@@ -447,7 +447,7 @@ See `references/block-kinds/mockup.md`.
 
 - [ ] **Step 5: Run the structure test to verify it passes**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_skill_structure.py -v`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests/test_skill_structure.py -v`
 Expected: PASS — menu now matches the on-disk `mockup.md`, the link resolves, SKILL.md is still under 120 lines.
 
 - [ ] **Step 6: Commit**
@@ -463,12 +463,12 @@ git commit -m "docs(annotate): wire mockup kind into the skill menu and referenc
 
 - [ ] **Run the full annotate Python suite**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests -q --ignore=skills/annotate/tests/e2e`
+Run: `cd ~/projects/petros-skills && PYTHONPATH=. python3 -m pytest skills/annotate/tests -q --ignore=skills/annotate/tests/e2e`
 Expected: all pass.
 
 - [ ] **Run the mockup e2e once more**
 
-Run: `cd /Users/petros.makris/projects/petros-skills && NODE_PATH=$(npm root -g) node skills/annotate/tests/e2e/mockup.e2e.cjs`
+Run: `cd ~/projects/petros-skills && NODE_PATH=$(npm root -g) node skills/annotate/tests/e2e/mockup.e2e.cjs`
 Expected: PASS.
 
 - [ ] **Manual smoke (optional but recommended):** push a real mockup block through annotate, confirm it renders at full fidelity, sizes correctly, survives a comment + rewrite (version bumps, iframe refreshes), and that a comment on it arrives with `step_id: null`.
