@@ -122,6 +122,17 @@ function writeBlocks(responseDir, blocks) {
     }, { timeout: 8000 });
     log("✓ height bridge sized the iframe to its content");
 
+    // 5. Rewrite the mockup's spec.html — the spec edit bumps the version, the
+    //    client refetches and the fresh iframe shows the new content.
+    writeBlocks(responseDir, [
+      { id: "b-0", kind: "mockup", version: 1, spec: {
+          title: "Mock",
+          html: "<div data-annotate-id='hero' style='height:240px'>REWRITTEN_MOCKUP</div>" } },
+    ]);
+    const fl2 = page.frameLocator("section[data-block-id='b-0'] iframe.mockup-frame");
+    await fl2.locator("text=REWRITTEN_MOCKUP").waitFor({ timeout: 10000 });
+    log("✓ version-bump re-render swapped the iframe to the new content");
+
     log("PASS: mockup renders in sandboxed iframe and is sized by the bridge");
   } finally {
     cleanup();

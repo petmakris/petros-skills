@@ -493,7 +493,7 @@
     }
     // annotate:click — a click on a [data-annotate-id] region inside the mock.
     // Opens a comment scoped to that slug, reusing the whole free-HTML contract.
-    if (typeof d.id !== "string" || !d.id.trim()) return;
+    if (typeof d.id !== "string" || !d.id.trim() || d.id.length > 256) return;
     const section = target.closest("section.block");
     if (section) openAnnotation(section, "comment", { stepId: d.id });
   });
@@ -519,6 +519,12 @@
     "if(el)parent.postMessage({type:'annotate:click'," +
     "id:el.getAttribute('data-annotate-id')},'*');});" +
     "p();})();</scr" + "ipt>";
+
+  // Drop any mockup iframes under `root` from the registry before the node is
+  // detached, so the Set never holds stale frames between message sweeps.
+  function untrackMockupFrames(root) {
+    root.querySelectorAll("iframe.mockup-frame").forEach((f) => mockupFrames.delete(f));
+  }
 
   function renderMockup(content, blk) {
     const html = (blk.spec && blk.spec.html) || "";
@@ -1356,6 +1362,7 @@
     proseEl.querySelectorAll("section.block").forEach(section => {
       if (!serverIds.has(section.dataset.blockId)) {
         clearUpdatingOverlay(section);
+        untrackMockupFrames(section);
         const ic = section.nextElementSibling;
         if (ic && ic.classList.contains("inline-comments")) ic.remove();
         section.remove();
@@ -1397,6 +1404,7 @@
     if (newKind !== oldKind || newKind === "choice" || newKind === "mockup") {
       const fresh = createBlockSection(blk);
       clearUpdatingOverlay(section);
+      untrackMockupFrames(section);
       section.replaceWith(fresh);
       return fresh;
     }

@@ -359,6 +359,9 @@ class Handlers:
                 if not isinstance(step_id, str) or not step_id.strip():
                     _send_text(h, 422, "step_id must be a non-empty string")
                     return
+                if len(step_id) > 256:
+                    _send_text(h, 422, "step_id too long")
+                    return
         evt = {
             "block_id": block_id,
             "step_id": step_id,

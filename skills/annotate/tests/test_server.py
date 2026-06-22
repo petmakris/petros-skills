@@ -751,6 +751,16 @@ class ServerStartupTests(unittest.TestCase):
         })
         self.assertEqual(status, 422)
 
+    def test_submit_overlong_step_id_on_mockup_returns_422(self):
+        response_dir = Path(self.sess["response_dir"])
+        _write_blocks(response_dir, "resp-mock-long", "T", [
+            {"id": "b-0", "kind": "mockup", "spec": {"html": "<div>x</div>"}, "version": 1},
+        ])
+        status, _ = self._post_json(self.base + "/api/submit", {
+            "block_id": "b-0", "step_id": "x" * 257, "type": "comment", "text": "x",
+        })
+        self.assertEqual(status, 422)
+
     def test_submit_without_step_id_succeeds_for_sequence_block(self):
         response_dir = Path(self.sess["response_dir"])
         _write_blocks(response_dir, "resp-whole-seq", "T", self._seq_blocks())
