@@ -1,267 +1,158 @@
-# Interactive Review — IntelliJ Plugin Spike
+# Interactive Review — IDE plugins handoff
 
-Handoff document for resuming work in a fresh Claude Code session. Start a new
-session in `~/projects/petros-skills/intellij-plugin-spike/`.
+Resume doc for a fresh Claude Code session. Covers the IntelliJ plugin
+(`intellij-plugin-spike/`) and its VS Code sibling (`vscode-extension-spike/`),
+both clients of the `interactive_review` server (`skills/interactive_review/`).
+
+This file was rewritten 2026-06 after an audit found the prior version
+describing code that never existed. Everything below is verified against source.
 
 ## What we're building
 
-An IntelliJ IDEA plugin that lets a developer annotate any line of any diff
-viewer with a question, get a synthesized answer from Claude inline, and ask
-follow-up questions that **refine the answer** rather than appending to a chat
-transcript.
+Let a developer annotate any line of a PR diff with a question and get a
+short, code-aware answer inline, then ask follow-ups on the same line. Each
+`file:side:line` owns its own thread. No code is modified — this is for
+*understanding* a PR.
 
-The end target: hover any changed line in a PR diff → click `+` → ask "why is
-this private?" → see a synthesized paragraph in a popup. Click the same line
-again → ask "and why camelCase?" → the same paragraph is rewritten to absorb
-both questions.
+The answer for a line is meant to read as **one self-contained paragraph** that
+absorbs every question asked on that line so far — a teammate joining later
+reads one up-to-date answer per line, not a chat to scroll. See "Synthesis
+model" for how close we actually are to that.
 
-## Why this is different from the Claude Code sidechat
-
-The sidechat is a transcript. To understand what was discussed about a piece
-of code you scroll history.
-
-This plugin produces an **artifact** per code line: one evolving paragraph
-that gets richer with each question. A teammate joining the review later
-reads one up-to-date paragraph per annotated line, not a chat to scroll.
-
-Two structural differences:
-
-- **Many parallel, anchored threads.** Each `file:side:line` owns its own
-  conversation, independent of others. The sidechat is one linear
-  conversation.
-- **Synthesis, not response.** The prompt template tells Claude to *replace*
-  the prior paragraph with one that combines all prior questions and the new
-  one into a single coherent paragraph. Not "answer this question," but
-  "refine this annotation."
-
-If the synthesis model doesn't materialize as something visibly different
-from chat, the plugin loses its reason to exist — falls back to "anchored
-chat" which the sidechat already covers.
-
-## Current architecture
-
-The plugin is now a **passive surface** on top of the existing
-`interactive_review` server (`skills/interactive_review/`). All Claude
-synthesis happens in the Claude Code session that started the review;
-the plugin discovers that session by cwd and shares its threads with the
-browser surface.
+## Architecture (the real one)
 
 ```
-                     ┌──────────────────────────────────┐
-   Terminal:         │  /interactive-review <PR>        │
-                     └──────────────┬───────────────────┘
-                                    │
-                                    ▼
-                     ┌──────────────────────────────────┐
-                     │  interactive_review server       │
-                     │  - GET /api/sessions?cwd=        │
-                     │  - GET /s/<sid>/threads.json     │
-                     │  - GET /s/<sid>/stream  (SSE)    │
-                     │  - POST /s/<sid>/api/submit      │
-                     └────────┬────────────────┬────────┘
-                              ▲                ▼ SSE thread-changed
-                              │ POST submit    │
-                              │                │
-                     ┌────────┴────────────────┴────────┐
-                     │  IDE plugin                       │
-                     │  - ReviewSessionService           │
-                     │      └ ReviewSessionClient        │
-                     │  - SpikeDiffExtension             │
-                     │  - SynthesisPopup (JEditorPane)   │
-                     │  - ReviewStatusBarWidget          │
-                     └───────────────────────────────────┘
+  Terminal:  /interactive-review <PR>   (a Claude Code session)
+                       │
+                       ▼
+         interactive_review server  ── headless: no browser UI
+           - POST /api/sessions           (discovery by cwd)
+           - GET  /s/<sid>/threads.json
+           - GET  /s/<sid>/stream  (SSE thread-changed)
+           - POST /s/<sid>/api/submit
+                  ▲                 │ WEBCOMPANION_EVENT (watcher stdout)
+                  │ submit          ▼
+         ┌────────┴────────┐   the SAME Claude session that ran
+         │  IDE clients    │   /interactive-review wakes, reads
+         │  IntelliJ + VSC │   diff.patch + threads, answers,
+         └─────────────────┘   appends to the thread, acks
 ```
 
-Anchor format is `<project-relative-path>:<L|R>:<line>` — shared with the
-browser, so threads created from either surface are interchangeable.
+Two facts the old doc got wrong:
 
-Synthesis is rendered as HTML in a `JEditorPane`. Code references in the
-synthesis text use markdown link syntax with `path[:line]` targets; clicks
-navigate via `OpenFileDescriptor`. External URLs open in the system
-browser via `BrowserUtil`.
+- **There is no `claude -p` subprocess.** Synthesis is done by the live
+  in-session agent, woken by the watcher (`skills/_shared/web_companion/watcher.sh`).
+  The server does zero LLM calls — it's a thread store + SSE bus.
+- **There is no browser surface.** The server's old PR-diff page was removed
+  (commit `697665f`); the IDE plugins are the only review surfaces. The server
+  still snapshots the diff to `diff.patch` (the agent reads it for context) and
+  `meta.json` (PR title for the status bar).
 
-See the design spec and implementation plan for the full picture:
-- `docs/superpowers/specs/2026-05-22-ide-backend-automation-design.md`
-- `docs/superpowers/plans/2026-05-22-ide-backend-automation.md`
+Anchor format is `<project-relative-path>:<L|R>:<line>` — shared by both IDE
+clients, so a thread is the same object from either.
 
 ## What works
 
-- DiffExtension hooks every `TwosideTextDiffViewer` IntelliJ opens (Blank
-  Diff, Compare Files, Compare with Branch, PR review, VCS log diff — all of
-  them).
-- Per-line gutter icons on both panes. Hover-only: `+` appears only on
-  the line under the mouse; lines with existing annotations show a
-  persistent balloon icon. Tooltip on icon: `Comment on <file>:<L|R>:<line>`.
-- Click `+` → JBPopup anchored to the editor. Shows current synthesis at
-  top, textarea below, Ask button (Cmd/Ctrl-Enter also submits).
-- Submit → HTTP POST to the server → popup shows "thinking…" → server
-  streams SSE thread-changed events → popup re-renders with new synthesis.
-- ReviewSessionService discovers active sessions via `~/.claude/interactive-review/server.json`
-  and fetches threads/streams from there.
-- Status bar widget shows `Review: <PR-title> ✓` when a session is active,
-  `Review: idle` otherwise.
-- HTML rendering of synthesis in `JEditorPane` with clickable code references
-  (`[symbol](path:line)` markdown) and external links.
+**Server** (`skills/interactive_review/`, 33 pytest passing)
+- Session discovery, threads.json, SSE stream (with deletion + missed-wake
+  self-heal), submit, append-only threads with `source_event_id` dedup.
 
-## What's pending
+**IntelliJ** (`intellij-plugin-spike/`, 26 tests passing)
+- `SpikeDiffExtension` hooks every `TwosideTextDiffViewer`; per-line gutter
+  icons on both panes (hover `+`, persistent yellow icon on annotated lines).
+- Click → `SynthesisPopup` (JBPopup): shows current synthesis, textarea, Ask
+  (⌘/Ctrl-Enter). Esc / click-outside deliberately **do not** dismiss — click ✕.
+- Synthesis rendered as HTML in a `JEditorPane`; `[symbol](path:line)` links
+  navigate via `OpenFileDescriptor`, backtick identifiers resolve via PSI,
+  external URLs open in the system browser.
+- `Review Annotations` tool window: one row per anchor (file · side:line ·
+  snippet · v#), live search filter, yellow ● on SSE-updated rows.
+- `ReviewSessionClient`: seeds from threads.json, SSE with fixed 2s reconnect.
+- Status bar widget: `Review: <prRef> ✓` when active, hint when idle.
+- `PrDiffOpener`: an "Open PR diff in IDE" button (this exists — the old doc
+  said "don't build it"; it was built and works).
 
-- **PR loader.** Punted intentionally. IntelliJ's built-in `Git → Branches →
-  master → Compare with Current` does this with no plugin code. Don't build
-  a custom action unless that workflow proves insufficient.
-- **Persistence.** Annotations live in the server (session-lifetime). The IDE
-  fetches them on each session start via HTTP. Restarting the IDE without
-  ending the session preserves annotations.
-- **Inline panel instead of JBPopup.** The popup dismisses on Esc and on
-  click-outside. For a more PR-review-shaped UX, embed the
-  synthesis between the diff lines via `EditorEmbeddedComponentManager`.
-  Tried and deferred — JBPopup proved good enough for v1.
-- **Annotated lines should show synthesis even when popup is closed.** Some
-  visual cue beyond the balloon icon — maybe an inlay between the lines, or
-  a hover-tooltip showing the first 100 chars.
+**VS Code** (`vscode-extension-spike/`, 28 tests passing)
+- Comment-thread bubbles on regular file editors, side panel with delete,
+  status bar, workspace-symbol nav from synthesis links, SSE sync.
 
-## Known issues and areas to test
+## Synthesis model — honest status
 
-1. **HTTP discovery on plugin startup.** If `~/.claude/interactive-review/server.json`
-   doesn't exist (no active session), the plugin falls back to hardcoded
-   `http://127.0.0.1:54620`. It will fail until a session is started in the
-   terminal. That's expected.
-2. **Anchor stability across diff re-opens.** If you close the diff viewer
-   and reopen the same comparison, are anchors the same string? They should
-   be: `<project-relative-path>:<L|R>:<line>`. Test across re-opens.
-3. **Multi-file PRs.** When you open per-file diffs through `Compare with
-   Branch`, each file opens a separate viewer. Anchors include the file path
-   so they should be distinct. Verify switching between files preserves
-   the right syntheses.
-4. **SSE connection drops.** If the IDE is idle and the server restarts,
-   the SSE stream breaks. The next synthesis request will establish a new
-   connection. If connectivity is flaky, add reconnect-with-backoff logic
-   to `ReviewSessionClient`.
+`threads.py` is **append-only**; it cannot rewrite a prior message. "Synthesis"
+is achieved two soft ways: the clients display only the latest `claude` message
+(`threads_bulk` → `latest_synthesis`), and `SKILL.md` instructs the agent to
+make each reply self-contained and absorb prior questions. So in practice this
+is *anchored chat with last-message-wins display*, leaning on the prompt rather
+than enforced structure. For an LLM-driven flow that's a reasonable mechanism;
+there's no cheap way to *enforce* rewrite without a separate mutable field, and
+that has not been judged worth the schema work.
+
+## Known gaps worth fixing
+
+- **Anchor drift (the real correctness bug).** A snapshot line number is bound
+  to live editor coordinates with no re-anchoring. Local edits / rebase silently
+  move an annotation to the wrong line. Affects the **two IDE clients only**
+  (there's no browser to drift anymore). Fix: persist the anchored line's text
+  (server schema + `threads_bulk`), re-locate on attach in both clients, show a
+  "stale" marker when the text is gone. ~L, server + 2 clients.
+- **Discovery port fallback.** If `~/.claude/interactive-review/server.json` is
+  missing, clients fall back to hardcoded `127.0.0.1:54620` — the *first* of the
+  range `54620-54640`, so they hit a dead port if the server grabbed any other.
+- **`ReviewSessionClient` hand-rolls JSON with regex** (`jsonField`/
+  `parseThreadsBulk`). Brittle if synthesis text contains JSON-ish characters;
+  replace with a real parser.
+
+## Decided directions (do not re-litigate)
+
+- **PR-diff editor integration: dropped.** Anchoring onto the GitHub PR
+  extension's review editors (VS Code) or the native PR view (IntelliJ) is XL
+  effort — VS Code has no public extension point; IntelliJ's PR content/side
+  mapping is unproven — for marginal gain. The plain "Compare with Branch" /
+  file-editor workflow is what delivers the value.
+- **MCP-enriched synthesis: a spike, not a build.** The in-session agent
+  already inherits whatever MCP servers the session has configured, so there is
+  nothing to wire in code. "Enrichment" = enable IntelliJ's MCP server +
+  Auto-Configure Claude Code (one settings toggle, on the *real* IDE) + a
+  one-line `SKILL.md` nudge to prefer find-usages / git-blame / inspections.
+  Then A/B the same questions on vs off and keep it only if the answers are
+  visibly more grounded. The agent already has `git blame` and ripgrep, so the
+  marginal value is unproven — time-box it, don't build anything.
 
 ## How to iterate
 
-The plugin lives at `~/Library/Application Support/JetBrains/IntelliJIdea2026.1/plugins/interactive-review-spike` as a symlink to the gradle sandbox output. After any code change:
-
+**IntelliJ** — the plugin is symlinked into
+`~/Library/Application Support/JetBrains/IntelliJIdea2026.1/plugins/interactive-review-spike`.
 ```
-cd ~/projects/petros-skills/intellij-plugin-spike
-./gradlew prepareSandbox
-osascript -e 'quit app "IntelliJ IDEA"'
-# reopen IDEA manually (or use `open -a "IntelliJ IDEA"`)
+cd intellij-plugin-spike
+./gradlew test            # Java tests
+./gradlew prepareSandbox  # build into the symlinked sandbox
+osascript -e 'quit app "IntelliJ IDEA"'   # then reopen
 ```
+JDK 25 is hard-coded in `gradle.properties` (`javaVersion=25`) and
+`build.gradle.kts` (`JavaLanguageVersion.of(25)`) to match IDEA 2026.1's JBR.
+Update both if the JBR changes.
 
-To use the plugin:
-
-1. In a terminal Claude Code session, start a review:
-   `/interactive-review <PR>`
-   (The server URL + browser link print to the terminal.)
-
-2. Open the same project in IDEA. Within ~5 s the bottom status bar shows `Review: <PR-title> ✓` and gutter icons appear on diff viewers.
-
-3. Click `+` on any diff line → popup opens. Type a question, click Ask (or ⌘/Ctrl+Enter). The synthesis arrives via SSE within a few seconds.
-
-4. Same PR open in the browser? Annotations there flow into the IDE popup automatically (and vice versa) — one shared thread per anchor.
-
-## End-to-end smoke recipe
-
-1. Terminal: `/interactive-review <PR>` (in a Claude Code session). Wait for "PR diff in browser → http://localhost:....".
-2. IDEA: open the same project. Within ~5 s, gutter icons should appear in any open PR diff. Status bar should show `Review: <PR-title> ✓`.
-3. Click `+` on a line in IDE. Type a question. Click Ask. Within ~10 s, popup re-renders with the synthesis (clickable inline references).
-4. Open the browser URL. Same anchor — the IDE-asked thread is visible there.
-5. Ask a follow-up in the browser. The IDE popup (still open) auto-refreshes; or if closed, the gutter icon's balloon indicates the annotation exists.
-6. Click a `[symbol](path:line)` link in the synthesis. IDE navigates to that file + line.
-7. End the session: in the terminal Claude session, type `scrap it`. Within ~5 s, IDE gutter icons disappear; status bar shows `Review: idle`.
-
-### Navigation polish smoke (after the backend smoke passes)
-
-8. Open the `Review Annotations` tool window on the right side. You should see one row per annotated line, with file (last segment) · :side:line · 2-line snippet · `v<N>`.
-9. Type a substring of a file name into the search box at the top. Verify the list filters live.
-10. Click a row that's NOT the currently-open annotation. IDEA should jump to that file/line AND open the popup on it.
-11. From the browser surface, ask a follow-up question on a different annotation. The IDE panel should add a yellow `●` next to that row within ~5 s (SSE event). Click the row to clear the dot.
-12. In an open popup synthesis, hover any backtick code identifier — should show dashed underline. Click → IDE should navigate to that symbol's declaration (if it exists in the project).
-13. Click a backtick word that ISN'T a symbol (e.g. `null` or `POST /foo`). Should be a silent no-op (no error, no popup).
-
-## Gotchas / things to know
-
-- **JDK path hard-coded** in `gradle.properties`. As of 2026-05 the plugin
-  targets JDK 25 to match the JBR bundled with IntelliJ 2026.1
-  (`/opt/homebrew/Cellar/openjdk@25/25.0.3/...`). If brew updates `openjdk@25`
-  or IDEA moves to a new JBR, both `javaVersion=` in `gradle.properties` and
-  `JavaLanguageVersion.of(...)` in `build.gradle.kts` must be updated. To
-  check what JBR your installed IDEA ships with:
-  `"$IDEA_APP/Contents/jbr/Contents/Home/bin/java" -version`.
-- **Plugin attaches highlighters to every line of every diff viewer that
-  opens.** Performance is fine for normal PRs but unverified on huge
-  (>5000-line) diffs. If it lags, add a line-count cap in
-  `SpikeDiffExtension.attachAllLines`.
-- **Server discovery via `~/.claude/interactive-review/server.json`**: if that file doesn't exist (no session has been started yet) the plugin will hit `http://127.0.0.1:54620` as a hard-coded default and most likely fail. That's expected — without an active session there's nothing to talk to.
-
-## Phase 2: MCP-enriched synthesis
-
-IntelliJ 2026.1 ships with a built-in MCP server (`Settings → Tools →
-MCP Server`) that exposes IDE capabilities — open files, project
-structure, find usages, run inspections, git blame — to *external* MCP
-clients (Claude Code, Claude Desktop, VS Code, Codex). Crucially this is
-the opposite direction from what our plugin does: our plugin embeds in
-the IDE and calls *out* to Claude; the MCP server lets Claude (running
-externally) call *in*.
-
-That asymmetry is exactly the leverage we want. Today our `claude -p`
-subprocess sees only `{anchor, question, prior_synthesis, history}` and
-can read code only via shell tools. With Claude Code wired to the IDE's
-MCP server, the *same* `claude -p` invocation can navigate callers,
-inspect tests, run inspections, read git blame — all from inside the
-synthesis call. Annotations stop being "what the question implies" and
-start being "what the question implies plus what Claude found by
-investigating from the IDE."
-
-### Sequencing (do not parallelize — order matters for debugging)
-
-1. **Tune the synthesis prompt on the bare setup.** Confirm the prompt
-   genuinely rewrites the paragraph rather than appending. If syntheses
-   look chat-shaped here, MCP won't save us — it would just give chat
-   richer context.
-2. **Auto-Configure Claude Code's MCP integration.** In the sandbox IDE:
-   `Settings → Tools → MCP Server → Enable MCP Server` (check the box),
-   then click **Auto-Configure** next to **Claude Code**. This writes an
-   MCP server entry into Claude Code's config so any `claude -p`
-   invocation discovers the IDE's tools. Verify with `claude mcp list`
-   in a terminal — should show an `intellij` (or similarly-named) server
-   pointing at `127.0.0.1:<port>`.
-3. **Update the synthesis prompt to invite tool use.** Add something
-   like: "You have IDE tools available via MCP — feel free to inspect
-   callers, definitions, tests, or git blame for the anchor file before
-   synthesizing. Prefer evidence from the code over speculation."
-4. **A/B-compare syntheses.** Ask the same 3 questions on the same
-   anchor with MCP on vs off. If MCP doesn't visibly improve depth or
-   accuracy, the cost (latency, debug surface) isn't justified.
-
-### Gotchas to expect when wiring MCP
-
-- The MCP server listens on a *specific* IDE instance. The sandbox IDE
-  (`./gradlew runIde`) and your real IDEA are different instances on
-  different ports. Auto-Configure has to be run in the sandbox if the
-  responder runs against the sandbox.
-- Claude Code's MCP config is global to the user. If you Auto-Configure
-  the sandbox and then close it, the config still points at a dead port
-  until you re-run Auto-Configure on whichever IDE you actually want
-  tools from.
-- Latency goes up. `claude -p` with tool use can take 30s+ on a
-  multi-step investigation. The popup's "thinking…" copy should be
-  honest about this.
-- Tool calls are visible in the responder's stdout (Claude Code prints
-  tool invocations). That's a free debugging window — leave it
-  unstifled.
-
-## Where to start in the new session
-
-Read this file, then:
-
-```bash
-cd ~/projects/petros-skills/intellij-plugin-spike
-ls src/main/java/com/petros/ireview/
-./gradlew test                      # confirm Java tests pass
-./gradlew prepareSandbox            # build into the symlinked sandbox
+**VS Code**
+```
+cd vscode-extension-spike
+npm install && npm run compile && npm test   # 28 tests
+# F5 in VS Code → Extension Development Host
 ```
 
-For server-side work, the entry point is `skills/interactive_review/server.py`. For plugin work, the centerpiece is `ReviewSessionClient.java`.
+## Using it
 
-The Phase 2 MCP enrichment direction (described below) is still the next big step once the v1 architecture has time to settle.
+1. Terminal (Claude Code session): `/interactive-review <PR>`. It snapshots the
+   diff and starts a headless session; no URL to open.
+2. Open the same project in IntelliJ or VS Code. Within ~5 s the status bar
+   shows the review is active and gutter icons / comment bubbles appear.
+3. Click a line, ask a question, get a threaded reply within ~10 s.
+4. End the session: type `scrap it` in the terminal.
+
+## Key files
+
+- Server: `skills/interactive_review/server.py` (handlers), `threads.py`
+  (append/dedup), `diff.py` (snapshot parsing), `SKILL.md` (the agent's
+  answer protocol — this is where synthesis prompting lives).
+- IntelliJ: `ReviewSessionClient.java` (transport), `SpikeDiffExtension.java`
+  (gutter hooks), `SynthesisPopup.java`, `AnnotationsPanel` (tool window).
+- VS Code: `sessionClient.ts`, `commentsController.ts`, `annotationsView.ts`.
