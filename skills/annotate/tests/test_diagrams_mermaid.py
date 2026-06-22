@@ -11,6 +11,7 @@ from skills.annotate.diagrams.mermaid import (
     render,
     _postprocess,
     _strip_init_directives,
+    _normalize_line_breaks,
 )
 from skills.annotate.server import _render_block_for_raw
 
@@ -163,6 +164,32 @@ def test_strip_init_directives_removes_multiple():
     out = _strip_init_directives(src)
     assert "%%{" not in out
     assert "A-->B" in out
+
+
+def test_normalize_line_breaks_converts_literal_backslash_n():
+    # Models often author multi-line labels with a literal '\n' (backslash-n),
+    # which mermaid renders as the two characters rather than a line break.
+    src = 'flowchart TD\n  A["line1\\nline2"]'
+    out = _normalize_line_breaks(src)
+    assert '\\n' not in out
+    assert 'A["line1<br/>line2"]' in out
+
+
+def test_normalize_line_breaks_preserves_real_newlines():
+    # Real newline chars (0x0A) separate mermaid statements and must survive.
+    src = 'flowchart TD\n  A-->B\n  B-->C'
+    out = _normalize_line_breaks(src)
+    assert out == src
+
+
+@requires_mmdc
+def test_render_converts_literal_newline_in_label_to_break():
+    # End-to-end: a label authored with literal '\n' renders as two lines,
+    # never the literal text 'line1\nline2'.
+    spec = {"type": "flowchart", "source": 'flowchart TD\n  A["line1\\nline2"]'}
+    svg = render(spec, "section-1")
+    assert "\\n" not in svg
+    assert ">line1<" in svg and ">line2<" in svg
 
 
 @requires_mmdc

@@ -61,6 +61,7 @@ def render(spec: dict[str, Any], block_id: str) -> str:
     # we then inject as innerHTML. Strip every directive; theme/background are
     # already fixed via CLI flags, so nothing legitimate is lost.
     source = _strip_init_directives(spec["source"])
+    source = _normalize_line_breaks(source)
     with tempfile.TemporaryDirectory() as td:
         in_path = os.path.join(td, "in.mmd")
         out_path = os.path.join(td, "out.svg")
@@ -115,6 +116,19 @@ def _strip_init_directives(source: str) -> str:
     are stripped before render. Non-greedy so multiple directives each match.
     """
     return _INIT_DIRECTIVE.sub("", source)
+
+
+def _normalize_line_breaks(source: str) -> str:
+    r"""Rewrite literal ``\n`` sequences in the source to mermaid's ``<br/>``.
+
+    Models routinely author multi-line node/edge labels with a literal ``\n``
+    (backslash + ``n``). mermaid does not treat that as a line break — and with
+    ``htmlLabels`` off there is no HTML fallback — so it renders as the two
+    characters ``\n`` inside the box. Real newline characters (byte 0x0A, the
+    statement separators) are a different character and are left untouched; only
+    the two-character backslash-``n`` sequence is rewritten.
+    """
+    return source.replace("\\n", "<br/>")
 
 
 def _postprocess(svg: str) -> str:
