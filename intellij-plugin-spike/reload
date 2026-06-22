@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Refresh the installed plugin so a plain IntelliJ restart picks up your changes.
+#
+# Your real IDE has a symlink:
+#   ~/Library/Application Support/JetBrains/IntelliJIdea2026.1/plugins/interactive-review-spike
+#     -> .intellijPlatform/sandbox/.../plugins/interactive-review-spike
+# That sandbox is only updated by Gradle's prepareSandbox task (it copies the
+# plugin jar AND its dependency jars, e.g. commonmark, into the sandbox lib/).
+#
+# Usage:  ./reload          then restart IntelliJ
+#         ./reload --watch  rebuild on every save; then you ONLY ever restart
+set -euo pipefail
+cd "$(dirname "$0")"
+if [[ "${1:-}" == "--watch" ]]; then
+  echo "Watching for changes — edit, then just restart IntelliJ. Ctrl-C to stop."
+  exec ./gradlew -t prepareSandbox
+fi
+./gradlew prepareSandbox
+echo "✓ Sandbox updated. Restart IntelliJ to load the new plugin."

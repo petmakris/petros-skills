@@ -42,3 +42,6 @@ __pycache__/
 
 # Playwright dev screenshots
 diagram-*.png
+
+# ireview plugin reload marker (hook scratch)
+.claude/.ireview-reload-pending
