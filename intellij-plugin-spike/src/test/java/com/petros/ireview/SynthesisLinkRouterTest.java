@@ -31,4 +31,11 @@ class SynthesisLinkRouterTest {
         assertEquals(SynthesisLinkRouter.Kind.NONE, SynthesisLinkRouter.classify("mailto:x@y.z").kind());
         assertEquals(SynthesisLinkRouter.Kind.NONE, SynthesisLinkRouter.classify(null).kind());
     }
+
+    @Test
+    void httpAlsoExternal() {
+        var a = SynthesisLinkRouter.classify("http://example.com");
+        assertEquals(SynthesisLinkRouter.Kind.EXTERNAL, a.kind());
+        assertEquals("http://example.com", a.payload());
+    }
 }

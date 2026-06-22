@@ -92,4 +92,50 @@ class SynthesisHtmlRendererTest {
         String doc = SynthesisHtmlRenderer.toDocument("hi", theme, null);
         assertFalse(doc.contains("<script>"), doc);
     }
+
+    @Test
+    void rawHtmlScriptIsEscaped() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("<script>alert(1)</script>");
+        assertFalse(html.contains("<script>"), html);
+        assertTrue(html.contains("&lt;script&gt;"), html);
+    }
+
+    @Test
+    void rawHtmlImgIsEscaped() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("text <img src=x onerror=alert(1)> more");
+        assertFalse(html.contains("<img"), html);
+    }
+
+    @Test
+    void markdownImageDoesNotEmitImgTagAndKeepsAltText() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("![logo](https://evil/track.png)");
+        assertFalse(html.contains("<img"), html);
+        assertFalse(html.contains("track.png"), html);
+        assertTrue(html.contains("logo"), html);
+    }
+
+    @Test
+    void javascriptLinkIsNeutralizedToNavScheme() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("[x](javascript:alert(1))");
+        assertFalse(html.contains("href=\"javascript:"), html);
+        assertTrue(html.contains("ireview-nav://"), html);
+    }
+
+    @Test
+    void pathLinkStillRewrittenAfterEscapeHtml() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("[Foo](src/Foo.java:18)");
+        assertTrue(html.contains("href=\"ireview-nav://src/Foo.java:18\""), html);
+    }
+
+    @Test
+    void httpLinkStillExternalAfterEscapeHtml() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("[t](https://example.com/x)");
+        assertTrue(html.contains("href=\"https://example.com/x\""), html);
+    }
+
+    @Test
+    void inlineCodeDoubleQuoteEscapedInCodeText() {
+        String html = SynthesisHtmlRenderer.toBodyHtml("via `f(\"x\")`");
+        assertTrue(html.contains("<code>f(&quot;x&quot;)</code>"), html);
+    }
 }

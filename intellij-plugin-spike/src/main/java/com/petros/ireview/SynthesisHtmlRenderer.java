@@ -44,8 +44,10 @@ public final class SynthesisHtmlRenderer {
 
     private static final HtmlRenderer RENDERER = HtmlRenderer.builder()
             .extensions(EXTENSIONS)
+            .escapeHtml(true)
             .attributeProviderFactory(ctx -> new NavLinkAttributeProvider())
             .nodeRendererFactory(SymbolCodeRenderer::new)
+            .nodeRendererFactory(AltTextImageRenderer::new)
             .build();
 
     public static String toBodyHtml(String markdown) {
@@ -122,6 +124,29 @@ public final class SynthesisHtmlRenderer {
             html.text(literal);
             html.tag("/code");
             html.tag("/a");
+        }
+    }
+
+    /** Drops images entirely, keeping only their alt text — no remote <img> loads. */
+    private static final class AltTextImageRenderer implements NodeRenderer {
+        private final HtmlWriter html;
+
+        AltTextImageRenderer(HtmlNodeRendererContext context) {
+            this.html = context.getWriter();
+        }
+
+        @Override
+        public Set<Class<? extends Node>> getNodeTypes() {
+            return Set.of(org.commonmark.node.Image.class);
+        }
+
+        @Override
+        public void render(Node node) {
+            for (Node c = node.getFirstChild(); c != null; c = c.getNext()) {
+                if (c instanceof org.commonmark.node.Text t) {
+                    html.text(t.getLiteral());
+                }
+            }
         }
     }
 
