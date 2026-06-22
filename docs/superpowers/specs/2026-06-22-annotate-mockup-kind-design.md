@@ -1,7 +1,7 @@
 # Annotate `mockup` block kind — design spec
 
 **Date:** 2026-06-22
-**Status:** Approved design. Implementation plan scoped to Phase 1.
+**Status:** Implemented — Phase 1 and Phase 2 both shipped (whole-mockup render/commenting + per-region annotation). Only the region hover-glow round-trip remains deferred.
 **Author:** Brainstormed with a four-engineer review panel (frontend/rendering, skill-surface/protocol, security, server/protocol), all grounded in the live code.
 
 ## Problem
@@ -103,17 +103,17 @@ No `width`/`theme`/`scripts` fields — speculative; omit per simplicity, add la
 
 ## Phasing
 
-**Phase 1 (ship first) — high-fidelity render + whole-mockup commenting.**
+**Phase 1 — high-fidelity render + whole-mockup commenting. ✅ SHIPPED.**
 - `static/script.js`: `renderMockup` branch (iframe + sandbox + frame CSP + injected height bridge, skip sanitizer); boot message listener (auth + clamp + set height); `updateBlockContent` mockup branch (naive `srcdoc` reassign under spinner).
 - `server.py`: add the `mockup` spec-forwarding branch in `_render_block_for_raw` (mirrors `choice`, ~2 lines). `versions.py`: add `"mockup"` to `_SPEC_KINDS`. No HTML rendering, no `step_id` gate change. `blocks.py` persistence is schemaless and already round-trips the spec.
 - Skill docs: `SKILL.md` row, `pushing.md` cross-ref, new `mockup.md`.
 - Result: Claude's full HTML/CSS/JS expressiveness, rendered, isolated, safe, and commentable at block granularity.
 
-**Phase 2 (only if Phase 1 earns it) — per-region annotation.**
-- Bridge: add click forwarder.
-- `static/script.js`: extract `onHoverAction` body into `openAnnotation(block, type, {stepId, label})`; the boot message listener calls it for `annotate:click` messages.
-- `server.py` ~348: relax the `step_id` kind-gate; update `tests/test_server.py` ~696 + add positive test.
-- Accepted cosmetic loss: hover-to-glow on a region needs a later `data-cardFocus` round-trip into the iframe; the comment card itself works.
+**Phase 2 — per-region annotation. ✅ SHIPPED.**
+- Bridge: forwards clicks on `[data-annotate-id]` regions via `postMessage`.
+- `static/script.js`: extracted `onHoverAction` body into `openAnnotation(block, type, {stepId, selectedText, selection})`; the boot message listener authenticates the frame by identity and calls it for `annotate:click` messages.
+- `server.py`: relaxed the `step_id` gate so non-sequence kinds accept an opaque non-empty-string slug (sequence stays strict); replaced the markdown-step_id-422 test with acceptance + blank-string negative; added a mockup positive test. e2e `mockup-region.e2e.cjs` proves the round-trip.
+- Accepted cosmetic loss (still deferred): hover-to-glow on a region needs a later `data-cardFocus` round-trip into the iframe; the comment card itself works.
 
 ## Risks & mitigations
 

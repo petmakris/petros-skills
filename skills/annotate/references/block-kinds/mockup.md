@@ -30,9 +30,11 @@ styling. (This is the one place mockups differ from inline-HTML markdown, which
 reuses the page palette — see `references/pushing.md` § Inline HTML.)
 
 ## Commenting and rewriting
-Whole-mockup comments arrive with `step_id: null` — rewrite `spec.html` via
-`update_spec_block` (same helper as a diagram's `spec.source`; see
-`references/handling-events.md`). Per-region commenting (clicking a
-`data-annotate-id` region) is not yet wired — mark regions with
-`data-annotate-id` anyway so it works when enabled, and preserve surviving
-slugs on rewrite.
+Mark commentable regions with `data-annotate-id="<slug>"`. A click on a region
+arrives as `step_id: "<slug>"`; a click anywhere else comments on the whole
+mockup (`step_id: null`). Either way, rewrite `spec.html` via `update_spec_block`
+(same helper as a diagram's `spec.source`; see `references/handling-events.md`)
+and **preserve surviving `data-annotate-id` slugs** so the per-region scope
+round-trips. Tag regions you expect feedback on (a panel, a card, the nav) —
+not every element. Avoid tagging an element that is also interactive (a tab,
+a toggle): a click would both act and open a comment.
