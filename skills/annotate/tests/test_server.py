@@ -710,13 +710,44 @@ class ServerStartupTests(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertIn("step", body.lower())
 
-    def test_submit_step_id_against_markdown_block_returns_422(self):
+    def test_submit_step_id_against_markdown_block_is_accepted(self):
+        """Free-HTML and mockup blocks mark sub-units with data-annotate-id; a
+        click on one arrives as an opaque string step_id on a non-sequence block.
+        It is not a sequence step, so it must be accepted and passed through."""
         response_dir = Path(self.sess["response_dir"])
         _write_blocks(response_dir, "resp-md-sid", "T", [
             {"id": "b-0", "markdown": "hello", "version": 1},
         ])
-        status, body = self._post_json(self.base + "/api/submit", {
-            "block_id": "b-0", "step_id": "s1", "type": "comment", "text": "x",
+        status, _ = self._post_json(self.base + "/api/submit", {
+            "block_id": "b-0", "step_id": "sidebar", "type": "comment", "text": "x",
+        })
+        self.assertEqual(status, 202)
+        events_dir = Path(self.sess["events_dir"])
+        evt = json.loads(next(events_dir.glob("*.json")).read_text())
+        self.assertEqual(evt["block_id"], "b-0")
+        self.assertEqual(evt["step_id"], "sidebar")
+
+    def test_submit_step_id_against_mockup_block_is_accepted(self):
+        response_dir = Path(self.sess["response_dir"])
+        _write_blocks(response_dir, "resp-mock-sid", "T", [
+            {"id": "b-0", "kind": "mockup",
+             "spec": {"html": "<div data-annotate-id='hero'>x</div>"}, "version": 1},
+        ])
+        status, _ = self._post_json(self.base + "/api/submit", {
+            "block_id": "b-0", "step_id": "hero", "type": "comment", "text": "tighten this",
+        })
+        self.assertEqual(status, 202)
+        events_dir = Path(self.sess["events_dir"])
+        evt = json.loads(next(events_dir.glob("*.json")).read_text())
+        self.assertEqual(evt["step_id"], "hero")
+
+    def test_submit_blank_step_id_on_mockup_returns_422(self):
+        response_dir = Path(self.sess["response_dir"])
+        _write_blocks(response_dir, "resp-mock-empty", "T", [
+            {"id": "b-0", "kind": "mockup", "spec": {"html": "<div>x</div>"}, "version": 1},
+        ])
+        status, _ = self._post_json(self.base + "/api/submit", {
+            "block_id": "b-0", "step_id": "   ", "type": "comment", "text": "x",
         })
         self.assertEqual(status, 422)
 

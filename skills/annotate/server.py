@@ -345,14 +345,20 @@ class Handlers:
             except KeyError:
                 _send_text(h, 422, f"unknown block_id {block_id!r}")
                 return
-            if (blk.get("kind") or "markdown") != "sequence":
-                _send_text(h, 422, "step_id only valid for kind=sequence blocks")
-                return
-            spec = blk.get("spec") or {}
-            valid_step_ids = {s.get("id") for s in (spec.get("steps") or [])}
-            if step_id not in valid_step_ids:
-                _send_text(h, 422, f"unknown step_id {step_id!r}")
-                return
+            kind = blk.get("kind") or "markdown"
+            if kind == "sequence":
+                spec = blk.get("spec") or {}
+                valid_step_ids = {s.get("id") for s in (spec.get("steps") or [])}
+                if step_id not in valid_step_ids:
+                    _send_text(h, 422, f"unknown step_id {step_id!r}")
+                    return
+            else:
+                # Free-HTML / mockup sub-unit: an author-defined data-annotate-id
+                # slug. The server has no spec.steps to validate against, so it
+                # accepts any non-empty string and passes it through verbatim.
+                if not isinstance(step_id, str) or not step_id.strip():
+                    _send_text(h, 422, "step_id must be a non-empty string")
+                    return
         evt = {
             "block_id": block_id,
             "step_id": step_id,
