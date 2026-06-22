@@ -94,7 +94,11 @@ public final class MarkdownLinkRenderer {
     }
 
     private static String escape(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        // " must be escaped too: escaped values land inside double-quoted HTML
+        // attributes (href="…"), where a literal " terminates the attribute early
+        // and leaks the remainder of the symbol as bogus markup.
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     private MarkdownLinkRenderer() {}

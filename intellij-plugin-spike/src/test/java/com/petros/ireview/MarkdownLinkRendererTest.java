@@ -66,4 +66,16 @@ class MarkdownLinkRendererTest {
             "see <a href=\"ireview-sym://Map&lt;K,V&gt;\" class=\"ref-sym\">Map&lt;K,V&gt;</a>",
             html);
     }
+
+    @Test
+    void backtickContentWithDoubleQuotesDoesNotBreakAttribute() {
+        // A symbol with a string literal — the embedded " must be escaped, else
+        // it terminates the href attribute early and the rest leaks as markup.
+        String html = MarkdownLinkRenderer.toHtml(
+            "seeds via `DatabasePopulator.fromScript(\"scripts/<TestClass>/init.sql\")`");
+        assertEquals(
+            "seeds via <a href=\"ireview-sym://DatabasePopulator.fromScript(&quot;scripts/&lt;TestClass&gt;/init.sql&quot;)\""
+                + " class=\"ref-sym\">DatabasePopulator.fromScript(&quot;scripts/&lt;TestClass&gt;/init.sql&quot;)</a>",
+            html);
+    }
 }
