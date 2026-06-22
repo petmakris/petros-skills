@@ -4,7 +4,9 @@ import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.jcef.JBCefApp;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
@@ -122,25 +124,7 @@ public final class SynthesisPopup {
 
         synthesisPane.addHyperlinkListener(e -> {
             if (e.getEventType() != javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) return;
-            String url = e.getDescription();
-            if (url == null) return;
-            if (url.startsWith("ireview-nav://")) {
-                MarkdownLinkRenderer.NavTarget t = MarkdownLinkRenderer.parseNavTarget(url);
-                String base = project.getBasePath();
-                if (base == null) return;
-                com.intellij.openapi.vfs.VirtualFile vf =
-                    com.intellij.openapi.vfs.LocalFileSystem.getInstance()
-                        .findFileByPath(base + "/" + t.path());
-                if (vf != null) {
-                    int line0 = Math.max(0, t.line() - 1);
-                    new com.intellij.openapi.fileEditor.OpenFileDescriptor(project, vf, line0, 0).navigate(true);
-                }
-            } else if (url.startsWith("ireview-sym://")) {
-                String identifier = url.substring("ireview-sym://".length());
-                resolveAndNavigateSymbol(project, identifier);
-            } else {
-                com.intellij.ide.BrowserUtil.browse(url);
-            }
+            SynthesisLinkRouter.route(project, e.getDescription());
         });
 
         JScrollPane synthesisScroll = new JScrollPane(synthesisPane);
@@ -162,9 +146,13 @@ public final class SynthesisPopup {
         thinkingCard.add(thinkingInner);
 
         // CardLayout swap between synthesis content and thinking spinner.
+        // Prefer JCEF (real browser) for the synthesis card; fall back to the
+        // JEditorPane (synthesisScroll) when JCEF is unavailable.
+        final SynthesisBrowser browser = JBCefApp.isSupported() ? new SynthesisBrowser(project) : null;
+        JComponent synthesisCard = browser != null ? (JComponent) browser.getComponent() : synthesisScroll;
         java.awt.CardLayout cards = new java.awt.CardLayout();
         JPanel centerCards = new JPanel(cards);
-        centerCards.add(synthesisScroll, "synthesis");
+        centerCards.add(synthesisCard, "synthesis");
         centerCards.add(thinkingCard, "thinking");
         centerCards.setPreferredSize(new Dimension(520, 130));
 
@@ -174,7 +162,7 @@ public final class SynthesisPopup {
         JScrollPane inputScroll = new JScrollPane(input);
         inputScroll.setBorder(BorderFactory.createLineBorder(JBColor.border(), 1, true));
 
-        // renderCurrent captures synthesisPane and thinking; called on EDT.
+        // renderCurrent captures synthesisPane/browser and thinking; called on EDT.
         Runnable renderCurrent = () -> {
             if (thinking.get()) {
                 cards.show(centerCards, "thinking");
@@ -182,6 +170,12 @@ public final class SynthesisPopup {
             }
             cards.show(centerCards, "synthesis");
             var cached = client.threadFor(anchor);
+            if (browser != null) {
+                browser.render(cached.isEmpty()
+                    ? "*No annotation yet. Ask a question to start.*"
+                    : cached.get().synthesis());
+                return;
+            }
             if (cached.isEmpty()) {
                 synthesisPane.setText(wrapHtml("<i style='color:#7a7e85'>No annotation yet. Ask a question to start.</i>"));
             } else {
@@ -203,8 +197,12 @@ public final class SynthesisPopup {
                 if (t != null) {
                     thinking.set(false);
                     cards.show(centerCards, "synthesis");
-                    synthesisPane.setText(wrapHtml(
-                        "<span style='color:#cc6666'>Failed to submit — retry?</span>"));
+                    if (browser != null) {
+                        browser.render("**Failed to submit — retry?**");
+                    } else {
+                        synthesisPane.setText(wrapHtml(
+                            "<span style='color:#cc6666'>Failed to submit — retry?</span>"));
+                    }
                 }
                 // On success, do nothing; the SSE thread-changed event will call
                 // onThreadChanged, which sets thinking=false and re-renders.
@@ -277,6 +275,7 @@ public final class SynthesisPopup {
                 // surface in the content/header panels.
                 .createPopup();
         popupRef.set(popup);
+        if (browser != null) Disposer.register(popup, browser);
         OPEN_POPUPS.put(anchor, popup);
         popup.addListener(new com.intellij.openapi.ui.popup.JBPopupListener() {
             @Override public void onClosed(@NotNull com.intellij.openapi.ui.popup.LightweightWindowEvent e) {
@@ -310,50 +309,6 @@ public final class SynthesisPopup {
              +                 " font-size: " + (editorFontSize - 1) + "px; }"
              + "</style></head><body>"
              + body + "</body></html>";
-    }
-
-    /**
-     * Look up `identifier` in the project's PSI symbol caches. If exactly one
-     * class or method matches, navigate to it. If multiple, show a chooser
-     * popup. If none, silent no-op.
-     */
-    private static void resolveAndNavigateSymbol(com.intellij.openapi.project.Project project,
-                                                 String identifier) {
-        com.intellij.openapi.application.ReadAction.nonBlocking(() -> {
-            var cache = com.intellij.psi.search.PsiShortNamesCache.getInstance(project);
-            var scope = com.intellij.psi.search.GlobalSearchScope.projectScope(project);
-            com.intellij.psi.PsiNamedElement[] candidates =
-                cache.getClassesByName(identifier, scope);
-            if (candidates.length == 0) {
-                candidates = cache.getMethodsByName(identifier, scope);
-            }
-            return candidates;
-        })
-        .finishOnUiThread(
-            com.intellij.openapi.application.ModalityState.defaultModalityState(),
-            candidates -> {
-                if (candidates.length == 0) {
-                    return; // silent no-op
-                }
-                if (candidates.length == 1) {
-                    if (candidates[0] instanceof com.intellij.pom.Navigatable nav) {
-                        nav.navigate(true);
-                    }
-                    return;
-                }
-                // Multi-match: small chooser popup
-                com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
-                    .createPopupChooserBuilder(java.util.Arrays.asList(candidates))
-                    .setTitle("Multiple matches for '" + identifier + "'")
-                    .setItemChosenCallback(item -> {
-                        if (item instanceof com.intellij.pom.Navigatable nav) {
-                            nav.navigate(true);
-                        }
-                    })
-                    .createPopup()
-                    .showCenteredInCurrentWindow(project);
-            })
-        .submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService());
     }
 
     /**
