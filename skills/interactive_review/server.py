@@ -1,9 +1,10 @@
 """Interactive-review skill — thin handlers module over web_companion.
 
-Renders a GitHub-style PR diff. Each line is a potential anchor for an
-inline thread. /api/submit appends a user message to the thread AND
-enqueues an event for Claude. Claude wakes via watcher, reads context,
-appends a claude-role message to the thread, acks.
+Per-line PR review runs in the IDE (IntelliJ plugin / VS Code extension).
+This server is headless: it snapshots the PR diff, holds per-anchor threads,
+streams thread changes over SSE, and enqueues /api/submit comments as events
+for Claude. Claude wakes via watcher, reads context, appends a claude-role
+message to the thread, acks. There is no browser review UI.
 """
 from __future__ import annotations
 
@@ -16,39 +17,26 @@ from pathlib import Path
 
 from skills._shared.web_companion import server as wc_server
 from skills._shared.web_companion import events as events_module
-from skills._shared.web_companion.templates import html_escape, render_page
 from skills.interactive_review import diff as diff_module
 from skills.interactive_review import threads as threads_module
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
 SHARED_STATIC_DIR = Path(__file__).resolve().parent.parent / "_shared" / "web_companion" / "static"
 
 PORT_RANGE = range(54620, 54641)
 BANNER = "interactive-review-server v1"
 
-WAITING_HTML = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>Waiting</title>
-<link rel="stylesheet" href="/static/core.css">
-<link rel="stylesheet" href="/static/review.css"></head>
-<body><main class="waiting"><p>Loading PR diff…</p></main></body></html>
+IDE_PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Interactive Review</title>
+<style>body{font-family:-apple-system,Segoe UI,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center}main{max-width:32rem;text-align:center;padding:2rem;line-height:1.5}h1{font-size:1.15rem;font-weight:600}b{color:#fff}</style></head>
+<body><main><h1>🔍 Interactive review runs in your IDE</h1>
+<p>This review has no browser page. Open the project in <b>IntelliJ&nbsp;IDEA</b> or <b>VS&nbsp;Code</b> — the plugin shows per-line annotations on the diff.</p></main></body></html>
 """
 
-CLOSED_HTML = """<!DOCTYPE html>
+CLOSED_PAGE = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Closed</title>
-<link rel="stylesheet" href="/static/core.css">
-<link rel="stylesheet" href="/static/review.css"></head>
-<body><main class="waiting"><p>This review session is closed.</p></main></body></html>
+<style>body{font-family:-apple-system,Segoe UI,sans-serif;background:#0d1117;color:#8b949e;display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center}</style></head>
+<body><main><p>This review session is closed.</p></main></body></html>
 """
-
-
-def _read_meta(state_dir: Path) -> dict:
-    p = state_dir / "meta.json"
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text())
-    except json.JSONDecodeError:
-        return {}
 
 
 def _is_terminal(state_dir: Path) -> bool:
@@ -65,33 +53,9 @@ class Handlers:
     def serve_root(self, h: BaseHTTPRequestHandler, dirs: dict) -> None:
         state_dir = Path(dirs["state_dir"])
         if _is_terminal(state_dir):
-            _send_html(h, 200, CLOSED_HTML)
+            _send_html(h, 200, CLOSED_PAGE)
             return
-        meta = _read_meta(state_dir)
-        if not meta:
-            _send_html(h, 200, WAITING_HTML)
-            return
-        title = meta.get("title", "PR Review")
-        body = (
-            f'<header class="page-header"><div class="header-title">'
-            f'<span class="header-emoji">🔍</span>'
-            f'<span class="header-text">{html_escape(title)}</span>'
-            f'</div><div class="header-actions">'
-            f'<button id="done-btn" type="button" class="done-btn">Done</button>'
-            f'</div></header>'
-            f'<main class="review"></main>'
-            f'<section class="general-section">'
-            f'  <h3>General review comments</h3>'
-            f'  <div id="general-thread"></div>'
-            f'  <button id="add-general" type="button" class="add-general-btn">'
-            f'    <span class="plus">+</span><span>Add general comment</span>'
-            f'  </button>'
-            f'</section>'
-        )
-        head = ('<link rel="stylesheet" href="/static/review.css">'
-                '<script src="/static/review.js" defer></script>')
-        page = render_page(title=title, head_assets=head, body_html=body)
-        _send_html(h, 200, page)
+        _send_html(h, 200, IDE_PAGE)
 
     def threads_bulk(self, dirs: dict) -> dict:
         """Return {anchor: {latest_synthesis, version, updated_at}} for all threads.
@@ -132,18 +96,6 @@ class Handlers:
             return
         if query == "threads.json":
             _send_json(h, 200, self.threads_bulk(dirs))
-            return
-        if query == "files":
-            files_path = state_dir / "files.json"
-            if not files_path.exists():
-                _send_json(h, 404, {"error": "no diff"})
-                return
-            data = files_path.read_bytes()
-            h.send_response(200)
-            h.send_header("Content-Type", "application/json; charset=utf-8")
-            h.send_header("Content-Length", str(len(data)))
-            h.end_headers()
-            h.wfile.write(data)
             return
         if query.startswith("thread"):
             qs = query.split("?", 1)[1] if "?" in query else ""
@@ -292,10 +244,7 @@ class Handlers:
             diff_text, meta = diff_module.fetch_pr_diff(pr_ref, dirs.get("_cwd"))
         except Exception as e:
             raise ValueError(f"gh pr fetch failed: {e}") from e
-        files = diff_module.parse_unified_diff(diff_text)
-        files_json = diff_module.files_to_json(files)
         (state_dir / "diff.patch").write_text(diff_text)
-        (state_dir / "files.json").write_text(json.dumps(files_json, indent=2))
         (state_dir / "meta.json").write_text(json.dumps({
             "pr_ref": pr_ref,
             "title": meta.get("title", pr_ref),
@@ -341,7 +290,7 @@ def main() -> int:
         skill_name="interactive-review",
         port_range=PORT_RANGE,
         handlers=Handlers(),
-        static_dirs=[SHARED_STATIC_DIR, STATIC_DIR],
+        static_dirs=[SHARED_STATIC_DIR],
     )
 
 

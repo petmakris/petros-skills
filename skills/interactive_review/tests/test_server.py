@@ -37,25 +37,15 @@ def make_dirs(tmp_path):
     }
 
 
-def test_serve_root_waiting_when_no_meta(tmp_path):
+def test_serve_root_points_to_ide(tmp_path):
+    """Root serves a headless 'use your IDE' page — no diff UI."""
     h = Handlers()
     handler = make_handler()
     h.serve_root(handler, make_dirs(tmp_path))
     handler.send_response.assert_called_once_with(200)
-    assert b"Loading PR diff" in handler.wfile.getvalue()
-
-
-def test_serve_root_renders_when_meta_present(tmp_path):
-    dirs = make_dirs(tmp_path)
-    (dirs["state_dir"] / "meta.json").write_text(json.dumps({"title": "PR #42"}))
-    h = Handlers()
-    handler = make_handler()
-    h.serve_root(handler, dirs)
-    handler.send_response.assert_called_with(200)
     written = handler.wfile.getvalue()
-    assert b"PR #42" in written
-    assert b"done-btn" in written
-    assert b"review.js" in written
+    assert b"IntelliJ" in written
+    assert b"review.js" not in written
 
 
 def test_serve_root_closed_when_finished(tmp_path):
@@ -66,25 +56,6 @@ def test_serve_root_closed_when_finished(tmp_path):
     h.serve_root(handler, dirs)
     handler.send_response.assert_called_with(200)
     assert b"closed" in handler.wfile.getvalue()
-
-
-def test_serve_files_returns_files_json(tmp_path):
-    dirs = make_dirs(tmp_path)
-    files = [{"path": "x", "added": 1, "removed": 0, "hunks": []}]
-    (dirs["state_dir"] / "files.json").write_text(json.dumps(files))
-    h = Handlers()
-    handler = make_handler()
-    h.serve_data(handler, dirs, "files")
-    handler.send_response.assert_called_with(200)
-    assert b'"path"' in handler.wfile.getvalue()
-
-
-def test_serve_files_404_when_missing(tmp_path):
-    dirs = make_dirs(tmp_path)
-    h = Handlers()
-    handler = make_handler()
-    h.serve_data(handler, dirs, "files")
-    handler.send_response.assert_called_with(404)
 
 
 def test_serve_thread_returns_empty_for_missing(tmp_path):
@@ -182,7 +153,6 @@ def test_create_session_extra_fetches_diff(tmp_path):
         extra = h.create_session_extra({"pr": "42"}, dirs)
     assert extra == {"pr_ref": "42", "title": "Test PR"}
     assert (dirs["state_dir"] / "diff.patch").exists()
-    assert (dirs["state_dir"] / "files.json").exists()
     meta = json.loads((dirs["state_dir"] / "meta.json").read_text())
     assert meta["title"] == "Test PR"
     assert meta["pr_ref"] == "42"
