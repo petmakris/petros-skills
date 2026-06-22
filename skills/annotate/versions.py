@@ -38,7 +38,7 @@ _TRAILING_WS = re.compile(r"[ \t]+$", re.MULTILINE)
 # Mermaid source) leaves the hash unchanged, the version chain never grows,
 # and the client never refetches the updated block. Keep in sync with
 # server._render_block_for_raw, which renders these from `spec`.
-_SPEC_KINDS = ("sequence", "diagram", "choice")
+_SPEC_KINDS = ("sequence", "diagram", "choice", "mockup")
 
 
 def _canonical_spec(spec: dict[str, Any]) -> str:

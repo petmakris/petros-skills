@@ -88,6 +88,26 @@ def test_choice_spec_change_bumps(tmp_path):
     assert versions == {"b-0": 2}
 
 
+def test_mockup_spec_change_bumps(tmp_path):
+    """Mockup content lives in spec.html, not markdown. A spec edit must bump
+    the version, or the client never refetches the updated iframe."""
+    vp = tmp_path / "versions.json"
+    derive_versions(vp, [{"id": "b-0", "kind": "mockup", "spec": {"html": "<h1>A</h1>"}}])
+    versions = derive_versions(
+        vp, [{"id": "b-0", "kind": "mockup", "spec": {"html": "<h1>B</h1>"}}]
+    )
+    assert versions == {"b-0": 2}
+
+
+def test_mockup_canonical_spec_no_bump_on_reorder(tmp_path):
+    vp = tmp_path / "versions.json"
+    derive_versions(vp, [{"id": "b-0", "kind": "mockup",
+                          "spec": {"title": "T", "html": "<h1>A</h1>"}}])
+    versions = derive_versions(vp, [{"id": "b-0", "kind": "mockup",
+                                     "spec": {"html": "<h1>A</h1>", "title": "T"}}])
+    assert versions == {"b-0": 1}
+
+
 def test_kind_change_bumps(tmp_path):
     vp = tmp_path / "versions.json"
     derive_versions(vp, [{"id": "b-0", "markdown": "hi"}])
