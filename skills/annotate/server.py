@@ -524,6 +524,10 @@ def _render_block_for_raw(blk: dict, version: int) -> dict:
         base["svg"] = svg
     elif kind == "choice":
         base["spec"] = blk.get("spec") or {}
+    elif kind == "mockup":
+        # Trusted Claude HTML rendered client-side in a sandboxed iframe.
+        # Server forwards the spec verbatim; it never parses or renders the HTML.
+        base["spec"] = blk.get("spec") or {}
     else:
         base["markdown"] = blk.get("markdown", "")
     return base

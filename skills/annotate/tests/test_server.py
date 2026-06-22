@@ -606,6 +606,23 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn('data-step-id="s1"', seq_blk["svg"])
         self.assertEqual(seq_blk["spec"], spec)
 
+    def test_raw_forwards_spec_for_mockup_block(self):
+        """A kind=mockup block round-trips with its spec (html) and no svg —
+        the server forwards but does not render it."""
+        response_dir = Path(self.sess["response_dir"])
+        spec = {"title": "Dashboard", "html": "<h1 data-annotate-id='hd'>Hi</h1>"}
+        _write_blocks(response_dir, "resp-mock", "T", [
+            {"id": "b-0", "markdown": "intro", "version": 1},
+            {"id": "b-1", "kind": "mockup", "spec": spec, "version": 1},
+        ])
+        status, body = _http_get("localhost", self.info["port"], self.base + "/raw")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        mock_blk = next(b for b in data["blocks"] if b["id"] == "b-1")
+        self.assertEqual(mock_blk["kind"], "mockup")
+        self.assertEqual(mock_blk["spec"]["html"], "<h1 data-annotate-id='hd'>Hi</h1>")
+        self.assertNotIn("svg", mock_blk)
+
     def test_raw_includes_authored_title(self):
         """An authored block `title` round-trips through /raw so the client can
         render it as the card header (else it falls back to deriving one)."""
