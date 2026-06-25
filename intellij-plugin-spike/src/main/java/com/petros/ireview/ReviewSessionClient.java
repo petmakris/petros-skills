@@ -73,13 +73,28 @@ public final class ReviewSessionClient {
     private final Duration pollInterval;
     private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
 
+    /** Per-request read timeout for the synchronous polls — without it a
+     *  server that accepts the socket but stalls pins a discovery-pool thread
+     *  indefinitely and survives project close. */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
+
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(2)).build();
     private final ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
     private final java.util.List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Map<String, ThreadState> cache = new ConcurrentHashMap<>();
-    /** Anchors with an in-flight Claude reply (post-submit, pre-SSE-confirmation). */
-    private final java.util.Set<String> pending = ConcurrentHashMap.newKeySet();
+    /** Bumped on every cache mutation so consumers (e.g. the gutter index) can
+     *  memoize against a cheap version stamp instead of rebuilding each paint. */
+    private final java.util.concurrent.atomic.AtomicLong cacheVersion =
+        new java.util.concurrent.atomic.AtomicLong();
+    /** Anchors with an in-flight Claude reply (post-submit, pre-SSE-confirmation),
+     *  mapped to the submit token that set them. A later submit on the same
+     *  anchor supersedes the token, so a stale failure can't clear a newer
+     *  in-flight reply's spinner. */
+    private final Map<String, Long> pending = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong submitSeq =
+        new java.util.concurrent.atomic.AtomicLong();
+    private volatile boolean closed = false;
     private volatile State state = State.DORMANT;
     private volatile SessionInfo current = null;
     private volatile Future<?> sseTask = null;
@@ -97,6 +112,7 @@ public final class ReviewSessionClient {
     }
 
     public void stop() {
+        closed = true;
         if (discoverTask != null) discoverTask.cancel(true);
         if (sseTask != null) sseTask.cancel(true);
         exec.shutdownNow();
@@ -104,6 +120,11 @@ public final class ReviewSessionClient {
     }
 
     public void addListener(Listener l) { listeners.add(l); }
+
+    public void removeListener(Listener l) { listeners.remove(l); }
+
+    /** Monotonic counter bumped on every cache mutation; use to memoize. */
+    public long cacheVersion() { return cacheVersion.get(); }
 
     public Optional<SessionInfo> currentSession() { return Optional.ofNullable(current); }
 
@@ -117,7 +138,7 @@ public final class ReviewSessionClient {
         return new java.util.HashMap<>(cache);
     }
 
-    public boolean isPending(String anchor) { return pending.contains(anchor); }
+    public boolean isPending(String anchor) { return pending.containsKey(anchor); }
 
     /** POST a comment event to /s/<sid>/api/submit. */
     public CompletableFuture<Void> postComment(String anchor, String text, String anchorText) {
@@ -127,7 +148,8 @@ public final class ReviewSessionClient {
             return CompletableFuture.failedFuture(new IllegalStateException(
                 "Claude session is gone — re-run /interactive-review to resume"));
         }
-        markPending(anchor, true);
+        long token = submitSeq.incrementAndGet();
+        markPending(anchor, token);
         java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
         payload.put("anchor", anchor);
         payload.put("type", "comment");
@@ -136,12 +158,13 @@ public final class ReviewSessionClient {
         String body = GSON.toJson(payload);
         HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + s.sid() + "/api/submit"))
             .header("Content-Type", "application/json")
+            .timeout(REQUEST_TIMEOUT)
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();
         return http.sendAsync(req, HttpResponse.BodyHandlers.discarding())
             .whenComplete((resp, err) -> {
                 if (err != null || (resp != null && resp.statusCode() / 100 != 2)) {
-                    markPending(anchor, false);
+                    clearPendingIfToken(anchor, token);
                 }
             })
             .thenAccept(resp -> {
@@ -161,6 +184,7 @@ public final class ReviewSessionClient {
         SessionInfo s = current;
         if (s == null) return CompletableFuture.failedFuture(new IllegalStateException("no session"));
         HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + s.sid() + "/api/cancel"))
+            .timeout(REQUEST_TIMEOUT)
             .POST(HttpRequest.BodyPublishers.noBody())
             .build();
         return http.sendAsync(req, HttpResponse.BodyHandlers.discarding())
@@ -179,6 +203,7 @@ public final class ReviewSessionClient {
         String body = "{\"anchor\":" + jsonEscape(anchor) + "}";
         HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + s.sid() + "/api/threads/delete"))
             .header("Content-Type", "application/json")
+            .timeout(REQUEST_TIMEOUT)
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();
         return http.sendAsync(req, HttpResponse.BodyHandlers.discarding())
@@ -189,10 +214,28 @@ public final class ReviewSessionClient {
             });
     }
 
-    private void markPending(String anchor, boolean isPending) {
-        boolean changed = isPending ? pending.add(anchor) : pending.remove(anchor);
-        if (!changed) return;
-        for (Listener l : listeners) l.onPendingChanged(anchor, isPending);
+    /** Mark an anchor pending under a submit token; notify only on the
+     *  not-pending → pending transition. */
+    private void markPending(String anchor, long token) {
+        if (pending.put(anchor, token) == null) {
+            for (Listener l : listeners) l.onPendingChanged(anchor, true);
+        }
+    }
+
+    /** Clear pending regardless of token — used when the reply is confirmed or
+     *  the session freezes/pauses. */
+    private void clearPending(String anchor) {
+        if (pending.remove(anchor) != null) {
+            for (Listener l : listeners) l.onPendingChanged(anchor, false);
+        }
+    }
+
+    /** Clear pending only if this exact submit is still the latest one — a
+     *  newer submit on the same anchor must keep its spinner. */
+    private void clearPendingIfToken(String anchor, long token) {
+        if (pending.remove(anchor, token)) {
+            for (Listener l : listeners) l.onPendingChanged(anchor, false);
+        }
     }
 
     // --- internal ---
@@ -239,7 +282,7 @@ public final class ReviewSessionClient {
 
     private SessionInfo fetchNewestSession() throws Exception {
         String url = baseUrl + "/api/sessions?cwd=" + URLEncoder.encode(projectCwd, StandardCharsets.UTF_8);
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).GET().build();
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT).GET().build();
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) return null;
         return parseFirstSession(resp.body());
@@ -248,7 +291,7 @@ public final class ReviewSessionClient {
     /** Freeze the current session read-only. One-way: only attach() clears it. */
     private void latchEnded() {
         endedLatched = true;
-        for (String a : new java.util.ArrayList<>(pending)) markPending(a, false);
+        for (String a : new java.util.ArrayList<>(pending.keySet())) clearPending(a);
         if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
         setState(State.ENDED);
     }
@@ -266,7 +309,7 @@ public final class ReviewSessionClient {
         long seenAt;
         boolean ended;
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/poll")).GET().build();
+            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/poll")).timeout(REQUEST_TIMEOUT).GET().build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return;
             com.google.gson.JsonObject o = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
@@ -286,7 +329,7 @@ public final class ReviewSessionClient {
             if (state != State.PAUSED) {
                 // Clear pending so spinners and the side-panel × recover —
                 // no ack is coming until the watcher returns.
-                for (String a : new java.util.ArrayList<>(pending)) markPending(a, false);
+                for (String a : new java.util.ArrayList<>(pending.keySet())) clearPending(a);
                 setState(State.PAUSED);
             }
         } else if (state == State.PAUSED) {
@@ -300,6 +343,7 @@ public final class ReviewSessionClient {
         if (current != null) {
             current = null;
             cache.clear();
+            cacheVersion.incrementAndGet();
             pending.clear();
             if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
             for (Listener l : listeners) l.onDetached();
@@ -314,46 +358,87 @@ public final class ReviewSessionClient {
         // Otherwise the side panel keeps showing dead threads from the old
         // session and × clicks on them return HTTP 409 from the server.
         cache.clear();
+        cacheVersion.incrementAndGet();
         pending.clear();
         setState(State.CONNECTING);
-        seedCache(s.sid());
         for (Listener l : listeners) l.onAttached(s);
         openSse(s.sid());
     }
 
+    /**
+     * Seed (or re-seed) the per-anchor cache from the bulk threads endpoint.
+     * Retries a few times so a transient blip on attach doesn't leave the panel
+     * empty until the next SSE event; dedups against the current cache so a
+     * re-seed on reconnect doesn't churn listeners for unchanged threads.
+     */
     private void seedCache(String sid) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/threads.json")).GET().build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                Map<String, ThreadState> seeded = parseThreadsBulk(resp.body());
-                cache.putAll(seeded);
-                for (var e : seeded.entrySet()) {
-                    for (Listener l : listeners) {
-                        l.onThreadChanged(e.getKey(), e.getValue().synthesis(), e.getValue().version());
-                    }
+        for (int attempt = 0; attempt < 3 && !closed; attempt++) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/threads.json"))
+                    .timeout(REQUEST_TIMEOUT).GET().build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200) {
+                    applySeed(parseThreadsBulk(resp.body()));
+                    return;
                 }
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    private void applySeed(Map<String, ThreadState> seeded) {
+        for (var e : seeded.entrySet()) {
+            ThreadState existing = cache.get(e.getKey());
+            ThreadState incoming = e.getValue();
+            if (existing != null
+                    && existing.synthesis().equals(incoming.synthesis())
+                    && existing.version() == incoming.version()) {
+                continue; // unchanged — don't re-fire listeners on a reconnect re-seed
+            }
+            cache.put(e.getKey(), incoming);
+            cacheVersion.incrementAndGet();
+            for (Listener l : listeners) {
+                l.onThreadChanged(e.getKey(), incoming.synthesis(), incoming.version());
+            }
         }
     }
 
     private void openSse(String sid) {
         URI uri = URI.create(baseUrl + "/s/" + sid + "/stream");
         sseTask = exec.submit(() -> {
+            // Seed on every (re)connect: covers a failed initial seed and an
+            // outage where SSE events were missed while disconnected.
+            seedCache(sid);
             try {
-                SseClient.connect(uri, Duration.ofSeconds(2), this::handleSseEvent, t -> {
+                SseClient.connect(http, uri, this::handleSseEvent, t -> {
                     // Don't churn DISCONNECTED/reconnect for a frozen session,
                     // and don't let an SSE drop override PAUSED/ENDED.
                     if (endedLatched) return;
                     if (state == State.ACTIVE) setState(State.DISCONNECTED);
-                    exec.schedule(() -> openSse(sid), 2, TimeUnit.SECONDS);
+                    scheduleReconnect(sid);
                 }).join();
             } catch (Exception e) {
                 if (!endedLatched && state == State.ACTIVE) setState(State.DISCONNECTED);
             }
         });
         if (!endedLatched) setState(State.ACTIVE);
+    }
+
+    /** Reschedule a reconnect unless we're shutting down — guards against an
+     *  in-flight SSE error callback hitting the executor after stop(). */
+    private void scheduleReconnect(String sid) {
+        if (closed || exec.isShutdown()) return;
+        try {
+            exec.schedule(() -> openSse(sid), 2, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // stop() raced us between the guard and the schedule — nothing to do.
+        }
     }
 
     private void handleSseEvent(SseClient.Event e) {
@@ -368,7 +453,8 @@ public final class ReviewSessionClient {
             String anchor = str(data, "anchor");
             if (anchor.isEmpty()) return;
             cache.remove(anchor);
-            markPending(anchor, false);
+            cacheVersion.incrementAndGet();
+            clearPending(anchor);
             for (Listener l : listeners) l.onThreadDeleted(anchor);
             return;
         }
@@ -397,10 +483,12 @@ public final class ReviewSessionClient {
             prefer(question, priorQuestion));
         if (existing != null && existing.synthesis().equals(synthesis)) {
             cache.put(anchor, next);
+            cacheVersion.incrementAndGet();
             return;
         }
         cache.put(anchor, next);
-        markPending(anchor, false);
+        cacheVersion.incrementAndGet();
+        clearPending(anchor);
         for (Listener l : listeners) l.onThreadChanged(anchor, synthesis, version);
     }
 

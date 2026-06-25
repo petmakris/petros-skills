@@ -51,10 +51,11 @@ import java.util.Map;
  * Yellow dot on rows whose version is greater than what the user last saw
  * (in-memory only; not persisted across IDE restart).
  */
-public final class AnnotationsPanel {
+public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
 
     private final Project project;
     private final ReviewSessionClient client;
+    private final ReviewSessionClient.Listener listener;
     private final DefaultListModel<AnnotationEntry> model = new DefaultListModel<>();
     private final JBList<AnnotationEntry> list = new JBList<>(model);
     private final JLabel titleLabel = new JLabel("Review · idle");
@@ -181,7 +182,7 @@ public final class AnnotationsPanel {
         root.add(new JBScrollPane(list), BorderLayout.CENTER);
         root.add(footer, BorderLayout.SOUTH);
 
-        client.addListener(new ReviewSessionClient.Listener() {
+        listener = new ReviewSessionClient.Listener() {
             @Override public void onStateChanged(ReviewSessionClient.State state) {
                 SwingUtilities.invokeLater(AnnotationsPanel.this::refreshTitle);
             }
@@ -203,7 +204,8 @@ public final class AnnotationsPanel {
             @Override public void onPendingChanged(String anchor, boolean isPending) {
                 SwingUtilities.invokeLater(list::repaint);
             }
-        });
+        };
+        client.addListener(listener);
 
         refreshTitle();
         rebuild();
@@ -211,6 +213,12 @@ public final class AnnotationsPanel {
 
     public JComponent getComponent() {
         return root;
+    }
+
+    @Override
+    public void dispose() {
+        client.removeListener(listener);
+        if (spinTimer != null) spinTimer.stop();
     }
 
     private static final JBColor LIVE_COLOR =

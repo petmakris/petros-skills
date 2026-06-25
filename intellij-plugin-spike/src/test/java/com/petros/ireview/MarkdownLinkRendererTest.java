@@ -52,6 +52,21 @@ class MarkdownLinkRendererTest {
     }
 
     @Test
+    void urlLinkTargetMayContainBalancedParens() {
+        String html = MarkdownLinkRenderer.toHtml(
+            "see [Bar](https://en.wikipedia.org/wiki/Bar_(disambiguation)) please");
+        assertEquals(
+            "see <a href=\"https://en.wikipedia.org/wiki/Bar_(disambiguation)\" class=\"ref-ticket\">Bar</a> please",
+            html);
+    }
+
+    @Test
+    void boldRunWithNewlineKeepsLineBreak() {
+        String html = MarkdownLinkRenderer.toHtml("**a\n\nb**");
+        assertEquals("<b>a<br><br>b</b>", html);
+    }
+
+    @Test
     void backtickCodeBecomesSymbolAnchor() {
         String html = MarkdownLinkRenderer.toHtml("call `Foo` here");
         assertEquals(

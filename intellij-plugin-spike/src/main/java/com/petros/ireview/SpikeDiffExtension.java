@@ -161,13 +161,30 @@ public final class SpikeDiffExtension extends DiffExtension {
         return out;
     }
 
+    /** Memoized gutter index per editor — rebuilt only when the document or the
+     *  session cache actually changes, not on every line's paint. */
+    private static final Map<EditorEx, CachedIndex> INDEX_CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    private record CachedIndex(long docStamp, long cacheVersion,
+                               Map<Integer, GutterAnchorIndex.LineAnchor> index) {}
+
     /** The thread (if any) that should render at this 0-based line. */
     private static GutterAnchorIndex.@Nullable LineAnchor lineAnchorFor(
             @NotNull EditorEx editor, @NotNull String label, @NotNull String side,
             int line0, @NotNull Project project) {
-        var cache = ReviewSessionService.get(project).client().snapshotCache();
-        var index = GutterAnchorIndex.build(documentLines(editor), cache, label, side,
-            AnchorResolver.DEFAULT_K);
+        var client = ReviewSessionService.get(project).client();
+        long docStamp = editor.getDocument().getModificationStamp();
+        long ver = client.cacheVersion();
+        CachedIndex memo = INDEX_CACHE.get(editor);
+        Map<Integer, GutterAnchorIndex.LineAnchor> index;
+        if (memo != null && memo.docStamp() == docStamp && memo.cacheVersion() == ver) {
+            index = memo.index();
+        } else {
+            index = GutterAnchorIndex.build(documentLines(editor),
+                client.snapshotCache(), label, side, AnchorResolver.DEFAULT_K);
+            INDEX_CACHE.put(editor, new CachedIndex(docStamp, ver, index));
+        }
         return index.get(line0 + 1); // index is 1-based
     }
 

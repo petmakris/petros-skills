@@ -17,13 +17,14 @@ public final class ReviewStatusBarWidget implements StatusBarWidget, StatusBarWi
 
     private final Project project;
     private final ReviewSessionClient client;
+    private final ReviewSessionClient.Listener listener;
     private volatile String text = "Review: idle";
     private StatusBar statusBar;
 
     public ReviewStatusBarWidget(Project project, ReviewSessionClient client) {
         this.project = project;
         this.client = client;
-        client.addListener(new ReviewSessionClient.Listener() {
+        this.listener = new ReviewSessionClient.Listener() {
             @Override public void onStateChanged(ReviewSessionClient.State state) {
                 text = switch (state) {
                     case DORMANT -> "Review: idle — /interactive-review <PR>";
@@ -44,13 +45,14 @@ public final class ReviewStatusBarWidget implements StatusBarWidget, StatusBarWi
             @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
                 if (statusBar != null) statusBar.updateWidget(WIDGET_ID);
             }
-        });
+        };
+        client.addListener(listener);
     }
 
     @Override public @NonNls @NotNull String ID() { return WIDGET_ID; }
     @Override public @Nullable WidgetPresentation getPresentation() { return this; }
     @Override public void install(@NotNull StatusBar statusBar) { this.statusBar = statusBar; }
-    @Override public void dispose() {}
+    @Override public void dispose() { client.removeListener(listener); }
 
     @Override public @Nullable String getTooltipText() {
         return "Click to copy /interactive-review command to clipboard";

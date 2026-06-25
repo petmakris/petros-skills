@@ -261,10 +261,7 @@ public final class SynthesisPopup {
 
         // SSE listener: when the thread for OUR anchor updates, re-render.
         // When it's deleted, dismiss the popup so the user doesn't keep
-        // interacting with a gone thread.
-        // KNOWN MINOR LEAK: ReviewSessionClient has no removeListener, so this
-        // listener outlives the popup. For long-running IDE sessions with many
-        // popups this is a leak; acceptable for v1, fix in a follow-up.
+        // interacting with a gone thread. Unregistered on popup close below.
         ReviewSessionClient.Listener listener = new ReviewSessionClient.Listener() {
             @Override
             public void onStateChanged(ReviewSessionClient.State st) {
@@ -308,6 +305,7 @@ public final class SynthesisPopup {
         popup.addListener(new com.intellij.openapi.ui.popup.JBPopupListener() {
             @Override public void onClosed(@NotNull com.intellij.openapi.ui.popup.LightweightWindowEvent e) {
                 OPEN_POPUPS.remove(anchor, popup);
+                client.removeListener(listener);
             }
         });
         popup.showInBestPositionFor(editor);

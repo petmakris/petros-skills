@@ -13,6 +13,7 @@ public final class AnnotationsToolWindowFactory implements ToolWindowFactory {
         AnnotationsPanel panel = new AnnotationsPanel(project);
         Content content = ContentFactory.getInstance()
             .createContent(panel.getComponent(), "", false);
+        content.setDisposer(panel);
         toolWindow.getContentManager().addContent(content);
     }
 }

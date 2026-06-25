@@ -76,6 +76,17 @@ class JsonStringPrettifierTest {
     }
 
     @Test
+    void stringValueContainingSentinelLikeTextIsNotCorrupted() {
+        Optional<String> out = JsonStringPrettifier.prettify(
+            "{ \"note\": \"@@IREVIEW_PH_0@@\", \"id\": {{orderId}} }");
+        assertEquals(String.join("\n",
+            "{",
+            "  \"note\": \"@@IREVIEW_PH_0@@\",",
+            "  \"id\": {{orderId}}",
+            "}"), out.orElseThrow());
+    }
+
+    @Test
     void unbalancedBracesReturnEmpty() {
         assertTrue(JsonStringPrettifier.prettify("{ \"a\": 1 ").isEmpty());
     }

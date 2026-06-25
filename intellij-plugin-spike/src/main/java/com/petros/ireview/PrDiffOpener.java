@@ -24,9 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -70,15 +68,15 @@ final class PrDiffOpener {
                 if (base.isEmpty()) base = "master";
                 String baseRef = resolveBaseRef(repoRoot, base);
 
-                List<String> paths = changedPaths(patch);
-                if (paths.isEmpty()) {
+                List<DiffFileList.ChangedFile> files = DiffFileList.parse(patch);
+                if (files.isEmpty()) {
                     notifyWarn(project, "Nothing to diff", "No changed files found in the PR diff.");
                     return;
                 }
 
                 List<DiffRequest> requests = new ArrayList<>();
-                for (String path : paths) {
-                    DiffRequest req = buildRequest(project, repoRoot, baseRef, path);
+                for (DiffFileList.ChangedFile file : files) {
+                    DiffRequest req = buildRequest(project, repoRoot, baseRef, file);
                     if (req != null) requests.add(req);
                 }
                 if (requests.isEmpty()) {
@@ -103,19 +101,28 @@ final class PrDiffOpener {
     }
 
     /**
-     * Left = file content at {@code baseRef} (empty for files added in the PR);
-     * right = the working-tree file. Returns null for binary files or files
-     * that exist neither on disk nor at the base ref.
+     * Left = file content at {@code baseRef}, read from the base-side path
+     * (the renamed-from path for a rename; empty for files added in the PR);
+     * right = the working-tree file at the b-side path. Returns null for binary
+     * files or files that exist neither on disk nor at the base ref.
      */
     private static @Nullable DiffRequest buildRequest(@NotNull Project project,
                                                       @NotNull String repoRoot,
                                                       @NotNull String baseRef,
-                                                      @NotNull String path) {
+                                                      @NotNull DiffFileList.ChangedFile file) {
         DiffContentFactory factory = DiffContentFactory.getInstance();
-        VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(repoRoot + "/" + path);
+        String basePath = file.basePath();
+        String workPath = file.workPath();
+
+        VirtualFile vf = workPath == null
+            ? null
+            : LocalFileSystem.getInstance().findFileByPath(repoRoot + "/" + workPath);
         if (vf != null && vf.getFileType().isBinary()) return null;
 
-        String baseText = gitShow(repoRoot, baseRef + ":" + path);  // "" if absent at base
+        // Read the base pane from the OLD path. For a rename this is the
+        // renamed-from path, so the diff shows removals against the original
+        // file instead of rendering the new-named file as entirely added.
+        String baseText = basePath == null ? "" : gitShow(repoRoot, baseRef + ":" + basePath);
 
         DiffContent left;
         DiffContent right;
@@ -129,7 +136,15 @@ final class PrDiffOpener {
             left = factory.create(project, baseText);
             right = factory.createEmpty();
         }
-        return new SimpleDiffRequest(path, left, right, baseRef, "Working Tree");
+        String title;
+        if (workPath == null) {
+            title = basePath + " (deleted)";
+        } else if (basePath != null && !basePath.equals(workPath)) {
+            title = basePath + " → " + workPath;
+        } else {
+            title = workPath;
+        }
+        return new SimpleDiffRequest(title, left, right, baseRef, "Working Tree");
     }
 
     /** Prefer {@code origin/<base>} (what the user picks by hand); fall back to
@@ -163,17 +178,6 @@ final class PrDiffOpener {
         } catch (Exception e) {
             return "";
         }
-    }
-
-    /** Project-relative b-side paths from a unified diff's {@code diff --git} lines. */
-    private static @NotNull List<String> changedPaths(@NotNull String patch) {
-        Set<String> paths = new LinkedHashSet<>();  // preserve order, dedupe
-        Matcher m = Pattern.compile("(?m)^diff --git a/(.+?) b/(.+)$").matcher(patch);
-        while (m.find()) {
-            String b = m.group(2).trim();
-            if (!b.isEmpty() && !"/dev/null".equals(b)) paths.add(b);
-        }
-        return new ArrayList<>(paths);
     }
 
     private static @NotNull String readString(@NotNull Path p) {

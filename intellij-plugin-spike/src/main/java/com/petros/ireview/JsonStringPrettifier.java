@@ -32,7 +32,8 @@ public final class JsonStringPrettifier {
 
     /** Returns the reformatted JSON, or empty if the content (post-tokenization) isn't valid JSON. */
     public static Optional<String> prettify(String content) {
-        Tokenized t = tokenize(content);
+        String nonce = newNonce();
+        Tokenized t = tokenize(content, nonce);
         JsonElement parsed;
         try {
             parsed = JsonParser.parseString(t.text);
@@ -42,16 +43,27 @@ public final class JsonStringPrettifier {
         return Optional.of(t.restore(GSON.toJson(parsed)));
     }
 
-    private static String sentinel(int index) {
-        return "@@IREVIEW_PH_" + index + "@@";
+    /**
+     * A per-invocation random nonce, woven into every sentinel. Without it,
+     * {@code restore}'s global string-replace would clobber any literal
+     * {@code @@IREVIEW_PH_<i>@@} text that happened to sit inside a real string
+     * value in the input. A random nonce the input can't predict makes that
+     * collision impossible.
+     */
+    private static String newNonce() {
+        return java.util.UUID.randomUUID().toString().replace("-", "");
     }
 
-    private record Tokenized(String text, List<String> tokens) {
+    private static String sentinel(String nonce, int index) {
+        return "@@IREVIEW_PH_" + nonce + "_" + index + "@@";
+    }
+
+    private record Tokenized(String text, String nonce, List<String> tokens) {
         String restore(String formatted) {
             String r = formatted;
             for (int i = 0; i < tokens.size(); i++) {
                 // Each sentinel was emitted quoted, so drop the quotes Gson kept around it.
-                r = r.replace('"' + sentinel(i) + '"', tokens.get(i));
+                r = r.replace('"' + sentinel(nonce, i) + '"', tokens.get(i));
             }
             return r;
         }
@@ -63,7 +75,7 @@ public final class JsonStringPrettifier {
      * Real JSON never produces a literal {@code {{} outside a string (object keys must be quoted),
      * so this never triggers on genuine structure.
      */
-    private static Tokenized tokenize(String s) {
+    private static Tokenized tokenize(String s, String nonce) {
         StringBuilder out = new StringBuilder();
         List<String> tokens = new ArrayList<>();
         boolean inString = false;
@@ -93,7 +105,7 @@ public final class JsonStringPrettifier {
                     i++;
                 } else {
                     tokens.add(s.substring(i, end + 2));
-                    out.append('"').append(sentinel(tokens.size() - 1)).append('"');
+                    out.append('"').append(sentinel(nonce, tokens.size() - 1)).append('"');
                     i = end + 2;
                 }
             } else {
@@ -101,6 +113,6 @@ public final class JsonStringPrettifier {
                 i++;
             }
         }
-        return new Tokenized(out.toString(), tokens);
+        return new Tokenized(out.toString(), nonce, tokens);
     }
 }

@@ -4,7 +4,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -56,15 +55,18 @@ public final class SseClient {
         }
     }
 
-    /** Open an SSE stream. Returns a CompletableFuture that completes when the stream ends. */
+    /**
+     * Open an SSE stream on the supplied (shared) client. Returns a
+     * CompletableFuture that completes when the stream ends. Reusing the
+     * caller's {@link HttpClient} avoids leaking one IO-thread pool per
+     * reconnect — Java 17's {@code HttpClient} has no {@code close()}, so a
+     * fresh client per connect is only reclaimed by GC.
+     */
     public static CompletableFuture<Void> connect(
+            HttpClient client,
             URI uri,
-            Duration connectTimeout,
             Consumer<Event> onEvent,
             Consumer<Throwable> onError) {
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(connectTimeout)
-            .build();
         HttpRequest req = HttpRequest.newBuilder(uri)
             .header("Accept", "text/event-stream")
             .GET()

@@ -25,7 +25,7 @@ public final class MarkdownLinkRenderer {
     private static final Pattern INLINE = Pattern.compile(
         "(?s)```(?:[A-Za-z][A-Za-z0-9_+\\-]*)?\\s*?\\r?\\n?(.*?)```" + // fenced block
         "|\\*\\*([^*]+)\\*\\*"                                          + // bold
-        "|\\[([^\\]]+)\\]\\(([^)]+)\\)"                                 + // link
+        "|\\[([^\\]]+)\\]\\(((?:[^()]|\\([^()]*\\))+)\\)"               + // link (target allows balanced parens)
         "|`([^`\\n]+)`"                                                   // inline code
     );
     private static final Pattern PATH_LINE = Pattern.compile("^(.+?):(\\d+)$");
@@ -45,8 +45,9 @@ public final class MarkdownLinkRenderer {
                    .append(escape(m.group(1).stripTrailing()))
                    .append("</pre>");
             } else if (m.group(2) != null) {
-                // Bold
-                out.append("<b>").append(escape(m.group(2))).append("</b>");
+                // Bold — escapeAndBreak so a newline inside the run renders as a
+                // <br> rather than collapsing to a space.
+                out.append("<b>").append(escapeAndBreak(m.group(2))).append("</b>");
             } else if (m.group(3) != null) {
                 // Markdown link
                 String label = m.group(3);
