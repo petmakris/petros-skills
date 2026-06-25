@@ -318,6 +318,7 @@ public final class AnnotationsPanel {
 
         if (isStale(entry.anchor())) {
             pathLbl.setForeground(JBColor.GRAY);
+            lineLbl.setForeground(JBColor.GRAY);
             lineLbl.setText(lineRef + "  ⚠ stale");
         }
 

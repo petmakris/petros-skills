@@ -42,7 +42,7 @@ public final class GutterAnchorIndex {
             switch (kind) {
                 case EXACT, MOVED -> { displayLine = res.line(); stale = false; }
                 case STALE -> { displayLine = recorded; stale = true; }
-                default -> { continue; }
+                default -> throw new AssertionError("Unreachable: AnchorResolver.Kind has exactly 3 values");
             }
             // kindRank: EXACT=0, MOVED=1, STALE=2 — lower is higher priority
             long kindRank = switch (kind) {
