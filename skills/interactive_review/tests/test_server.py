@@ -242,6 +242,37 @@ def test_threads_bulk_returns_anchor_text(tmp_path):
     assert bulk["src/x.py:R:42"]["anchor_text"] == "  return foo()"
 
 
+def test_threads_bulk_returns_title_and_question(tmp_path):
+    dirs = make_dirs(tmp_path)
+    h = Handlers()
+    handler = make_handler()
+    # User asks (creates the thread with a question), then Claude answers with a title.
+    h.handle_submit(handler, dirs, {"anchor": "src/x.py:R:42", "type": "comment",
+                                    "text": "why is this null-checked?"})
+    from skills.interactive_review import threads as tm
+    tm.append_message(dirs["state_dir"] / "threads", "src/x.py:R:42",
+                      {"role": "claude", "ts": 9, "text": "Because foo() can return null.",
+                       "source_event_id": "c1"},
+                      title="Null check on foo()")
+    bulk = h.threads_bulk(dirs)
+    row = bulk["src/x.py:R:42"]
+    assert row["title"] == "Null check on foo()"
+    assert row["question"] == "why is this null-checked?"
+
+
+def test_threads_bulk_defaults_title_and_question_empty(tmp_path):
+    dirs = make_dirs(tmp_path)
+    h = Handlers()
+    threads_dir = dirs["state_dir"] / "threads"
+    from skills.interactive_review import threads as tm
+    # Claude-origin thread: a claude message, no user message, no title.
+    tm.append_message(threads_dir, "src/x.py:R:7",
+                      {"role": "claude", "ts": 1, "text": "finding", "source_event_id": "c1"})
+    row = h.threads_bulk(dirs)["src/x.py:R:7"]
+    assert row["title"] == ""
+    assert row["question"] == ""
+
+
 # ---------------------------------------------------------------------------
 # SSE stream unit tests
 # ---------------------------------------------------------------------------

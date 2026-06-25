@@ -157,7 +157,7 @@ You wake here when a task-notification arrives whose first stdout line is one of
        'ts': $(date +%s),
        'text': '''<your answer>''',
        'source_event_id': '$EVENT_ID',
-   })
+   }, title='''<short headline>''')
    "
    ```
    The anchor encoding maps `path/to/file:R:42` → `path__to__file_R_42.json`. `append_message` handles this; you don't need to compute it manually.
@@ -201,6 +201,11 @@ The user cancelled (clicked tab close or typed `scrap it` in terminal).
   need ("I'd need to see `<file>:<function>` to know"). Don't hedge.
 - **No general reviews per event.** Each wake-up is one question on one
   anchor. Answer that; let the user iterate.
+- **Headline title.** Pass a `title` to `append_message`: plain text (no
+  markdown), ≤ ~6 words / 60 chars, a noun phrase naming the thread's topic
+  (e.g. "Null check on portfolio lookup", "Why the fee branch is skipped").
+  Refresh it each answer so it stays accurate as the synthesis absorbs new
+  questions. The IDE panel shows this as the row's title.
 
 ## Re-apply safety
 

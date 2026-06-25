@@ -83,3 +83,27 @@ def test_set_anchor_text_first_write_wins(tmp_path):
     set_anchor_text_if_absent(threads_dir, "src/x.py:R:42", "DIFFERENT LINE")
     t = load(threads_dir, "src/x.py:R:42")
     assert t["anchor_text"] == "    return foo(bar)"
+
+
+def test_append_message_sets_title_last_write_wins(tmp_path):
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    append_message(threads_dir, "src/x.py:R:42",
+                   {"role": "claude", "ts": 1, "text": "a", "source_event_id": "c1"},
+                   title="First headline")
+    append_message(threads_dir, "src/x.py:R:42",
+                   {"role": "claude", "ts": 2, "text": "b", "source_event_id": "c2"},
+                   title="Second headline")
+    assert load(threads_dir, "src/x.py:R:42")["title"] == "Second headline"
+
+
+def test_append_message_without_title_leaves_it_untouched(tmp_path):
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    append_message(threads_dir, "src/x.py:R:42",
+                   {"role": "claude", "ts": 1, "text": "a", "source_event_id": "c1"},
+                   title="Keep me")
+    append_message(threads_dir, "src/x.py:R:42",
+                   {"role": "user", "ts": 2, "text": "follow-up?", "source_event_id": "u1"})
+    t = load(threads_dir, "src/x.py:R:42")
+    assert t["title"] == "Keep me"

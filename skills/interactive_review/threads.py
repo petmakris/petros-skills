@@ -52,8 +52,12 @@ def save_atomic(threads_dir: Path, thread: dict) -> None:
     tmp.replace(p)
 
 
-def append_message(threads_dir: Path, anchor: str, msg: dict) -> bool:
-    """Append a message; dedup by source_event_id.  Returns True if appended."""
+def append_message(threads_dir: Path, anchor: str, msg: dict, title: str | None = None) -> bool:
+    """Append a message; dedup by source_event_id.  Returns True if appended.
+
+    If `title` is a non-empty string, set the thread's top-level `title`
+    (last-write-wins) — the agent's short headline shown in the IDE panel.
+    """
     t = load(threads_dir, anchor)
     seid = msg.get("source_event_id")
     if seid is not None:
@@ -62,6 +66,8 @@ def append_message(threads_dir: Path, anchor: str, msg: dict) -> bool:
                 return False
     t["messages"].append(msg)
     t["version"] = int(t.get("version", 0)) + 1
+    if title:
+        t["title"] = title
     save_atomic(threads_dir, t)
     return True
 

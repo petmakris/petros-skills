@@ -81,11 +81,14 @@ class Handlers:
             if not claude_msgs:
                 continue
             last = claude_msgs[-1]
+            user_msgs = [m for m in t.get("messages", []) if m.get("role") == "user"]
             result[anchor] = {
                 "latest_synthesis": last.get("text", ""),
                 "version": t.get("version", 0),
                 "updated_at": last.get("ts", 0),
                 "anchor_text": t.get("anchor_text", ""),
+                "title": t.get("title", ""),
+                "question": user_msgs[0].get("text", "") if user_msgs else "",
             }
         return result
 
