@@ -149,6 +149,32 @@ class ReviewSessionClientTest {
     }
 
     @Test
+    void exposesTitleAndQuestion() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            server.threadsJson =
+                "{\"foo:R:1\":{\"latest_synthesis\":\"because **foo** is null\",\"version\":2,"
+              + "\"anchor_text\":\"return foo();\",\"title\":\"Null check on foo\","
+              + "\"question\":\"why null-checked?\"}}";
+            CountDownLatch seeded = new CountDownLatch(1);
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onThreadChanged(String anchor, String synthesis, int version) {
+                    if ("foo:R:1".equals(anchor)) seeded.countDown();
+                }
+            });
+            client.start();
+            assertTrue(seeded.await(2, TimeUnit.SECONDS));
+            var ts = client.threadFor("foo:R:1").orElseThrow();
+            assertEquals("Null check on foo", ts.title());
+            assertEquals("why null-checked?", ts.question());
+            client.stop();
+        }
+    }
+
+    @Test
     void postCommentSendsAnchorText() throws Exception {
         try (FakeReviewServer server = new FakeReviewServer()) {
             server.sessionsJson =

@@ -30,7 +30,8 @@ import java.util.concurrent.TimeUnit;
 public final class ReviewSessionClient {
 
     public record SessionInfo(String sid, String prRef, String title, String stateDir) {}
-    public record ThreadState(String synthesis, int version, String anchorText) {}
+    public record ThreadState(String synthesis, int version, String anchorText,
+                              String title, String question) {}
 
     public interface Listener {
         default void onAttached(SessionInfo info) {}
@@ -318,6 +319,8 @@ public final class ReviewSessionClient {
         int version = data.has("version") && !data.get("version").isJsonNull()
             ? data.get("version").getAsInt() : 0;
         String anchorText = str(data, "anchor_text");
+        String title = str(data, "title");
+        String question = str(data, "question");
 
         ThreadState existing = cache.get(anchor);
         if (existing != null
@@ -325,19 +328,25 @@ public final class ReviewSessionClient {
                 && existing.version() == version) {
             return;
         }
+        String priorAnchorText = existing != null ? existing.anchorText() : "";
+        String priorTitle = existing != null ? existing.title() : "";
+        String priorQuestion = existing != null ? existing.question() : "";
+        ThreadState next = new ThreadState(synthesis, version,
+            prefer(anchorText, priorAnchorText),
+            prefer(title, priorTitle),
+            prefer(question, priorQuestion));
         if (existing != null && existing.synthesis().equals(synthesis)) {
-            cache.put(anchor, new ThreadState(synthesis, version, preferText(anchorText, existing)));
+            cache.put(anchor, next);
             return;
         }
-        cache.put(anchor, new ThreadState(synthesis, version, preferText(anchorText, existing)));
+        cache.put(anchor, next);
         markPending(anchor, false);
         for (Listener l : listeners) l.onThreadChanged(anchor, synthesis, version);
     }
 
-    /** Keep a previously-seen anchor_text if a later event omits it. */
-    private static String preferText(String incoming, ThreadState existing) {
-        if (incoming != null && !incoming.isEmpty()) return incoming;
-        return existing != null ? existing.anchorText() : "";
+    /** Keep a previously-seen value if a later event omits the field. */
+    private static String prefer(String incoming, String prior) {
+        return (incoming != null && !incoming.isEmpty()) ? incoming : prior;
     }
 
     private void setState(State s) {
@@ -368,7 +377,9 @@ public final class ReviewSessionClient {
             out.put(e.getKey(), new ThreadState(
                 str(t, "latest_synthesis"),
                 t.has("version") && !t.get("version").isJsonNull() ? t.get("version").getAsInt() : 0,
-                str(t, "anchor_text")));
+                str(t, "anchor_text"),
+                str(t, "title"),
+                str(t, "question")));
         }
         return out;
     }
