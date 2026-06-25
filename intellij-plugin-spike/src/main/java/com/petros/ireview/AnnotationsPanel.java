@@ -316,6 +316,11 @@ public final class AnnotationsPanel {
         lineLbl.setForeground(new Color(0xf1, 0xc4, 0x0f));
         lineLbl.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
 
+        if (isStale(entry.anchor())) {
+            pathLbl.setForeground(JBColor.GRAY);
+            lineLbl.setText(lineRef + "  ⚠ stale");
+        }
+
         JPanel rightCluster = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         rightCluster.setOpaque(false);
         rightCluster.add(lineLbl);
@@ -422,6 +427,26 @@ public final class AnnotationsPanel {
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.setToolTipText("Delete thread");
         return btn;
+    }
+
+    /** True if this anchor's thread is currently stale in an open diff editor. */
+    private boolean isStale(String anchor) {
+        String[] p = anchor.split(":", 3);
+        if (p.length < 3) return false;
+        var editor = SpikeDiffExtension.editorFor(p[0] + ":" + p[1]);
+        if (editor == null) return false;
+        var ts = client.threadFor(anchor).orElse(null);
+        if (ts == null) return false;
+        int recorded;
+        try { recorded = Integer.parseInt(p[2]); } catch (NumberFormatException e) { return false; }
+        var lines = new ArrayList<String>();
+        var doc = editor.getDocument();
+        for (int i = 0; i < doc.getLineCount(); i++) {
+            lines.add(doc.getText(new com.intellij.openapi.util.TextRange(
+                doc.getLineStartOffset(i), doc.getLineEndOffset(i))));
+        }
+        return AnchorResolver.resolve(lines, recorded, ts.anchorText(), AnchorResolver.DEFAULT_K)
+            .kind() == AnchorResolver.Kind.STALE;
     }
 
     private void onRowClicked(AnnotationEntry entry) {

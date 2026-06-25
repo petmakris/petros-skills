@@ -38,6 +38,8 @@ public final class SpikeDiffExtension extends DiffExtension {
     private static final Icon ASK_ICON = AllIcons.General.Add;
     private static final Icon ANNOTATED_ICON =
             IconLoader.getIcon("/icons/annotation_yellow.svg", SpikeDiffExtension.class);
+    private static final Icon STALE_ICON =
+            IconLoader.getIcon("/icons/annotation_stale.svg", SpikeDiffExtension.class);
     private static final Icon HIDDEN_ICON = EmptyIcon.ICON_16;
 
     /** Per-editor "currently hovered line index" (0-based), or -1. */
@@ -148,6 +150,27 @@ public final class SpikeDiffExtension extends DiffExtension {
         return v != null && v == line;
     }
 
+    private static java.util.List<String> documentLines(@NotNull EditorEx editor) {
+        Document doc = editor.getDocument();
+        int n = doc.getLineCount();
+        java.util.List<String> out = new java.util.ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            out.add(doc.getText(new com.intellij.openapi.util.TextRange(
+                doc.getLineStartOffset(i), doc.getLineEndOffset(i))));
+        }
+        return out;
+    }
+
+    /** The thread (if any) that should render at this 0-based line. */
+    private static GutterAnchorIndex.@Nullable LineAnchor lineAnchorFor(
+            @NotNull EditorEx editor, @NotNull String label, @NotNull String side,
+            int line0, @NotNull Project project) {
+        var cache = ReviewSessionService.get(project).client().snapshotCache();
+        var index = GutterAnchorIndex.build(documentLines(editor), cache, label, side,
+            AnchorResolver.DEFAULT_K);
+        return index.get(line0 + 1); // index is 1-based
+    }
+
     private static @Nullable String extractRelativePath(@NotNull ContentDiffRequest request,
                                                         int sideIndex,
                                                         @NotNull Project project) {
@@ -186,19 +209,20 @@ public final class SpikeDiffExtension extends DiffExtension {
 
         private String anchor() { return label + ":" + side + ":" + (lineZeroBased + 1); }
 
-        private boolean isAnnotated() {
-            return ReviewSessionService.get(project).client()
-                    .threadFor(anchor()).isPresent();
-        }
-
         @Override public @NotNull Icon getIcon() {
-            if (isAnnotated()) return ANNOTATED_ICON;
+            var la = lineAnchorFor(editor, label, side, lineZeroBased, project);
+            if (la != null) return la.stale() ? STALE_ICON : ANNOTATED_ICON;
             if (isHovered(editor, lineZeroBased)) return ASK_ICON;
             return HIDDEN_ICON;
         }
 
         @Override public @NotNull String getTooltipText() {
-            return (isAnnotated() ? "Annotated · " : "Comment on ") + anchor();
+            var la = lineAnchorFor(editor, label, side, lineZeroBased, project);
+            if (la != null) {
+                return (la.stale() ? "Annotation stale (line changed) · " : "Annotated · ")
+                    + la.ownerAnchor();
+            }
+            return "Comment on " + anchor();
         }
 
         @Override public boolean isNavigateAction() { return true; }
@@ -208,7 +232,11 @@ public final class SpikeDiffExtension extends DiffExtension {
             return new AnAction() {
                 @Override
                 public void actionPerformed(@NotNull AnActionEvent e) {
-                    SynthesisPopup.show(project, editor, anchor(), lineZeroBased);
+                    var la = lineAnchorFor(editor, label, side, lineZeroBased, project);
+                    // Open the thread that lives here (recorded anchor), else a
+                    // fresh thread for this line.
+                    String target = la != null ? la.ownerAnchor() : anchor();
+                    SynthesisPopup.show(project, editor, target, lineZeroBased);
                 }
             };
         }
