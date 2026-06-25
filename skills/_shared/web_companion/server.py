@@ -35,6 +35,25 @@ def _is_terminal(dirs: dict) -> bool:
     return (state_dir / "finished").exists() or (state_dir / "cancelled").exists()
 
 
+REAP_AFTER = 180  # seconds; a watcher silent longer than this is treated as dead
+
+
+def _watcher_age(dirs: dict) -> int | None:
+    """Seconds since the watcher last beat, or None if it never has.
+
+    The heartbeat file holds an integer epoch second (written by watcher.sh
+    every ~1s). Missing/empty/unparseable -> None, which callers treat as
+    "live": a freshly-armed session has not written its first beat yet, so it
+    must not be reaped.
+    """
+    hb_path = Path(dirs["state_dir"]) / "watcher_heartbeat"
+    try:
+        hb = int(hb_path.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+    return int(time.time()) - hb
+
+
 def _resolve_public_host() -> str:
     if env := os.environ.get("WEBCOMPANION_PUBLIC_HOST"):
         return env
@@ -231,11 +250,15 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                     return
                 rows = []
                 for sid, dirs in registry.find_by_cwd(cwd):
-                    # Skip terminated sessions — they can't accept new
-                    # annotations or deletes, so surfacing them only confuses
-                    # clients (e.g. the IDE plugin would attach to a dead
-                    # session and every subsequent write returns 409).
-                    if _is_terminal(dirs):
+                    # Skip terminated sessions and watcher-dead "zombies". A
+                    # session that is cancelled/finished, OR whose watcher has
+                    # been silent past REAP_AFTER, can't answer anything — so
+                    # surfacing it makes the IDE attach to a dead review and
+                    # accept input nobody reads. (rehydrate() after a server
+                    # restart re-registers such sessions from disk; reaping them
+                    # here is intentional — nothing re-arms their watcher.)
+                    age = _watcher_age(dirs)
+                    if _is_terminal(dirs) or (age is not None and age > REAP_AFTER):
                         continue
                     meta_path = Path(dirs["state_dir"]) / "meta.json"
                     meta = {}

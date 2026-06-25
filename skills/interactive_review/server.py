@@ -235,10 +235,27 @@ class Handlers:
             hb = int(hb_path.read_text().strip())
         except (FileNotFoundError, ValueError):
             hb = 0
+        # Liveness: a session is ENDED if explicitly cancelled/finished, or if
+        # its watcher has been silent past REAP_AFTER. hb==0 means no beat yet
+        # (age unknown) -> not dead. The client latches ENDED and freezes the
+        # panel read-only; PAUSED (watcher_seen_at age 15-180s) is its own
+        # client-side styling derived from watcher_seen_at below.
+        age = (int(time.time()) - hb) if hb else None
+        cancelled = (state_dir / "cancelled").exists()
+        finished = (state_dir / "finished").exists()
+        dead = age is not None and age > wc_server.REAP_AFTER
+        ended_reason = (
+            "cancelled" if cancelled
+            else "finished" if finished
+            else "dead" if dead
+            else None
+        )
         _send_json(h, 200, {
             "threads": versions,
             "watcher_seen_at": hb,
             "finished": _is_terminal(state_dir),
+            "ended": ended_reason is not None,
+            "ended_reason": ended_reason,
         })
 
     def create_session_extra(self, payload: dict, dirs: dict) -> dict | None:

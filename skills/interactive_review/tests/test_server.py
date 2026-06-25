@@ -133,6 +133,58 @@ def test_serve_poll_returns_thread_versions(tmp_path):
     assert body["finished"] is False
 
 
+def _poll_body(tmp_path, dirs):
+    h = Handlers()
+    handler = make_handler()
+    h.serve_poll(handler, dirs)
+    return json.loads(handler.wfile.getvalue())
+
+
+def test_serve_poll_not_ended_when_fresh_heartbeat(tmp_path):
+    dirs = make_dirs(tmp_path)
+    now = int(time.time())
+    (dirs["state_dir"] / "watcher_heartbeat").write_text(str(now))
+    body = _poll_body(tmp_path, dirs)
+    assert body["watcher_seen_at"] == now
+    assert body["ended"] is False
+    assert body["ended_reason"] is None
+
+
+def test_serve_poll_not_ended_when_no_heartbeat(tmp_path):
+    # No heartbeat yet => age unknown => not ended (freshly armed session).
+    dirs = make_dirs(tmp_path)
+    body = _poll_body(tmp_path, dirs)
+    assert body["ended"] is False
+    assert body["ended_reason"] is None
+
+
+def test_serve_poll_ended_dead_when_heartbeat_stale(tmp_path):
+    from skills._shared.web_companion import server as wc_server
+    dirs = make_dirs(tmp_path)
+    stale = int(time.time()) - (wc_server.REAP_AFTER + 60)
+    (dirs["state_dir"] / "watcher_heartbeat").write_text(str(stale))
+    body = _poll_body(tmp_path, dirs)
+    assert body["ended"] is True
+    assert body["ended_reason"] == "dead"
+
+
+def test_serve_poll_ended_cancelled_takes_precedence(tmp_path):
+    dirs = make_dirs(tmp_path)
+    (dirs["state_dir"] / "watcher_heartbeat").write_text(str(int(time.time())))
+    (dirs["state_dir"] / "cancelled").write_text("{}")
+    body = _poll_body(tmp_path, dirs)
+    assert body["ended"] is True
+    assert body["ended_reason"] == "cancelled"
+
+
+def test_serve_poll_ended_finished(tmp_path):
+    dirs = make_dirs(tmp_path)
+    (dirs["state_dir"] / "finished").write_text("")
+    body = _poll_body(tmp_path, dirs)
+    assert body["ended"] is True
+    assert body["ended_reason"] == "finished"
+
+
 def test_create_session_extra_fetches_diff(tmp_path):
     dirs = make_dirs(tmp_path)
     sample_diff = (

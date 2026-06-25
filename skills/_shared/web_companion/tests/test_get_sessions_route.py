@@ -167,6 +167,63 @@ def test_get_sessions_returns_matching_sessions(tmp_path):
         assert "state_dir" in row
 
 
+def _write_heartbeat(state_dir: Path, age_seconds: int):
+    """Write a watcher_heartbeat whose epoch contents are `age_seconds` old."""
+    (state_dir / "watcher_heartbeat").write_text(str(int(time.time()) - age_seconds))
+
+
+def test_get_sessions_reaps_watcher_dead_session(tmp_path):
+    """A session whose watcher has been silent past REAP_AFTER is hidden."""
+    port, registry = _start_server(tmp_path)
+    cwd = str(tmp_path / "proj_reap")
+
+    fresh = tmp_path / "s_fresh" / "state"
+    dead = tmp_path / "s_dead" / "state"
+    never = tmp_path / "s_never" / "state"
+    for d in (fresh, dead, never):
+        d.mkdir(parents=True)
+
+    _write_heartbeat(fresh, age_seconds=2)                       # LIVE
+    _write_heartbeat(dead, age_seconds=server_mod.REAP_AFTER + 60)  # dead -> reaped
+    # `never` has no heartbeat file at all -> age unknown -> NOT reaped
+
+    sid_fresh = registry.make_sid()
+    sid_dead = registry.make_sid()
+    sid_never = registry.make_sid()
+    registry.register(sid_fresh, {"state_dir": fresh, "_cwd": cwd})
+    registry.register(sid_dead, {"state_dir": dead, "_cwd": cwd})
+    registry.register(sid_never, {"state_dir": never, "_cwd": cwd})
+
+    status, body = _get(port, f"/api/sessions?cwd={urllib.parse.quote(cwd)}")
+    assert status == 200
+    returned = {row["sid"] for row in json.loads(body)}
+    assert sid_dead not in returned, "watcher-dead session must be reaped"
+    assert returned == {sid_fresh, sid_never}
+
+
+def test_get_sessions_newest_first_after_reap(tmp_path):
+    """Surviving sessions keep the newest-first (sid-descending) ordering."""
+    port, registry = _start_server(tmp_path)
+    cwd = str(tmp_path / "proj_order")
+
+    older = tmp_path / "s_older" / "state"
+    newer = tmp_path / "s_newer" / "state"
+    for d in (older, newer):
+        d.mkdir(parents=True)
+        _write_heartbeat(d, age_seconds=1)
+
+    sid_older = registry.make_sid()
+    sid_newer = registry.make_sid()
+    # sids are time-ordered; ensure newer > older lexically
+    lo, hi = sorted([sid_older, sid_newer])
+    registry.register(lo, {"state_dir": older, "_cwd": cwd})
+    registry.register(hi, {"state_dir": newer, "_cwd": cwd})
+
+    status, body = _get(port, f"/api/sessions?cwd={urllib.parse.quote(cwd)}")
+    data = json.loads(body)
+    assert [row["sid"] for row in data] == [hi, lo]
+
+
 def test_get_sessions_reads_meta_json(tmp_path):
     port, registry = _start_server(tmp_path)
 
