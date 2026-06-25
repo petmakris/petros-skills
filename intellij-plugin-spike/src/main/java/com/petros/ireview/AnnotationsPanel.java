@@ -277,7 +277,7 @@ public final class AnnotationsPanel {
             int last = seenVersions.getOrDefault(anchor, 0);
             rows.add(new AnnotationEntry(
                 anchor,
-                snippet(thread.synthesis()),
+                PanelRowTitle.resolve(thread.title(), thread.question(), thread.synthesis(), anchor),
                 thread.version(),
                 0L,
                 thread.version() > last
@@ -294,73 +294,68 @@ public final class AnnotationsPanel {
                                  int index,
                                  boolean selected,
                                  boolean focused) {
-        JPanel row = new JPanel(new BorderLayout(0, 2));
+        JPanel row = new JPanel(new BorderLayout(0, 3));
         row.setBorder(JBUI.Borders.empty(8, 10));
         row.setOpaque(true);
-
-        Color bg = selected
+        row.setBackground(selected
             ? new JBColor(new Color(0x1a, 0x3a, 0x5e), new Color(0x1a, 0x3a, 0x5e))
-            : new JBColor(new Color(0xf0, 0xf0, 0xf0), new Color(0x23, 0x25, 0x27));
-        row.setBackground(bg);
+            : new JBColor(new Color(0xf0, 0xf0, 0xf0), new Color(0x23, 0x25, 0x27)));
 
-        String[] parts = entry.anchor().split(":", 3);
-        String pathOnly = parts.length >= 1 ? lastSegment(parts[0]) : entry.anchor();
-        String lineRef = parts.length >= 3 ? ":" + parts[1] + ":" + parts[2] : "";
+        boolean stale = isStale(entry.anchor());
 
-        JPanel top = new JPanel(new BorderLayout());
-        top.setOpaque(false);
-        JLabel pathLbl = new JLabel(pathOnly);
-        pathLbl.setForeground(selected ? new Color(0xd6, 0xe9, 0xff) : new Color(0xb5, 0xb6, 0xe3));
-        pathLbl.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
-        JLabel lineLbl = new JLabel(lineRef);
-        lineLbl.setForeground(new Color(0xf1, 0xc4, 0x0f));
-        lineLbl.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
-
-        if (isStale(entry.anchor())) {
-            pathLbl.setForeground(JBColor.GRAY);
-            lineLbl.setForeground(JBColor.GRAY);
-            lineLbl.setText(lineRef + "  ⚠ stale");
-        }
+        // Title line: clean summary title (WEST) + ×/spinner (EAST).
+        JPanel titleLine = new JPanel(new BorderLayout());
+        titleLine.setOpaque(false);
+        JLabel titleLbl = new JLabel(truncate(entry.title(), 64));
+        titleLbl.setFont(titleLbl.getFont().deriveFont(Font.BOLD, 12.5f));
+        titleLbl.setForeground(stale ? JBColor.GRAY
+            : (selected ? new Color(0xe8, 0xe8, 0xe8) : new Color(0xd0, 0xd2, 0xd6)));
+        titleLine.add(titleLbl, BorderLayout.WEST);
 
         JPanel rightCluster = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         rightCluster.setOpaque(false);
-        rightCluster.add(lineLbl);
-        // Three states for the right-edge affordance:
-        //   1. Delete in flight → animated spinner (driven by spinTimer).
-        //   2. Hovered + not pending → styled × button.
-        //   3. Otherwise → nothing.
         if (deleting.contains(entry.anchor())) {
             JLabel s = new JLabel(SPINNER_FRAMES[spinFrame]);
             s.setBorder(JBUI.Borders.empty(2, 6));
             rightCluster.add(s);
         } else if (index == hoveredIndex && !client.isPending(entry.anchor())) {
-            boolean hot = hoveringDeleteButton;
-            rightCluster.add(makeDeleteButtonVisual(hot));
+            rightCluster.add(makeDeleteButtonVisual(hoveringDeleteButton));
         }
-        top.add(pathLbl, BorderLayout.WEST);
-        top.add(rightCluster, BorderLayout.EAST);
+        titleLine.add(rightCluster, BorderLayout.EAST);
 
-        JLabel snippetLbl = new JLabel("<html><body style='width:240px'>"
-            + escapeHtml(entry.snippet()) + "</body></html>");
-        snippetLbl.setForeground(selected ? new Color(0xe8, 0xe8, 0xe8) : new Color(0xc0, 0xc0, 0xc0));
-        snippetLbl.setFont(snippetLbl.getFont().deriveFont(11.5f));
+        // Meta line: file:side:line (muted, WEST) + v# / state (EAST).
+        String[] parts = entry.anchor().split(":", 3);
+        String pathOnly = parts.length >= 1 ? lastSegment(parts[0]) : entry.anchor();
+        String lineRef = parts.length >= 3 ? ":" + parts[1] + ":" + parts[2] : "";
+        JLabel locLbl = new JLabel(pathOnly + lineRef);
+        locLbl.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11).deriveFont(10.5f));
+        locLbl.setForeground(stale ? JBColor.GRAY : new Color(0x8a, 0x8d, 0x93));
 
-        JPanel meta = new JPanel(new BorderLayout());
-        meta.setOpaque(false);
+        JPanel rightMeta = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        rightMeta.setOpaque(false);
         JLabel verLbl = new JLabel("v" + entry.version());
         verLbl.setForeground(new Color(0x80, 0x80, 0x80));
         verLbl.setFont(verLbl.getFont().deriveFont(10f));
-        meta.add(verLbl, BorderLayout.WEST);
-        if (entry.isNew()) {
+        rightMeta.add(verLbl);
+        if (stale) {
+            JLabel st = new JLabel("⚠ stale");
+            st.setForeground(JBColor.GRAY);
+            st.setFont(st.getFont().deriveFont(10f));
+            rightMeta.add(st);
+        } else if (entry.isNew()) {
             JLabel dot = new JLabel("●");
             dot.setForeground(new Color(0xf1, 0xc4, 0x0f));
             dot.setFont(dot.getFont().deriveFont(12f));
-            meta.add(dot, BorderLayout.EAST);
+            rightMeta.add(dot);
         }
 
-        row.add(top, BorderLayout.NORTH);
-        row.add(snippetLbl, BorderLayout.CENTER);
-        row.add(meta, BorderLayout.SOUTH);
+        JPanel metaLine = new JPanel(new BorderLayout());
+        metaLine.setOpaque(false);
+        metaLine.add(locLbl, BorderLayout.WEST);
+        metaLine.add(rightMeta, BorderLayout.EAST);
+
+        row.add(titleLine, BorderLayout.NORTH);
+        row.add(metaLine, BorderLayout.SOUTH);
         return row;
     }
 
@@ -527,12 +522,6 @@ public final class AnnotationsPanel {
         });
     }
 
-    private static String snippet(String synthesis) {
-        if (synthesis == null) return "";
-        String oneLine = synthesis.replace('\n', ' ').replaceAll("\\s+", " ").trim();
-        return oneLine.length() <= 160 ? oneLine : oneLine.substring(0, 159) + "…";
-    }
-
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
@@ -540,9 +529,5 @@ public final class AnnotationsPanel {
     private static String lastSegment(String path) {
         int slash = path.lastIndexOf('/');
         return slash < 0 ? path : path.substring(slash + 1);
-    }
-
-    private static String escapeHtml(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 }
