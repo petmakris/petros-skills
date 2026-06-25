@@ -1,5 +1,6 @@
 package com.petros.ireview;
 
+import org.commonmark.Extension;
 import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.text.TextContentRenderer;
@@ -18,11 +19,10 @@ public final class PanelRowTitle {
 
     private static final Pattern LINK_URL_PATTERN = Pattern.compile(" \\([^)]+\\)");
 
-    @SuppressWarnings("unchecked")
-    private static final List<?> EXT = List.of(TablesExtension.create());
-    private static final Parser PARSER = Parser.builder().extensions((Iterable) EXT).build();
+    private static final List<Extension> EXT = List.of(TablesExtension.create());
+    private static final Parser PARSER = Parser.builder().extensions(EXT).build();
     private static final TextContentRenderer TEXT =
-        TextContentRenderer.builder().extensions((Iterable) EXT).build();
+        TextContentRenderer.builder().extensions(EXT).build();
 
     private PanelRowTitle() {}
 
