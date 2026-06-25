@@ -27,6 +27,8 @@ public final class FakeReviewServer implements AutoCloseable {
     /** Count of POSTs that reached /api/submit. */
     public final java.util.concurrent.atomic.AtomicInteger submitCount =
         new java.util.concurrent.atomic.AtomicInteger();
+    /** Raw body of the last POST that reached /api/submit. */
+    public volatile String lastSubmitBody = null;
     /** Count of POSTs that reached /api/cancel. */
     public final java.util.concurrent.atomic.AtomicInteger cancelCount =
         new java.util.concurrent.atomic.AtomicInteger();
@@ -70,6 +72,7 @@ public final class FakeReviewServer implements AutoCloseable {
             return;
         }
         if (path.endsWith("/api/submit")) {
+            lastSubmitBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             submitCount.incrementAndGet();
             ex.sendResponseHeaders(202, -1);
             ex.close();

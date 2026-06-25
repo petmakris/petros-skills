@@ -18,8 +18,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Talks to the interactive_review server: discovers a session by cwd,
@@ -32,7 +30,7 @@ import java.util.regex.Pattern;
 public final class ReviewSessionClient {
 
     public record SessionInfo(String sid, String prRef, String title, String stateDir) {}
-    public record ThreadState(String synthesis, int version) {}
+    public record ThreadState(String synthesis, int version, String anchorText) {}
 
     public interface Listener {
         default void onAttached(SessionInfo info) {}
@@ -56,6 +54,8 @@ public final class ReviewSessionClient {
     private final String baseUrl;
     private final String projectCwd;
     private final Duration pollInterval;
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
+
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(2)).build();
     private final ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
@@ -103,27 +103,26 @@ public final class ReviewSessionClient {
     public boolean isPending(String anchor) { return pending.contains(anchor); }
 
     /** POST a comment event to /s/<sid>/api/submit. */
-    public CompletableFuture<Void> postComment(String anchor, String text) {
+    public CompletableFuture<Void> postComment(String anchor, String text, String anchorText) {
         SessionInfo s = current;
         if (s == null) return CompletableFuture.failedFuture(new IllegalStateException("no session"));
-        // The Claude session is gone — the server would 202 the submit but no
-        // watcher will ever process it. Reject so the user isn't fooled into
-        // thinking the question was asked.
         if (state == State.STALE) {
             return CompletableFuture.failedFuture(new IllegalStateException(
                 "Claude session is gone — re-run /interactive-review to resume"));
         }
         markPending(anchor, true);
-        String body = "{\"anchor\":" + jsonEscape(anchor)
-                    + ",\"type\":\"comment\",\"text\":" + jsonEscape(text) + "}";
+        java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
+        payload.put("anchor", anchor);
+        payload.put("type", "comment");
+        payload.put("text", text);
+        payload.put("anchor_text", anchorText == null ? "" : anchorText);
+        String body = GSON.toJson(payload);
         HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + s.sid() + "/api/submit"))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();
         return http.sendAsync(req, HttpResponse.BodyHandlers.discarding())
             .whenComplete((resp, err) -> {
-                // On HTTP failure or transport error, clear pending so the
-                // user (and the side-panel × button) can recover.
                 if (err != null || (resp != null && resp.statusCode() / 100 != 2)) {
                     markPending(anchor, false);
                 }
@@ -218,8 +217,9 @@ public final class ReviewSessionClient {
             HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/poll")).GET().build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return;
-            String v = jsonField(resp.body(), "watcher_seen_at");
-            seenAt = v.isEmpty() ? 0 : Long.parseLong(v);
+            com.google.gson.JsonObject o = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
+            seenAt = o.has("watcher_seen_at") && !o.get("watcher_seen_at").isJsonNull()
+                ? o.get("watcher_seen_at").getAsLong() : 0;
         } catch (Exception e) {
             return; // transient — leave state as-is, next poll retries
         }
@@ -297,9 +297,14 @@ public final class ReviewSessionClient {
 
     private void handleSseEvent(SseClient.Event e) {
         String name = e.name();
-        String data = e.data();
+        com.google.gson.JsonObject data;
+        try {
+            data = com.google.gson.JsonParser.parseString(e.data()).getAsJsonObject();
+        } catch (Exception ex) {
+            return; // non-JSON heartbeat/connected frames
+        }
         if ("thread-deleted".equals(name)) {
-            String anchor = jsonField(data, "anchor");
+            String anchor = str(data, "anchor");
             if (anchor.isEmpty()) return;
             cache.remove(anchor);
             markPending(anchor, false);
@@ -307,16 +312,13 @@ public final class ReviewSessionClient {
             return;
         }
         if (!"thread-changed".equals(name)) return;
-        String anchor = jsonField(data, "anchor");
-        String synthesis = jsonField(data, "latest_synthesis");
-        String versionStr = jsonField(data, "version");
-        int version = versionStr.isEmpty() ? 0 : Integer.parseInt(versionStr);
+        String anchor = str(data, "anchor");
+        if (anchor.isEmpty()) return;
+        String synthesis = str(data, "latest_synthesis");
+        int version = data.has("version") && !data.get("version").isJsonNull()
+            ? data.get("version").getAsInt() : 0;
+        String anchorText = str(data, "anchor_text");
 
-        // Filter: the server fires `thread-changed` on EVERY thread mutation
-        // including the user's own appended question (which arrives via HTTP
-        // submit). For those, the version bumps but `latest_synthesis` is
-        // unchanged (Claude hasn't replied yet). Treat unchanged-text events
-        // as a no-op so the popup's "thinking…" spinner stays up.
         ThreadState existing = cache.get(anchor);
         if (existing != null
                 && existing.synthesis().equals(synthesis)
@@ -324,15 +326,18 @@ public final class ReviewSessionClient {
             return;
         }
         if (existing != null && existing.synthesis().equals(synthesis)) {
-            // Version bumped but synthesis unchanged → just update the cache,
-            // don't notify listeners (no user-visible change).
-            cache.put(anchor, new ThreadState(synthesis, version));
+            cache.put(anchor, new ThreadState(synthesis, version, preferText(anchorText, existing)));
             return;
         }
-        cache.put(anchor, new ThreadState(synthesis, version));
-        // New synthesis text landed → Claude has replied. Clear pending.
+        cache.put(anchor, new ThreadState(synthesis, version, preferText(anchorText, existing)));
         markPending(anchor, false);
         for (Listener l : listeners) l.onThreadChanged(anchor, synthesis, version);
+    }
+
+    /** Keep a previously-seen anchor_text if a later event omits it. */
+    private static String preferText(String incoming, ThreadState existing) {
+        if (incoming != null && !incoming.isEmpty()) return incoming;
+        return existing != null ? existing.anchorText() : "";
     }
 
     private void setState(State s) {
@@ -341,71 +346,36 @@ public final class ReviewSessionClient {
         for (Listener l : listeners) l.onStateChanged(s);
     }
 
-    // --- small json helpers (avoiding a dependency) ---
+    // --- json helpers ---
 
     private static String jsonEscape(String s) {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
-    private static String jsonField(String json, String key) {
-        Pattern p = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*(?:\"((?:[^\"\\\\]|\\\\.)*)\"|(\\d+))");
-        Matcher m = p.matcher(json);
-        if (!m.find()) return "";
-        return m.group(1) != null ? unescapeJsonString(m.group(1)) : m.group(2);
-    }
-
-    /**
-     * Decode the contents of a JSON string literal. Handles the standard
-     * escape sequences (n, r, t, quote, backslash, slash, b, f, and the
-     * 4-hex-digit unicode form). Input is the body of the string (between
-     * the outer quotes), not the quoted form.
-     */
-    private static String unescapeJsonString(String s) {
-        StringBuilder out = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c != '\\' || i + 1 >= s.length()) { out.append(c); continue; }
-            char next = s.charAt(++i);
-            switch (next) {
-                case 'n' -> out.append('\n');
-                case 'r' -> out.append('\r');
-                case 't' -> out.append('\t');
-                case 'b' -> out.append('\b');
-                case 'f' -> out.append('\f');
-                case '"' -> out.append('"');
-                case '\\' -> out.append('\\');
-                case '/' -> out.append('/');
-                case 'u' -> {
-                    if (i + 4 < s.length()) {
-                        out.append((char) Integer.parseInt(s.substring(i + 1, i + 5), 16));
-                        i += 4;
-                    } else {
-                        out.append('\\').append(next);
-                    }
-                }
-                default -> out.append('\\').append(next);
-            }
-        }
-        return out.toString();
-    }
-
     private static SessionInfo parseFirstSession(String json) {
-        if (json == null || !json.contains("\"sid\"")) return null;
+        com.google.gson.JsonElement root = com.google.gson.JsonParser.parseString(json);
+        if (!root.isJsonArray() || root.getAsJsonArray().isEmpty()) return null;
+        com.google.gson.JsonObject o = root.getAsJsonArray().get(0).getAsJsonObject();
         return new SessionInfo(
-            jsonField(json, "sid"),
-            jsonField(json, "pr_ref"),
-            jsonField(json, "title"),
-            jsonField(json, "state_dir"));
+            str(o, "sid"), str(o, "pr_ref"), str(o, "title"), str(o, "state_dir"));
     }
 
     private static Map<String, ThreadState> parseThreadsBulk(String json) {
         Map<String, ThreadState> out = new HashMap<>();
-        Pattern p = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*\\{[^}]*\"latest_synthesis\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"[^}]*\"version\"\\s*:\\s*(\\d+)");
-        Matcher m = p.matcher(json);
-        while (m.find()) {
-            out.put(m.group(1), new ThreadState(unescapeJsonString(m.group(2)), Integer.parseInt(m.group(3))));
+        com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+        for (var e : root.entrySet()) {
+            com.google.gson.JsonObject t = e.getValue().getAsJsonObject();
+            out.put(e.getKey(), new ThreadState(
+                str(t, "latest_synthesis"),
+                t.has("version") && !t.get("version").isJsonNull() ? t.get("version").getAsInt() : 0,
+                str(t, "anchor_text")));
         }
         return out;
+    }
+
+    /** Null-safe string field read; returns "" when absent or null. */
+    private static String str(com.google.gson.JsonObject o, String key) {
+        com.google.gson.JsonElement v = o.get(key);
+        return (v == null || v.isJsonNull()) ? "" : v.getAsString();
     }
 }

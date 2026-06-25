@@ -1,7 +1,9 @@
 package com.petros.ireview;
 
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Disposer;
@@ -193,7 +195,8 @@ public final class SynthesisPopup {
             input.setText("");
             thinking.set(true);
             renderCurrent.run();
-            client.postComment(anchor, q).whenComplete((v, t) -> SwingUtilities.invokeLater(() -> {
+            String anchorText = lineTextAt(editor.getDocument(), visualLine);
+            client.postComment(anchor, q, anchorText).whenComplete((v, t) -> SwingUtilities.invokeLater(() -> {
                 if (t != null) {
                     thinking.set(false);
                     cards.show(centerCards, "synthesis");
@@ -283,6 +286,13 @@ public final class SynthesisPopup {
             }
         });
         popup.showInBestPositionFor(editor);
+    }
+
+    private static String lineTextAt(Document doc, int line0) {
+        if (line0 < 0 || line0 >= doc.getLineCount()) return "";
+        int s = doc.getLineStartOffset(line0);
+        int en = doc.getLineEndOffset(line0);
+        return doc.getText(new TextRange(s, en));
     }
 
     private static String wrapHtml(String body) {

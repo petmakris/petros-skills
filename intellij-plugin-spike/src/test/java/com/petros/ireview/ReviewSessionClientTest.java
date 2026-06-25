@@ -54,7 +54,7 @@ class ReviewSessionClientTest {
             assertTrue(stale.await(2, TimeUnit.SECONDS), "should detect dead watcher");
 
             // A submission while stale must fail fast and never reach the server.
-            var f = client.postComment("foo:R:1", "hi");
+            var f = client.postComment("foo:R:1", "hi", "");
             assertThrows(Exception.class, () -> f.get(1, TimeUnit.SECONDS));
             assertEquals(0, server.submitCount.get(),
                 "stale session must not POST submits");
@@ -117,6 +117,58 @@ class ReviewSessionClientTest {
             server.pushSseEvent("thread-changed",
                 "{\"anchor\":\"foo:R:1\",\"latest_synthesis\":\"hello\",\"version\":1,\"updated_at\":1}");
             assertTrue(gotEvent.await(3, TimeUnit.SECONDS));
+            client.stop();
+        }
+    }
+
+    @Test
+    void exposesAnchorTextAndParsesTrickySynthesis() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            // Synthesis text full of JSON-hostile characters; anchor_text present.
+            server.threadsJson =
+                "{\"foo:R:1\":{\"latest_synthesis\":\"a \\\"quote\\\" and {brace}\\nline2\","
+              + "\"version\":3,\"anchor_text\":\"  return foo(bar);\"}}";
+            CountDownLatch seeded = new CountDownLatch(1);
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onThreadChanged(String anchor, String synthesis, int version) {
+                    if ("foo:R:1".equals(anchor)) seeded.countDown();
+                }
+            });
+            client.start();
+            assertTrue(seeded.await(2, TimeUnit.SECONDS));
+            var ts = client.threadFor("foo:R:1").orElseThrow();
+            assertEquals("  return foo(bar);", ts.anchorText());
+            assertEquals("a \"quote\" and {brace}\nline2", ts.synthesis());
+            assertEquals(3, ts.version());
+            client.stop();
+        }
+    }
+
+    @Test
+    void postCommentSendsAnchorText() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            CountDownLatch attached = new CountDownLatch(1);
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
+                    attached.countDown();
+                }
+            });
+            client.start();
+            assertTrue(attached.await(2, TimeUnit.SECONDS));
+            client.postComment("foo:R:1", "why?", "  return foo(bar);").get(2, TimeUnit.SECONDS);
+            assertNotNull(server.lastSubmitBody);
+            assertTrue(server.lastSubmitBody.contains("\"anchor_text\""),
+                "submit body must carry anchor_text");
+            assertTrue(server.lastSubmitBody.contains("return foo(bar);"));
             client.stop();
         }
     }
