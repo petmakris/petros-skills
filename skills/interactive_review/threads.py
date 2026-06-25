@@ -8,30 +8,65 @@ Each thread lives in <state_dir>/threads/<encoded_anchor>.json with shape:
     }
 
 Threads are append-only; dedup is by source_event_id stored in each message.
+
+Concurrency: thread files are written via web_companion.atomic.write_text_atomic
+(unique temp name + os.replace), and every read-modify-write is serialized by an
+exclusive flock on a per-anchor sidecar lock file so concurrent writers (the
+server worker handling /api/submit and the in-session agent appending its reply)
+cannot lose each other's messages.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import hashlib
 import json
 import re
+import urllib.parse
 from pathlib import Path
+
+from skills._shared.web_companion.atomic import write_text_atomic
 
 
 _ANCHOR_RE = re.compile(r"^[^/:]+(?:/[^/:]+)*:[LR]:\d+(?:-\d+)?$")
 GENERAL_ANCHOR = "__general__"
+_MAX_NAME = 200
 
 
 def valid_anchor(anchor: str) -> bool:
     if anchor == GENERAL_ANCHOR:
         return True
-    return bool(_ANCHOR_RE.match(anchor))
+    if not _ANCHOR_RE.match(anchor):
+        return False
+    path = anchor.rsplit(":", 2)[0]
+    return not any(part in ("", ".", "..") for part in path.split("/"))
 
 
 def _encode_anchor(anchor: str) -> str:
-    return anchor.replace("/", "__").replace(":", "_")
+    enc = urllib.parse.quote(anchor, safe="")
+    if len(enc) > _MAX_NAME:
+        enc = "h_" + hashlib.sha256(anchor.encode("utf-8")).hexdigest()
+    return enc
 
 
 def _path_for(threads_dir: Path, anchor: str) -> Path:
     return Path(threads_dir) / f"{_encode_anchor(anchor)}.json"
+
+
+@contextlib.contextmanager
+def _anchor_lock(threads_dir: Path, anchor: str):
+    # Lock files live in a sibling `.locks/` dir, never inside threads_dir, so
+    # consumers that iterate threads_dir see only thread `.json` files.
+    locks_dir = Path(threads_dir).parent / ".locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = locks_dir / f"{_encode_anchor(anchor)}.lock"
+    fd = lock_path.open("w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
 
 
 def load(threads_dir: Path, anchor: str) -> dict:
@@ -45,11 +80,7 @@ def load(threads_dir: Path, anchor: str) -> dict:
 
 
 def save_atomic(threads_dir: Path, thread: dict) -> None:
-    Path(threads_dir).mkdir(parents=True, exist_ok=True)
-    p = _path_for(threads_dir, thread["anchor"])
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(thread, indent=2))
-    tmp.replace(p)
+    write_text_atomic(_path_for(threads_dir, thread["anchor"]), json.dumps(thread, indent=2))
 
 
 def append_message(threads_dir: Path, anchor: str, msg: dict, title: str | None = None) -> bool:
@@ -58,18 +89,19 @@ def append_message(threads_dir: Path, anchor: str, msg: dict, title: str | None 
     If `title` is a non-empty string, set the thread's top-level `title`
     (last-write-wins) — the agent's short headline shown in the IDE panel.
     """
-    t = load(threads_dir, anchor)
-    seid = msg.get("source_event_id")
-    if seid is not None:
-        for existing in t["messages"]:
-            if existing.get("source_event_id") == seid:
-                return False
-    t["messages"].append(msg)
-    t["version"] = int(t.get("version", 0)) + 1
-    if title:
-        t["title"] = title
-    save_atomic(threads_dir, t)
-    return True
+    with _anchor_lock(threads_dir, anchor):
+        t = load(threads_dir, anchor)
+        seid = msg.get("source_event_id")
+        if seid is not None:
+            for existing in t["messages"]:
+                if existing.get("source_event_id") == seid:
+                    return False
+        t["messages"].append(msg)
+        t["version"] = int(t.get("version", 0)) + 1
+        if title:
+            t["title"] = title
+        save_atomic(threads_dir, t)
+        return True
 
 
 def set_anchor_text_if_absent(threads_dir: Path, anchor: str, text: str) -> None:
@@ -80,21 +112,23 @@ def set_anchor_text_if_absent(threads_dir: Path, anchor: str, text: str) -> None
     """
     if not text:
         return
-    t = load(threads_dir, anchor)
-    if t.get("anchor_text"):
-        return
-    t["anchor_text"] = text
-    save_atomic(threads_dir, t)
+    with _anchor_lock(threads_dir, anchor):
+        t = load(threads_dir, anchor)
+        if t.get("anchor_text"):
+            return
+        t["anchor_text"] = text
+        save_atomic(threads_dir, t)
 
 
 def delete(threads_dir: Path, anchor: str) -> bool:
     """Remove the thread file for `anchor`.  Returns True if a file was removed."""
-    p = _path_for(threads_dir, anchor)
-    try:
-        p.unlink()
-        return True
-    except FileNotFoundError:
-        return False
+    with _anchor_lock(threads_dir, anchor):
+        p = _path_for(threads_dir, anchor)
+        try:
+            p.unlink()
+            return True
+        except FileNotFoundError:
+            return False
 
 
 def list_versions(threads_dir: Path) -> dict[str, int]:

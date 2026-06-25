@@ -1,6 +1,6 @@
 ---
 name: interactive-review
-description: Per-line threaded Q&A on a GitHub PR diff, surfaced in the IDE (IntelliJ plugin / VS Code extension). User clicks any diff line, asks a question, Claude wakes via WEBCOMPANION_EVENT, appends a reply to the line's thread, and the IDE refreshes that thread. Triggered by /interactive-review <PR>. Watcher events are WEBCOMPANION_EVENT / WEBCOMPANION_FINISHED / WEBCOMPANION_CANCELLED.
+description: Per-line threaded Q&A on a GitHub PR diff, surfaced in IntelliJ via the IDE plugin. User clicks any diff line, asks a question, Claude wakes via WEBCOMPANION_EVENT, appends a reply to the line's thread, and the IDE refreshes that thread. Triggered by /interactive-review <PR>. Watcher events are WEBCOMPANION_EVENT / WEBCOMPANION_FINISHED / WEBCOMPANION_CANCELLED.
 allowed-tools:
   - Bash
   - Read
@@ -11,7 +11,7 @@ allowed-tools:
 
 # /interactive-review — per-line threaded Q&A on a PR diff
 
-Surface a GitHub PR diff in the IDE (IntelliJ plugin or VS Code extension) where the user clicks any changed line to open a threaded conversation on it. Claude answers in that thread; the IDE refreshes the thread in place. No code is modified — this is a tool for *understanding* a PR, not rewriting it.
+Surface a GitHub PR diff in IntelliJ (via the IDE plugin) where the user clicks any changed line to open a threaded conversation on it. Claude answers in that thread; the IDE refreshes the thread in place. No code is modified — this is a tool for *understanding* a PR, not rewriting it.
 
 Use this when you want to walk through a PR line-by-line, ask questions about specific changes, or discuss a diff with a collaborator. The session is anchored to a diff snapshot taken at session-open. The conversation persists as a thread file per anchor so you can return to earlier questions.
 
@@ -65,7 +65,8 @@ The server's `create_session_extra` runs `gh pr diff` and `gh pr view`, then wri
   "events_dir": "...",
   "consumed_dir": "...",
   "pr_ref": "...",
-  "title": "..."
+  "title": "...",
+  "warning": "..."   // present only for large diffs; see below
 }
 ```
 
@@ -73,11 +74,13 @@ Save `url`, `sid`, `state_dir`, `events_dir`, `consumed_dir`, and `title` for th
 
 **gh failure:** if `create_session_extra` raises, the endpoint returns HTTP 500 with body `session-init failed: <stderr>`. Surface this verbatim in terminal: *"Couldn't fetch PR diff: `<error>`. Check `gh auth status` and try again."* Do not retry.
 
+**Diff too large:** the server hard-rejects diffs over 5 MB (raised as a `session-init failed` error — surface it like a gh failure and stop). Diffs over 1 MB succeed but return a `warning` field; if present, append it to the "review session ready" sentence so the user knows annotations may be slow.
+
 ## Tell the user where to review
 
 One sentence in terminal:
 
-**"Review session ready for `<title>` — open the project in IntelliJ or VS Code; the plugin shows per-line annotations on the diff. Click any line to ask a question and my answer appears as a threaded reply inline."**
+**"Review session ready for `<title>` — open the project in IntelliJ; the plugin shows per-line annotations on the diff. Click any line to ask a question and my answer appears as a threaded reply inline."**
 
 ## Arm the watcher
 
@@ -146,21 +149,36 @@ You wake here when a task-notification arrives whose first stdout line is one of
    - Write a short, code-aware answer in markdown: 2-4 sentences typically. Fenced code blocks for snippet suggestions.
    - If you spot a real bug, flag it and suggest a fix as a code block. **Do not modify the diff.**
    - Avoid hedging. If you genuinely need more context, say so concretely ("I'd need to see how `foo()` is called elsewhere") — don't ramble.
-4. **Append the message to the thread.** Write ONLY to the active anchor's thread (the one in the event payload). Thread isolation is load-bearing: never mutate any other anchor's file in response to this event. Use the Python helper to handle encoding and dedup atomically:
+4. **Append the message to the thread.** Write ONLY to the active anchor's thread (the one in the event payload). Thread isolation is load-bearing: never mutate any other anchor's file in response to this event.
+
+   To avoid any shell-quoting/injection of your answer (which may contain quotes, backticks, `$(...)`, or `'''`) or of the anchor (which comes from a filename), do NOT interpolate content into `python3 -c`. Instead route it through files with the Write tool, then run a quoted heredoc that reads them:
+
+   a. **Write your answer** (raw markdown — no escaping needed) to `<state_dir>/.reply.md` using the Write tool.
+
+   b. **Write the metadata** to `<state_dir>/.reply.meta.json` using the Write tool:
+   ```json
+   {"anchor": "<the event's anchor, verbatim>", "title": "<short headline>", "source_event_id": "<event_id>"}
+   ```
+
+   c. **Run the helper** (values come from those files and the environment — never interpolated into code):
    ```bash
    PLUGIN_ROOT=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["plugin_root"])')
-   PYTHONPATH="$PLUGIN_ROOT" python3 -c "
-   from skills.interactive_review.threads import append_message
+   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" python3 - <<'PY'
+   import json, os, time
    from pathlib import Path
-   append_message(Path('$STATE_DIR/threads'), '$ANCHOR', {
-       'role': 'claude',
-       'ts': $(date +%s),
-       'text': '''<your answer>''',
-       'source_event_id': '$EVENT_ID',
-   }, title='''<short headline>''')
-   "
+   from skills.interactive_review.threads import append_message
+   sd = Path(os.environ["STATE_DIR"])
+   meta = json.loads((sd / ".reply.meta.json").read_text())
+   text = (sd / ".reply.md").read_text()
+   append_message(sd / "threads", meta["anchor"], {
+       "role": "claude",
+       "ts": int(time.time()),
+       "text": text,
+       "source_event_id": meta["source_event_id"],
+   }, title=(meta.get("title") or None))
+   PY
    ```
-   The anchor encoding maps `path/to/file:R:42` → `path__to__file_R_42.json`. `append_message` handles this; you don't need to compute it manually.
+   `append_message` handles anchor→filename encoding and `source_event_id` dedup; you don't compute paths manually. `.reply.md` / `.reply.meta.json` are scratch files — reused (overwritten) each event.
 5. **Write the ack:** `<consumed_dir>/<event_id>.ack` (empty file — existence is the signal).
 6. **End your turn. No terminal output.** The watcher stays armed.
 

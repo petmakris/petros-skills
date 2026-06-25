@@ -9,11 +9,15 @@ package com.petros.ireview;
  * @param updatedAt Server-side updated_at timestamp (epoch seconds).
  * @param isNew     True if this row's version exceeds the panel's last-seen
  *                  version. Drives the "updated" dot.
+ * @param stale     True if the anchored line has drifted/changed in the open
+ *                  diff editor. Drives the "⚠ stale" marker and groups the row
+ *                  to the bottom of the list.
  */
 public record AnnotationEntry(
     String anchor,
     String title,
     int version,
     long updatedAt,
-    boolean isNew
+    boolean isNew,
+    boolean stale
 ) {}

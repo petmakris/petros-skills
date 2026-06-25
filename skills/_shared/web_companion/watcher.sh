@@ -13,10 +13,15 @@ mkdir -p "$EVENTS_DIR" "$CONSUMED_DIR"
 
 while [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; do
   date +%s > "$STATE_DIR/watcher_heartbeat"
+  # Fixed-width event-id filenames sort chronologically (see events.append).
   evt=$(ls "$EVENTS_DIR"/*.json 2>/dev/null | sort | head -n1)
   if [ -n "$evt" ]; then
     id=$(basename "$evt" .json)
-    if [ ! -f "$CONSUMED_DIR/$id.ack" ]; then
+    if [ -f "$CONSUMED_DIR/$id.ack" ]; then
+      # Already acked (e.g. a re-emitted event that has since been handled).
+      rm -f "$CONSUMED_DIR/$id.attempts"
+      mv -f "$evt" "$CONSUMED_DIR/$id.json"
+    else
       printf 'WEBCOMPANION_EVENT skill=%s sid=%s event_id=%s\n' "$SKILL" "$SID" "$id"
       printf '%s\n' '---payload---'
       cat "$evt"
@@ -30,11 +35,24 @@ while [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; do
         date +%s > "$STATE_DIR/watcher_heartbeat"
         sleep 1
       done
-      if [ ! -f "$CONSUMED_DIR/$id.ack" ] && [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; then
-        touch "$CONSUMED_DIR/$id.failed"
+      if [ -f "$CONSUMED_DIR/$id.ack" ]; then
+        rm -f "$CONSUMED_DIR/$id.attempts"
+        mv -f "$evt" "$CONSUMED_DIR/$id.json"
+      elif [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; then
+        # Ack timed out. Re-emit on a later loop instead of silently dropping
+        # the user's request — downstream dedups by source_event_id, so re-emit
+        # is safe. Bound the attempts so one perpetually-unanswered event can't
+        # wedge the (serially-processed) queue behind it forever.
+        n=$(cat "$CONSUMED_DIR/$id.attempts" 2>/dev/null || echo 0)
+        n=$((n + 1))
+        if [ "$n" -ge "${WEBCOMPANION_MAX_EMITS:-3}" ]; then
+          rm -f "$CONSUMED_DIR/$id.attempts"
+          mv -f "$evt" "$CONSUMED_DIR/$id.json"
+        else
+          echo "$n" > "$CONSUMED_DIR/$id.attempts"
+        fi
       fi
     fi
-    mv -f "$evt" "$CONSUMED_DIR/$id.json"
   else
     sleep 1
   fi

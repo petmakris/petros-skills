@@ -1,8 +1,9 @@
-# Interactive Review — IDE plugins handoff
+# Interactive Review — IntelliJ plugin handoff
 
 Resume doc for a fresh Claude Code session. Covers the IntelliJ plugin
-(`intellij-plugin-spike/`) and its VS Code sibling (`vscode-extension-spike/`),
-both clients of the `interactive_review` server (`skills/interactive_review/`).
+(`intellij-plugin-spike/`), the sole client of the `interactive_review`
+server (`skills/interactive_review/`). IntelliJ is the only supported review
+surface — there is no VS Code extension and no browser UI.
 
 This file was rewritten 2026-06 after an audit found the prior version
 describing code that never existed. Everything below is verified against source.
@@ -33,8 +34,8 @@ model" for how close we actually are to that.
                   ▲                 │ WEBCOMPANION_EVENT (watcher stdout)
                   │ submit          ▼
          ┌────────┴────────┐   the SAME Claude session that ran
-         │  IDE clients    │   /interactive-review wakes, reads
-         │  IntelliJ + VSC │   diff.patch + threads, answers,
+         │ IntelliJ plugin │   /interactive-review wakes, reads
+         │   (sole client) │   diff.patch + threads, answers,
          └─────────────────┘   appends to the thread, acks
 ```
 
@@ -44,12 +45,11 @@ Two facts the old doc got wrong:
   in-session agent, woken by the watcher (`skills/_shared/web_companion/watcher.sh`).
   The server does zero LLM calls — it's a thread store + SSE bus.
 - **There is no browser surface.** The server's old PR-diff page was removed
-  (commit `697665f`); the IDE plugins are the only review surfaces. The server
+  (commit `697665f`); the IntelliJ plugin is the only review surface. The server
   still snapshots the diff to `diff.patch` (the agent reads it for context) and
   `meta.json` (PR title for the status bar).
 
-Anchor format is `<project-relative-path>:<L|R>:<line>` — shared by both IDE
-clients, so a thread is the same object from either.
+Anchor format is `<project-relative-path>:<L|R>:<line>`.
 
 ## What works
 
@@ -72,10 +72,6 @@ clients, so a thread is the same object from either.
 - `PrDiffOpener`: an "Open PR diff in IDE" button (this exists — the old doc
   said "don't build it"; it was built and works).
 
-**VS Code** (`vscode-extension-spike/`, 28 tests passing)
-- Comment-thread bubbles on regular file editors, side panel with delete,
-  status bar, workspace-symbol nav from synthesis links, SSE sync.
-
 ## Synthesis model — honest status
 
 `threads.py` is **append-only**; it cannot rewrite a prior message. "Synthesis"
@@ -91,10 +87,9 @@ that has not been judged worth the schema work.
 
 - **Anchor drift (the real correctness bug).** A snapshot line number is bound
   to live editor coordinates with no re-anchoring. Local edits / rebase silently
-  move an annotation to the wrong line. Affects the **two IDE clients only**
-  (there's no browser to drift anymore). Fix: persist the anchored line's text
-  (server schema + `threads_bulk`), re-locate on attach in both clients, show a
-  "stale" marker when the text is gone. ~L, server + 2 clients.
+  move an annotation to the wrong line. Fix: persist the anchored line's text
+  (server schema + `threads_bulk`), re-locate on attach in the plugin, show a
+  "stale" marker when the text is gone. ~L, server + plugin.
 - **Discovery port fallback.** If `~/.claude/interactive-review/server.json` is
   missing, clients fall back to hardcoded `127.0.0.1:54620` — the *first* of the
   range `54620-54640`, so they hit a dead port if the server grabbed any other.
@@ -104,11 +99,10 @@ that has not been judged worth the schema work.
 
 ## Decided directions (do not re-litigate)
 
-- **PR-diff editor integration: dropped.** Anchoring onto the GitHub PR
-  extension's review editors (VS Code) or the native PR view (IntelliJ) is XL
-  effort — VS Code has no public extension point; IntelliJ's PR content/side
-  mapping is unproven — for marginal gain. The plain "Compare with Branch" /
-  file-editor workflow is what delivers the value.
+- **PR-diff editor integration: dropped.** Anchoring onto IntelliJ's native PR
+  view is XL effort — the PR content/side mapping is unproven — for marginal
+  gain. The plain "Compare with Branch" / file-editor workflow is what delivers
+  the value.
 - **MCP-enriched synthesis: a spike, not a build.** The in-session agent
   already inherits whatever MCP servers the session has configured, so there is
   nothing to wire in code. "Enrichment" = enable IntelliJ's MCP server +
@@ -132,19 +126,12 @@ JDK 25 is hard-coded in `gradle.properties` (`javaVersion=25`) and
 `build.gradle.kts` (`JavaLanguageVersion.of(25)`) to match IDEA 2026.1's JBR.
 Update both if the JBR changes.
 
-**VS Code**
-```
-cd vscode-extension-spike
-npm install && npm run compile && npm test   # 28 tests
-# F5 in VS Code → Extension Development Host
-```
-
 ## Using it
 
 1. Terminal (Claude Code session): `/interactive-review <PR>`. It snapshots the
    diff and starts a headless session; no URL to open.
-2. Open the same project in IntelliJ or VS Code. Within ~5 s the status bar
-   shows the review is active and gutter icons / comment bubbles appear.
+2. Open the same project in IntelliJ. Within ~5 s the status bar
+   shows the review is active and gutter icons appear.
 3. Click a line, ask a question, get a threaded reply within ~10 s.
 4. End the session: type `scrap it` in the terminal.
 
@@ -155,4 +142,3 @@ npm install && npm run compile && npm test   # 28 tests
   answer protocol — this is where synthesis prompting lives).
 - IntelliJ: `ReviewSessionClient.java` (transport), `SpikeDiffExtension.java`
   (gutter hooks), `SynthesisPopup.java`, `AnnotationsPanel` (tool window).
-- VS Code: `sessionClient.ts`, `commentsController.ts`, `annotationsView.ts`.

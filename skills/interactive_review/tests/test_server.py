@@ -226,6 +226,28 @@ def test_create_session_extra_wraps_gh_failure(tmp_path):
             h.create_session_extra({"pr": "99999"}, dirs)
 
 
+def test_create_session_extra_rejects_oversized_diff(tmp_path):
+    dirs = make_dirs(tmp_path)
+    huge = "x" * (6 * 1024 * 1024)
+    with patch("skills.interactive_review.diff.fetch_pr_diff",
+               return_value=(huge, {"title": "Big PR"})):
+        h = Handlers()
+        with pytest.raises(ValueError, match="over the 5 MB limit"):
+            h.create_session_extra({"pr": "42"}, dirs)
+    assert not (dirs["state_dir"] / "diff.patch").exists()
+
+
+def test_create_session_extra_warns_on_large_diff(tmp_path):
+    dirs = make_dirs(tmp_path)
+    big = "x" * (2 * 1024 * 1024)
+    with patch("skills.interactive_review.diff.fetch_pr_diff",
+               return_value=(big, {"title": "Largish PR"})):
+        h = Handlers()
+        extra = h.create_session_extra({"pr": "42"}, dirs)
+    assert "warning" in extra
+    assert (dirs["state_dir"] / "diff.patch").exists()
+
+
 def test_threads_bulk_returns_anchor_to_latest_synthesis(tmp_path):
     state_dir = tmp_path / "state"
     threads_dir = state_dir / "threads"

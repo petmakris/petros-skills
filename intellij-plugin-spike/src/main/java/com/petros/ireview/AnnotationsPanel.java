@@ -92,6 +92,15 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         this.client = ReviewSessionService.get(project).client();
 
         list.setCellRenderer(this::renderCell);
+        // Onboarding empty state — otherwise a fresh session shows a blank box
+        // with no hint of how to start.
+        list.getEmptyText().setText("No questions yet");
+        list.getEmptyText().appendLine("Open the PR diff, hover a changed line, click 💬 to ask Claude.");
+        list.getEmptyText().appendLine("");
+        list.getEmptyText().appendLine("Copy /interactive-review <PR>",
+            com.intellij.ui.SimpleTextAttributes.LINK_ATTRIBUTES,
+            e -> java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new java.awt.datatransfer.StringSelection("/interactive-review "), null));
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -184,13 +193,23 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
 
         listener = new ReviewSessionClient.Listener() {
             @Override public void onStateChanged(ReviewSessionClient.State state) {
-                SwingUtilities.invokeLater(AnnotationsPanel.this::refreshTitle);
+                SwingUtilities.invokeLater(() -> {
+                    // No delete confirmation is coming while paused/ended/idle —
+                    // clear in-flight spinners so rows recover.
+                    if (state != ReviewSessionClient.State.ACTIVE
+                            && state != ReviewSessionClient.State.CONNECTING
+                            && !deleting.isEmpty()) {
+                        deleting.clear();
+                        list.repaint();
+                    }
+                    refreshTitle();
+                });
             }
             @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
                 SwingUtilities.invokeLater(() -> { refreshTitle(); rebuild(); });
             }
             @Override public void onDetached() {
-                SwingUtilities.invokeLater(() -> { refreshTitle(); rebuild(); });
+                SwingUtilities.invokeLater(() -> { deleting.clear(); refreshTitle(); rebuild(); });
             }
             @Override public void onThreadChanged(String anchor, String synthesis, int version) {
                 SwingUtilities.invokeLater(AnnotationsPanel.this::rebuild);
@@ -299,10 +318,13 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
                 PanelRowTitle.resolve(thread.title(), thread.question(), thread.synthesis(), anchor),
                 thread.version(),
                 0L,
-                thread.version() > last
+                thread.version() > last,
+                isStale(anchor)
             ));
         }
-        rows.sort(Comparator.comparing(AnnotationEntry::anchor));
+        // Live rows first; stale (drifted) rows grouped at the bottom so they
+        // don't get lost interleaved. Stable by anchor within each group.
+        rows.sort(Comparator.comparing(AnnotationEntry::stale).thenComparing(AnnotationEntry::anchor));
         model.clear();
         for (var r : rows) model.addElement(r);
         countLabel.setText(rows.size() + " annotation" + (rows.size() == 1 ? "" : "s"));
@@ -320,7 +342,7 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
             ? new JBColor(new Color(0x1a, 0x3a, 0x5e), new Color(0x1a, 0x3a, 0x5e))
             : new JBColor(new Color(0xf0, 0xf0, 0xf0), new Color(0x23, 0x25, 0x27)));
 
-        boolean stale = isStale(entry.anchor());
+        boolean stale = entry.stale();
 
         // Title line: clean summary title (WEST) + ×/spinner (EAST).
         JPanel titleLine = new JPanel(new BorderLayout());
@@ -393,9 +415,8 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         hoveringDeleteButton = false;
         ensureSpinTimer();
         list.repaint();
-        client.deleteThread(entry.anchor()).whenComplete((v, t) -> {
-            if (t == null) return;  // success path: SSE thread-deleted clears `deleting`
-            SwingUtilities.invokeLater(() -> {
+        client.deleteThread(entry.anchor()).whenComplete((v, t) -> SwingUtilities.invokeLater(() -> {
+            if (t != null) {
                 deleting.remove(entry.anchor());
                 list.repaint();
                 com.intellij.notification.Notifications.Bus.notify(
@@ -405,8 +426,22 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
                         t.getMessage() == null ? t.toString() : t.getMessage(),
                         com.intellij.notification.NotificationType.ERROR),
                     project);
-            });
+                return;
+            }
+            // Success: SSE thread-deleted normally clears `deleting` within ~1s.
+            // Guard against a missed confirmation so the row can't spin forever.
+            scheduleDeleteFallback(entry.anchor());
+        }));
+    }
+
+    /** If no thread-deleted confirmation arrives, stop the spinner so the row
+     *  becomes interactive again instead of spinning indefinitely. */
+    private void scheduleDeleteFallback(String anchor) {
+        Timer t = new Timer(8000, e -> {
+            if (deleting.remove(anchor)) list.repaint();
         });
+        t.setRepeats(false);
+        t.start();
     }
 
     private void ensureSpinTimer() {

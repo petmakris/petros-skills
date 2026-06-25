@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
@@ -80,7 +81,26 @@ public final class ReviewSessionClient {
 
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(2)).build();
+    /** Short, non-blocking polls + reconnect scheduling only. */
     private final ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
+    /** The blocking SSE stream lives here, never on {@link #exec}, so a stream
+     *  that blocks for its whole lifetime (or stalls) can't starve discovery /
+     *  liveness polling. Cached so a session switch never wedges behind a
+     *  not-yet-closed prior stream. */
+    private final ExecutorService sseExec = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "ireview-sse");
+        t.setDaemon(true);
+        return t;
+    });
+    /** Single-flight guard for the SSE stream. Every openSse bumps it; a stream
+     *  whose generation is stale ignores its events and never reconnects, so a
+     *  reconnect or session switch can't leave two live streams writing the
+     *  cache. */
+    private final java.util.concurrent.atomic.AtomicLong sseGen =
+        new java.util.concurrent.atomic.AtomicLong();
+    /** Guards the state check-and-set so two threads can't both pass the guard
+     *  and drop/duplicate a transition. */
+    private final Object stateLock = new Object();
     private final java.util.List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Map<String, ThreadState> cache = new ConcurrentHashMap<>();
     /** Bumped on every cache mutation so consumers (e.g. the gutter index) can
@@ -113,9 +133,11 @@ public final class ReviewSessionClient {
 
     public void stop() {
         closed = true;
+        sseGen.incrementAndGet();
         if (discoverTask != null) discoverTask.cancel(true);
         if (sseTask != null) sseTask.cancel(true);
         exec.shutdownNow();
+        sseExec.shutdownNow();
         setState(State.DORMANT);
     }
 
@@ -291,6 +313,7 @@ public final class ReviewSessionClient {
     /** Freeze the current session read-only. One-way: only attach() clears it. */
     private void latchEnded() {
         endedLatched = true;
+        sseGen.incrementAndGet();
         for (String a : new java.util.ArrayList<>(pending.keySet())) clearPending(a);
         if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
         setState(State.ENDED);
@@ -345,6 +368,7 @@ public final class ReviewSessionClient {
             cache.clear();
             cacheVersion.incrementAndGet();
             pending.clear();
+            sseGen.incrementAndGet();
             if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
             for (Listener l : listeners) l.onDetached();
         }
@@ -410,32 +434,54 @@ public final class ReviewSessionClient {
     }
 
     private void openSse(String sid) {
+        if (closed || sseExec.isShutdown()) return;
         URI uri = URI.create(baseUrl + "/s/" + sid + "/stream");
-        sseTask = exec.submit(() -> {
-            // Seed on every (re)connect: covers a failed initial seed and an
-            // outage where SSE events were missed while disconnected.
-            seedCache(sid);
-            try {
-                SseClient.connect(http, uri, this::handleSseEvent, t -> {
-                    // Don't churn DISCONNECTED/reconnect for a frozen session,
-                    // and don't let an SSE drop override PAUSED/ENDED.
-                    if (endedLatched) return;
-                    if (state == State.ACTIVE) setState(State.DISCONNECTED);
-                    scheduleReconnect(sid);
-                }).join();
-            } catch (Exception e) {
-                if (!endedLatched && state == State.ACTIVE) setState(State.DISCONNECTED);
-            }
-        });
-        if (!endedLatched) setState(State.ACTIVE);
+        long gen = sseGen.incrementAndGet();
+        Future<?> prev = sseTask;
+        if (prev != null) prev.cancel(true);
+        try {
+            sseTask = sseExec.submit(() -> runSse(sid, uri, gen));
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // stop() raced us between the guard and the submit — nothing to do.
+        }
     }
 
-    /** Reschedule a reconnect unless we're shutting down — guards against an
-     *  in-flight SSE error callback hitting the executor after stop(). */
-    private void scheduleReconnect(String sid) {
-        if (closed || exec.isShutdown()) return;
+    /** The blocking stream body. Runs on {@link #sseExec}. Only the current
+     *  generation acts on events / reconnects; a superseded stream is inert. */
+    private void runSse(String sid, URI uri, long gen) {
+        // Seed on every (re)connect: covers a failed initial seed and an outage
+        // where SSE events were missed while disconnected. Its retry-sleeps are
+        // on sseExec, so they never starve discovery polling.
+        seedCache(sid);
+        if (gen != sseGen.get() || closed) return; // superseded while seeding
+        if (!endedLatched) setState(State.ACTIVE);
         try {
-            exec.schedule(() -> openSse(sid), 2, TimeUnit.SECONDS);
+            SseClient.connect(http, uri,
+                ev -> { if (gen == sseGen.get()) handleSseEvent(ev); },
+                t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
+                           setState(State.DISCONNECTED); }
+            ).join();
+        } catch (Throwable ignored) {
+            // Task cancelled/interrupted, or an unexpected join failure — fall
+            // through to the single reconnect guard below.
+        }
+        // Stream ended (clean close or post-error). This is the SOLE reconnect
+        // path, so an error frame can't double-schedule. Reconnect only if this
+        // stream is still current and we're not shutting down or frozen.
+        if (gen == sseGen.get() && !closed && !endedLatched) {
+            if (state == State.ACTIVE) setState(State.DISCONNECTED);
+            scheduleReconnect(sid, gen);
+        }
+    }
+
+    /** Reschedule a reconnect unless we're shutting down or this stream was
+     *  already superseded — guards against a stale callback resurrecting a dead
+     *  generation after stop()/detach/attach. */
+    private void scheduleReconnect(String sid, long gen) {
+        if (closed || exec.isShutdown() || gen != sseGen.get()) return;
+        try {
+            exec.schedule(() -> { if (gen == sseGen.get() && !closed) openSse(sid); },
+                2, TimeUnit.SECONDS);
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
             // stop() raced us between the guard and the schedule — nothing to do.
         }
@@ -498,8 +544,12 @@ public final class ReviewSessionClient {
     }
 
     private void setState(State s) {
-        if (state == s) return;
-        state = s;
+        synchronized (stateLock) {
+            if (state == s) return;
+            state = s;
+        }
+        // Notify outside the lock; listeners bridge to the EDT and re-read
+        // state() there, so they always converge on the latest value.
         for (Listener l : listeners) l.onStateChanged(s);
     }
 

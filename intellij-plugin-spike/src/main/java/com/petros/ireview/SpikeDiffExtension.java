@@ -7,7 +7,6 @@ import com.intellij.diff.requests.ContentDiffRequest;
 import com.intellij.diff.requests.DiffRequest;
 import com.intellij.diff.tools.util.side.TwosideTextDiffViewer;
 import com.intellij.diff.util.Side;
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -35,11 +34,17 @@ import java.util.WeakHashMap;
 public final class SpikeDiffExtension extends DiffExtension {
 
     private static final Logger LOG = Logger.getInstance(SpikeDiffExtension.class);
-    private static final Icon ASK_ICON = AllIcons.General.Add;
+    /** Hover "ask Claude here" — a speech bubble reads as a comment, where the
+     *  old generic "+" read as "insert/expand". */
+    private static final Icon ASK_ICON =
+            IconLoader.getIcon("/icons/comment.svg", SpikeDiffExtension.class);
     private static final Icon ANNOTATED_ICON =
             IconLoader.getIcon("/icons/annotation_yellow.svg", SpikeDiffExtension.class);
     private static final Icon STALE_ICON =
             IconLoader.getIcon("/icons/annotation_stale.svg", SpikeDiffExtension.class);
+    /** A question on this line is in flight (asked, answer not yet back). */
+    private static final Icon PENDING_ICON =
+            IconLoader.getIcon("/icons/annotation_pending.svg", SpikeDiffExtension.class);
     private static final Icon HIDDEN_ICON = EmptyIcon.ICON_16;
 
     /** Per-editor "currently hovered line index" (0-based), or -1. */
@@ -52,9 +57,12 @@ public final class SpikeDiffExtension extends DiffExtension {
      * focuses the original diff viewer (keeps PR context) instead of opening
      * the working-copy file.
      *
-     * Stores WeakReference so closed diff viewers don't leak. The
-     * `editorFor(pathSideKey)` accessor returns null if the entry is GC'd or
-     * the editor is disposed.
+     * Values are WeakReferences so a closed diff viewer's editor can be GC'd,
+     * but the map entry itself (key + cleared ref) does NOT evict on its own —
+     * a WeakHashMap keyed by editor wouldn't support the path→editor lookup.
+     * So cleared/disposed entries are actively pruned in {@link #editorFor} and
+     * {@link #repaintAllGutters} (which runs on every session change), bounding
+     * the registry to live viewers.
      */
     private static final Map<String, java.lang.ref.WeakReference<EditorEx>> DIFF_EDITORS =
             Collections.synchronizedMap(new java.util.HashMap<>());
@@ -76,11 +84,14 @@ public final class SpikeDiffExtension extends DiffExtension {
      *  instead of waiting for the next hover-driven repaint. */
     public static void repaintAllGutters() {
         synchronized (DIFF_EDITORS) {
-            for (var ref : DIFF_EDITORS.values()) {
-                EditorEx editor = ref.get();
-                if (editor != null && !editor.isDisposed()) {
-                    editor.getGutterComponentEx().repaint();
+            var it = DIFF_EDITORS.values().iterator();
+            while (it.hasNext()) {
+                EditorEx editor = it.next().get();
+                if (editor == null || editor.isDisposed()) {
+                    it.remove(); // prune dead viewers so the registry can't grow unbounded
+                    continue;
                 }
+                editor.getGutterComponentEx().repaint();
             }
         }
     }
@@ -101,6 +112,28 @@ public final class SpikeDiffExtension extends DiffExtension {
         }
         if (leftLabel != null) attachAllLines(twoSide.getEditor(Side.LEFT), "L", leftLabel, project);
         if (rightLabel != null) attachAllLines(twoSide.getEditor(Side.RIGHT), "R", rightLabel, project);
+        // First time a diff is opened during an active review, tell the user the
+        // gutter is interactive — otherwise the affordance is invisible until a
+        // chance hover. Shown once ever (persisted), and only mid-review so it
+        // never fires on unrelated diffs.
+        if (ReviewSessionService.get(project).client().currentSession().isPresent()) {
+            maybeShowGutterHint(project);
+        }
+    }
+
+    private static void maybeShowGutterHint(@NotNull Project project) {
+        var props = com.intellij.ide.util.PropertiesComponent.getInstance();
+        if (props.getBoolean("ireview.gutterHintShown", false)) return;
+        props.setValue("ireview.gutterHintShown", true);
+        com.intellij.notification.Notifications.Bus.notify(
+            new com.intellij.notification.Notification(
+                "Interactive Review",
+                "Ask Claude about any line",
+                "Hover a changed line in this diff and click the 💬 in the gutter to ask. "
+                    + "Answered lines get a yellow marker; a line you've asked about shows an amber "
+                    + "marker until the answer arrives.",
+                com.intellij.notification.NotificationType.INFORMATION),
+            project);
     }
 
     private static void attachAllLines(@Nullable EditorEx editor,
@@ -227,6 +260,7 @@ public final class SpikeDiffExtension extends DiffExtension {
         private String anchor() { return label + ":" + side + ":" + (lineZeroBased + 1); }
 
         @Override public @NotNull Icon getIcon() {
+            if (ReviewSessionService.get(project).client().isPending(anchor())) return PENDING_ICON;
             var la = lineAnchorFor(editor, label, side, lineZeroBased, project);
             if (la != null) return la.stale() ? STALE_ICON : ANNOTATED_ICON;
             if (isHovered(editor, lineZeroBased)) return ASK_ICON;
@@ -234,12 +268,15 @@ public final class SpikeDiffExtension extends DiffExtension {
         }
 
         @Override public @NotNull String getTooltipText() {
+            if (ReviewSessionService.get(project).client().isPending(anchor())) {
+                return "Claude is answering…";
+            }
             var la = lineAnchorFor(editor, label, side, lineZeroBased, project);
             if (la != null) {
                 return (la.stale() ? "Annotation stale (line changed) · " : "Annotated · ")
                     + la.ownerAnchor();
             }
-            return "Comment on " + anchor();
+            return "Ask Claude about " + anchor();
         }
 
         @Override public boolean isNavigateAction() { return true; }

@@ -1,6 +1,6 @@
 """Interactive-review skill — thin handlers module over web_companion.
 
-Per-line PR review runs in the IDE (IntelliJ plugin / VS Code extension).
+Per-line PR review runs in IntelliJ via the IDE plugin.
 This server is headless: it snapshots the PR diff, holds per-anchor threads,
 streams thread changes over SSE, and enqueues /api/submit comments as events
 for Claude. Claude wakes via watcher, reads context, appends a claude-role
@@ -25,11 +25,14 @@ SHARED_STATIC_DIR = Path(__file__).resolve().parent.parent / "_shared" / "web_co
 PORT_RANGE = range(54620, 54641)
 BANNER = "interactive-review-server v1"
 
+WARN_DIFF_BYTES = 1 * 1024 * 1024   # soft warning surfaced to the user
+MAX_DIFF_BYTES = 5 * 1024 * 1024    # hard reject — review a narrower PR
+
 IDE_PAGE = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Interactive Review</title>
 <style>body{font-family:-apple-system,Segoe UI,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center}main{max-width:32rem;text-align:center;padding:2rem;line-height:1.5}h1{font-size:1.15rem;font-weight:600}b{color:#fff}</style></head>
-<body><main><h1>🔍 Interactive review runs in your IDE</h1>
-<p>This review has no browser page. Open the project in <b>IntelliJ&nbsp;IDEA</b> or <b>VS&nbsp;Code</b> — the plugin shows per-line annotations on the diff.</p></main></body></html>
+<body><main><h1>🔍 Interactive review runs in IntelliJ</h1>
+<p>This review has no browser page. Open the project in <b>IntelliJ&nbsp;IDEA</b> — the plugin shows per-line annotations on the diff.</p></main></body></html>
 """
 
 CLOSED_PAGE = """<!DOCTYPE html>
@@ -268,6 +271,12 @@ class Handlers:
             diff_text, meta = diff_module.fetch_pr_diff(pr_ref, dirs.get("_cwd"))
         except Exception as e:
             raise ValueError(f"gh pr fetch failed: {e}") from e
+        diff_bytes = len(diff_text.encode("utf-8"))
+        if diff_bytes > MAX_DIFF_BYTES:
+            raise ValueError(
+                f"diff is {diff_bytes // 1024} KB, over the {MAX_DIFF_BYTES // (1024 * 1024)} MB limit — "
+                "review a narrower PR, a single commit, or a branch with fewer changes"
+            )
         (state_dir / "diff.patch").write_text(diff_text)
         (state_dir / "meta.json").write_text(json.dumps({
             "pr_ref": pr_ref,
@@ -279,7 +288,13 @@ class Handlers:
             "head_oid": meta.get("headRefOid", ""),
             "fetched_at": int(time.time()),
         }, indent=2))
-        return {"pr_ref": pr_ref, "title": meta.get("title", pr_ref)}
+        result = {"pr_ref": pr_ref, "title": meta.get("title", pr_ref)}
+        if diff_bytes > WARN_DIFF_BYTES:
+            result["warning"] = (
+                f"large diff ({diff_bytes // 1024} KB) — annotations may be slow; "
+                "consider a narrower PR or branch"
+            )
+        return result
 
 
 def _send_text(h, status, body):

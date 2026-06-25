@@ -31,15 +31,20 @@ public final class ReviewSessionService implements Disposable {
             cwd != null ? cwd : System.getProperty("user.home"),
             Duration.ofSeconds(5)
         );
-        // Repaint diff gutters whenever a thread is added or deleted so the
-        // yellow annotation icon appears/disappears immediately instead of
-        // waiting for the user's next hover.
+        // Repaint diff gutters whenever a thread is added/deleted or a question
+        // goes in/out of flight, so the annotation / answering icons appear and
+        // disappear immediately instead of waiting for the user's next hover.
         this.client.addListener(new ReviewSessionClient.Listener() {
             @Override public void onThreadChanged(String anchor, String synthesis, int version) {
-                com.intellij.openapi.application.ApplicationManager.getApplication()
-                    .invokeLater(SpikeDiffExtension::repaintAllGutters);
+                repaintGutters();
             }
             @Override public void onThreadDeleted(String anchor) {
+                repaintGutters();
+            }
+            @Override public void onPendingChanged(String anchor, boolean pending) {
+                repaintGutters();
+            }
+            private void repaintGutters() {
                 com.intellij.openapi.application.ApplicationManager.getApplication()
                     .invokeLater(SpikeDiffExtension::repaintAllGutters);
             }
