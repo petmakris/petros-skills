@@ -48,4 +48,9 @@ class PanelRowTitleTest {
         assertEquals("", PanelRowTitle.firstLinePlainText("   \n  "));
         assertEquals("", PanelRowTitle.firstLinePlainText(null));
     }
+
+    @Test void firstLineKeepsNonLinkParentheticals() {
+        String out = PanelRowTitle.firstLinePlainText("foo can be null (in edge cases) here");
+        assertTrue(out.contains("(in edge cases)"));
+    }
 }

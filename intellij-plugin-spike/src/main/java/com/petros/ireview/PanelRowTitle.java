@@ -2,11 +2,13 @@ package com.petros.ireview;
 
 import org.commonmark.Extension;
 import org.commonmark.ext.gfm.tables.TablesExtension;
+import org.commonmark.node.AbstractVisitor;
+import org.commonmark.node.Link;
+import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.text.TextContentRenderer;
 
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * Resolves the single readable label for an annotations-panel row.
@@ -16,8 +18,6 @@ import java.util.regex.Pattern;
  * rung. Uses the commonmark dependency already bundled in the plugin.
  */
 public final class PanelRowTitle {
-
-    private static final Pattern LINK_URL_PATTERN = Pattern.compile(" \\([^)]+\\)");
 
     private static final List<Extension> EXT = List.of(TablesExtension.create());
     private static final Parser PARSER = Parser.builder().extensions(EXT).build();
@@ -43,8 +43,20 @@ public final class PanelRowTitle {
     /** Flatten markdown to plain text and return its first non-blank line. */
     public static String firstLinePlainText(String markdown) {
         if (markdown == null || markdown.isBlank()) return "";
-        String text = TEXT.render(PARSER.parse(markdown));
-        text = LINK_URL_PATTERN.matcher(text).replaceAll("");
+        Node doc = PARSER.parse(markdown);
+        doc.accept(new AbstractVisitor() {
+            @Override public void visit(Link link) {
+                visitChildren(link);
+                Node child = link.getFirstChild();
+                while (child != null) {
+                    Node next = child.getNext();
+                    link.insertBefore(child);
+                    child = next;
+                }
+                link.unlink();
+            }
+        });
+        String text = TEXT.render(doc);
         for (String line : text.split("\n")) {
             String t = collapse(line);
             if (!t.isEmpty()) return t;
