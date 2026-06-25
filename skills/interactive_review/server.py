@@ -85,6 +85,7 @@ class Handlers:
                 "latest_synthesis": last.get("text", ""),
                 "version": t.get("version", 0),
                 "updated_at": last.get("ts", 0),
+                "anchor_text": t.get("anchor_text", ""),
             }
         return result
 
@@ -217,6 +218,9 @@ class Handlers:
             "images": images,
             "source_event_id": f"user-{eid}",
         })
+        anchor_text = payload.get("anchor_text")
+        if isinstance(anchor_text, str):
+            threads_module.set_anchor_text_if_absent(threads_dir, anchor, anchor_text)
         _send_json(h, 202, {"event_id": eid, "status": "queued"})
 
     def serve_poll(self, h: BaseHTTPRequestHandler, dirs: dict) -> None:

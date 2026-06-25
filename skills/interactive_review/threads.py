@@ -66,6 +66,21 @@ def append_message(threads_dir: Path, anchor: str, msg: dict) -> bool:
     return True
 
 
+def set_anchor_text_if_absent(threads_dir: Path, anchor: str, text: str) -> None:
+    """Record the anchored line's text once, on first creation (first-write-wins).
+
+    No-op if the thread already has a non-empty anchor_text, or if `text` is
+    empty. Used to re-locate a drifted annotation later, client-side.
+    """
+    if not text:
+        return
+    t = load(threads_dir, anchor)
+    if t.get("anchor_text"):
+        return
+    t["anchor_text"] = text
+    save_atomic(threads_dir, t)
+
+
 def delete(threads_dir: Path, anchor: str) -> bool:
     """Remove the thread file for `anchor`.  Returns True if a file was removed."""
     p = _path_for(threads_dir, anchor)

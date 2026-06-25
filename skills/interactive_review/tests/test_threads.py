@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from skills.interactive_review.threads import (
-    load, save_atomic, append_message, valid_anchor, list_versions, delete
+    load, save_atomic, append_message, valid_anchor, list_versions, delete,
+    set_anchor_text_if_absent
 )
 
 
@@ -71,3 +72,14 @@ def test_list_versions(tmp_path):
     append_message(threads_dir, "b:R:1", {"role": "user", "ts": 3, "text": "z", "source_event_id": "e3"})
     vs = list_versions(threads_dir)
     assert vs == {"a:R:1": 2, "b:R:1": 1}
+
+
+def test_set_anchor_text_first_write_wins(tmp_path):
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    append_message(threads_dir, "src/x.py:R:42",
+                   {"role": "user", "ts": 1, "text": "why?", "source_event_id": "e1"})
+    set_anchor_text_if_absent(threads_dir, "src/x.py:R:42", "    return foo(bar)")
+    set_anchor_text_if_absent(threads_dir, "src/x.py:R:42", "DIFFERENT LINE")
+    t = load(threads_dir, "src/x.py:R:42")
+    assert t["anchor_text"] == "    return foo(bar)"

@@ -218,6 +218,30 @@ def test_threads_bulk_empty_when_no_threads_dir(tmp_path):
     assert result == {}
 
 
+def test_handle_submit_stores_anchor_text(tmp_path):
+    dirs = make_dirs(tmp_path)
+    h = Handlers()
+    handler = make_handler()
+    h.handle_submit(handler, dirs, {"anchor": "src/x.py:R:42", "type": "comment",
+                                    "text": "why?", "anchor_text": "  return foo()"})
+    t = json.loads(next((dirs["state_dir"] / "threads").iterdir()).read_text())
+    assert t["anchor_text"] == "  return foo()"
+
+
+def test_threads_bulk_returns_anchor_text(tmp_path):
+    dirs = make_dirs(tmp_path)
+    h = Handlers()
+    handler = make_handler()
+    h.handle_submit(handler, dirs, {"anchor": "src/x.py:R:42", "type": "comment",
+                                    "text": "why?", "anchor_text": "  return foo()"})
+    # Give the thread a claude reply so threads_bulk surfaces it.
+    from skills.interactive_review import threads as tm
+    tm.append_message(dirs["state_dir"] / "threads", "src/x.py:R:42",
+                      {"role": "claude", "ts": 2, "text": "because.", "source_event_id": "c1"})
+    bulk = h.threads_bulk(dirs)
+    assert bulk["src/x.py:R:42"]["anchor_text"] == "  return foo()"
+
+
 # ---------------------------------------------------------------------------
 # SSE stream unit tests
 # ---------------------------------------------------------------------------
