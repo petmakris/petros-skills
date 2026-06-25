@@ -32,9 +32,12 @@ public final class ReviewStatusBarWidget implements StatusBarWidget, StatusBarWi
                         .map(s -> "Review: " + s.prRef() + " ✓")
                         .orElse("Review: active ✓");
                     case DISCONNECTED -> "Review: reconnecting…";
-                    case STALE -> client.currentSession()
-                        .map(s -> "Review: " + s.prRef() + " — session gone")
-                        .orElse("Review: session gone");
+                    case PAUSED -> client.currentSession()
+                        .map(s -> "Review: " + s.prRef() + " — paused")
+                        .orElse("Review: paused");
+                    case ENDED -> client.currentSession()
+                        .map(s -> "Review: " + s.prRef() + " — ended (read-only)")
+                        .orElse("Review: ended");
                 };
                 if (statusBar != null) statusBar.updateWidget(WIDGET_ID);
             }

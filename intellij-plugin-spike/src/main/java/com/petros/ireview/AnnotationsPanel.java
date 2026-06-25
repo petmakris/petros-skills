@@ -222,13 +222,24 @@ public final class AnnotationsPanel {
         titleLabel.setText(client.currentSession()
             .map(s -> "Review · " + truncate(s.prRef(), 28))
             .orElse("Review · idle"));
-        openDiffButton.setEnabled(client.currentSession().isPresent());
-        endReviewButton.setEnabled(client.currentSession().isPresent());
+        boolean hasSession = client.currentSession().isPresent();
+        ReviewSessionClient.State st = client.state();
+        openDiffButton.setEnabled(hasSession);
+        // "End review" only makes sense for a session that is still running —
+        // an already-ENDED (frozen) session has nothing left to end.
+        endReviewButton.setEnabled(hasSession && st != ReviewSessionClient.State.ENDED);
         // The footer must tell the truth about the Claude session, not just
-        // about server reachability — a stale watcher means "session gone".
-        if (client.state() == ReviewSessionClient.State.STALE) {
-            footer.setText("● session gone — re-run /interactive-review");
+        // about server reachability.
+        if (!hasSession) {
+            footer.setText("● idle");
+            footer.setForeground(LIVE_COLOR);
+        } else if (st == ReviewSessionClient.State.ENDED) {
+            footer.setText("● session ended — read-only");
             footer.setForeground(GONE_COLOR);
+        } else if (st == ReviewSessionClient.State.PAUSED
+                || st == ReviewSessionClient.State.DISCONNECTED) {
+            footer.setText("● paused — reconnecting…");
+            footer.setForeground(LIVE_COLOR);
         } else {
             footer.setText("● live");
             footer.setForeground(LIVE_COLOR);

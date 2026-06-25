@@ -24,6 +24,10 @@ public final class FakeReviewServer implements AutoCloseable {
     public volatile String threadsJson = "{}";
     /** Epoch seconds of the last watcher heartbeat returned by /poll; null → none yet (0). */
     public volatile Long watcherSeenAt = null;
+    /** When true, /poll reports ended=true (terminal or watcher-dead past reap). */
+    public volatile boolean ended = false;
+    /** ended_reason returned by /poll when ended; null → JSON null. */
+    public volatile String endedReason = null;
     /** Count of POSTs that reached /api/submit. */
     public final java.util.concurrent.atomic.AtomicInteger submitCount =
         new java.util.concurrent.atomic.AtomicInteger();
@@ -64,8 +68,10 @@ public final class FakeReviewServer implements AutoCloseable {
         }
         if (path.endsWith("/poll")) {
             long seen = watcherSeenAt != null ? watcherSeenAt : 0;
+            String reasonJson = endedReason == null ? "null" : "\"" + endedReason + "\"";
             byte[] body = ("{\"threads\":{},\"watcher_seen_at\":" + seen
-                + ",\"finished\":false}").getBytes(StandardCharsets.UTF_8);
+                + ",\"finished\":false,\"ended\":" + (ended ? "true" : "false")
+                + ",\"ended_reason\":" + reasonJson + "}").getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
             ex.sendResponseHeaders(200, body.length);
             try (OutputStream os = ex.getResponseBody()) { os.write(body); }

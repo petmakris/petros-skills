@@ -42,15 +42,31 @@ public final class ReviewSessionClient {
         default void onStateChanged(State state) {}
     }
 
-    public enum State { DORMANT, CONNECTING, ACTIVE, DISCONNECTED, STALE }
+    /**
+     * Session lifecycle, in precedence order ENDED > PAUSED > DISCONNECTED >
+     * ACTIVE. PAUSED = watcher silent past STALE_AFTER but recoverable (the
+     * user may re-arm). ENDED = the server reported the session terminal
+     * (cancelled/finished) or watcher-dead past the reap threshold; it is a
+     * one-way latch — the panel freezes read-only and never un-freezes for the
+     * same sid.
+     */
+    public enum State { DORMANT, CONNECTING, ACTIVE, DISCONNECTED, PAUSED, ENDED }
 
     /**
      * How long the watcher heartbeat may age before we treat the Claude
-     * session as gone. The watcher rewrites it every ~1s (even while blocked
-     * on an ack), so anything past this is dead, not slow. Mirrors the
-     * annotate web client's WATCHER_DEAD_AFTER_S.
+     * session as merely PAUSED. The watcher rewrites it every ~1s (even while
+     * blocked on an ack), so anything past this is gone, not slow. The
+     * authoritative ENDED decision (reap threshold) is made by the server and
+     * delivered via the /poll "ended" flag.
      */
     private static final Duration STALE_AFTER = Duration.ofSeconds(15);
+
+    /**
+     * One-way latch: once the server says the attached session is ENDED, the
+     * panel freezes read-only. Reset only when we attach a different session
+     * or fully detach. A returning heartbeat must never un-freeze it.
+     */
+    private volatile boolean endedLatched = false;
 
     private final String baseUrl;
     private final String projectCwd;
@@ -107,7 +123,7 @@ public final class ReviewSessionClient {
     public CompletableFuture<Void> postComment(String anchor, String text, String anchorText) {
         SessionInfo s = current;
         if (s == null) return CompletableFuture.failedFuture(new IllegalStateException("no session"));
-        if (state == State.STALE) {
+        if (state == State.PAUSED || state == State.ENDED) {
             return CompletableFuture.failedFuture(new IllegalStateException(
                 "Claude session is gone — re-run /interactive-review to resume"));
         }
@@ -182,26 +198,59 @@ public final class ReviewSessionClient {
     // --- internal ---
 
     private void pollDiscover() {
+        SessionInfo found;
         try {
-            String url = baseUrl + "/api/sessions?cwd=" + URLEncoder.encode(projectCwd, StandardCharsets.UTF_8);
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url)).GET().build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                handleNoSession();
-                return;
-            }
-            SessionInfo found = parseFirstSession(resp.body());
-            if (found == null) {
-                handleNoSession();
-                return;
-            }
-            if (current == null || !current.sid().equals(found.sid())) {
+            found = fetchNewestSession();
+        } catch (Exception e) {
+            // Server unreachable. A transient blip must not wipe a frozen
+            // (ENDED) panel; for a live session this preserves the prior
+            // behaviour of detaching.
+            if (!endedLatched) handleNoSession();
+            return;
+        }
+        if (endedLatched) {
+            // Frozen read-only. Discovery only reaps dead sessions, so the
+            // ONLY thing that replaces a frozen panel is a genuinely new, LIVE
+            // session (a different sid). Never fall back to a zombie, never
+            // clear on our own.
+            if (found != null && (current == null || !current.sid().equals(found.sid()))) {
                 attach(found);
             }
-            checkWatcherHeartbeat(found.sid());
-        } catch (Exception e) {
-            handleNoSession();
+            return;
         }
+        if (found == null) {
+            // Discovery has nothing for this cwd. If we were attached, the
+            // session most likely just ended (terminal/dead → reaped) — freeze
+            // it on its own findings rather than blanking the panel. Only blank
+            // when the session is genuinely gone (poll fails / not ended).
+            if (current != null) {
+                pollLiveness(current.sid());
+                if (!endedLatched) handleNoSession();
+            } else {
+                handleNoSession();
+            }
+            return;
+        }
+        if (current == null || !current.sid().equals(found.sid())) {
+            attach(found);
+        }
+        pollLiveness(found.sid());
+    }
+
+    private SessionInfo fetchNewestSession() throws Exception {
+        String url = baseUrl + "/api/sessions?cwd=" + URLEncoder.encode(projectCwd, StandardCharsets.UTF_8);
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).GET().build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) return null;
+        return parseFirstSession(resp.body());
+    }
+
+    /** Freeze the current session read-only. One-way: only attach() clears it. */
+    private void latchEnded() {
+        endedLatched = true;
+        for (String a : new java.util.ArrayList<>(pending)) markPending(a, false);
+        if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+        setState(State.ENDED);
     }
 
     /**
@@ -212,8 +261,10 @@ public final class ReviewSessionClient {
      * Poll it; if it has gone stale, flip to STALE so the UI stops claiming
      * "live" and submissions are refused.
      */
-    private void checkWatcherHeartbeat(String sid) {
+    private void pollLiveness(String sid) {
+        if (endedLatched) return; // frozen; nothing un-freezes the same sid
         long seenAt;
+        boolean ended;
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/poll")).GET().build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
@@ -221,26 +272,31 @@ public final class ReviewSessionClient {
             com.google.gson.JsonObject o = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
             seenAt = o.has("watcher_seen_at") && !o.get("watcher_seen_at").isJsonNull()
                 ? o.get("watcher_seen_at").getAsLong() : 0;
+            ended = o.has("ended") && !o.get("ended").isJsonNull() && o.get("ended").getAsBoolean();
         } catch (Exception e) {
             return; // transient — leave state as-is, next poll retries
         }
+        // Authoritative end (cancelled/finished, or watcher-dead past the
+        // server's reap threshold) → freeze read-only, one-way.
+        if (ended) { latchEnded(); return; }
         // No heartbeat written yet (session just armed) → not dead, leave alone.
         if (seenAt <= 0) return;
         long ageMs = System.currentTimeMillis() - seenAt * 1000;
         if (ageMs > STALE_AFTER.toMillis()) {
-            if (state != State.STALE) {
+            if (state != State.PAUSED) {
                 // Clear pending so spinners and the side-panel × recover —
-                // no ack is ever coming for these.
+                // no ack is coming until the watcher returns.
                 for (String a : new java.util.ArrayList<>(pending)) markPending(a, false);
-                setState(State.STALE);
+                setState(State.PAUSED);
             }
-        } else if (state == State.STALE) {
+        } else if (state == State.PAUSED) {
             // Watcher came back (user re-ran /interactive-review).
             setState(State.ACTIVE);
         }
     }
 
     private void handleNoSession() {
+        endedLatched = false;
         if (current != null) {
             current = null;
             cache.clear();
@@ -252,6 +308,7 @@ public final class ReviewSessionClient {
     }
 
     private void attach(SessionInfo s) {
+        endedLatched = false;
         current = s;
         // Switching sessions: drop any cached state from the previous SID.
         // Otherwise the side panel keeps showing dead threads from the old
@@ -286,14 +343,17 @@ public final class ReviewSessionClient {
         sseTask = exec.submit(() -> {
             try {
                 SseClient.connect(uri, Duration.ofSeconds(2), this::handleSseEvent, t -> {
-                    setState(State.DISCONNECTED);
+                    // Don't churn DISCONNECTED/reconnect for a frozen session,
+                    // and don't let an SSE drop override PAUSED/ENDED.
+                    if (endedLatched) return;
+                    if (state == State.ACTIVE) setState(State.DISCONNECTED);
                     exec.schedule(() -> openSse(sid), 2, TimeUnit.SECONDS);
                 }).join();
             } catch (Exception e) {
-                setState(State.DISCONNECTED);
+                if (!endedLatched && state == State.ACTIVE) setState(State.DISCONNECTED);
             }
         });
-        setState(State.ACTIVE);
+        if (!endedLatched) setState(State.ACTIVE);
     }
 
     private void handleSseEvent(SseClient.Event e) {

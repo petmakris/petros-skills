@@ -190,6 +190,8 @@ public final class SynthesisPopup {
         JButton askBtn = makeAccentButton("Ask");
         askBtn.setMnemonic(KeyEvent.VK_A);
         Runnable submit = () -> {
+            ReviewSessionClient.State st = client.state();
+            if (st == ReviewSessionClient.State.PAUSED || st == ReviewSessionClient.State.ENDED) return;
             String q = input.getText().trim();
             if (q.isEmpty()) return;
             input.setText("");
@@ -212,6 +214,25 @@ public final class SynthesisPopup {
             }));
         };
         askBtn.addActionListener(e -> submit.run());
+
+        // Liveness gating: a PAUSED/ENDED session has no Claude to answer, so
+        // disable the input + Ask button and drop any stale spinner. The popup
+        // is reachable straight from the gutter, bypassing the side panel, so
+        // it must enforce this itself rather than rely on the panel.
+        java.util.function.Consumer<ReviewSessionClient.State> applyLiveness = st -> {
+            boolean frozen = st == ReviewSessionClient.State.PAUSED
+                    || st == ReviewSessionClient.State.ENDED;
+            input.setEnabled(!frozen);
+            askBtn.setEnabled(!frozen);
+            if (frozen) {
+                if (thinking.get()) { thinking.set(false); renderCurrent.run(); }
+                input.setToolTipText(st == ReviewSessionClient.State.ENDED
+                        ? "Session ended — read-only" : "Paused — reconnecting…");
+            } else {
+                input.setToolTipText(null);
+            }
+        };
+        applyLiveness.accept(client.state());
 
         // Cmd/Ctrl+Enter submits.
         input.getInputMap(JComponent.WHEN_FOCUSED).put(
@@ -245,6 +266,10 @@ public final class SynthesisPopup {
         // listener outlives the popup. For long-running IDE sessions with many
         // popups this is a leak; acceptable for v1, fix in a follow-up.
         ReviewSessionClient.Listener listener = new ReviewSessionClient.Listener() {
+            @Override
+            public void onStateChanged(ReviewSessionClient.State st) {
+                SwingUtilities.invokeLater(() -> applyLiveness.accept(st));
+            }
             @Override
             public void onThreadChanged(String changedAnchor, String synthesis, int version) {
                 if (!changedAnchor.equals(anchor)) return;
