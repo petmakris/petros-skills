@@ -50,4 +50,35 @@ class GutterAnchorIndexTest {
         assertTrue(idx.containsKey(1));
         assertFalse(idx.get(1).stale());
     }
+
+    @Test void nonStaleBeatsStaleOnSameLine() {
+        // Thread A: recorded@1, text found at line 3 → MOVED (non-stale) at display line 3
+        // Thread B: recorded@3, text not in document → STALE at display line 3
+        // Both collide at display line 3; non-stale (A) must win.
+        var lines = List.of("a", "b", "exact text here");
+        var cache = Map.of(
+            "file.java:R:1", new ThreadState("s", 1, "exact text here"),  // MOVED → display line 3
+            "file.java:R:3", new ThreadState("s", 1, "no such line text") // STALE → display line 3
+        );
+        var idx = GutterAnchorIndex.build(lines, cache, "file.java", "R", K);
+        assertEquals(1, idx.size(), "should be exactly one entry at display line 3");
+        assertTrue(idx.containsKey(3));
+        assertFalse(idx.get(3).stale(), "non-stale thread must beat the stale thread");
+    }
+
+    @Test void exactBeatsMovedOnSameLine() {
+        // Thread A: recorded@3, text matches line 3 → EXACT at display line 3
+        // Thread B: recorded@1, text also found at line 3 → MOVED at display line 3
+        // Both collide at display line 3; EXACT (A, ownerAnchor = file.java:R:3) must win.
+        var lines = List.of("a", "b", "exact text here");
+        var cache = Map.of(
+            "file.java:R:3", new ThreadState("s", 1, "exact text here"), // EXACT → line 3
+            "file.java:R:1", new ThreadState("s", 1, "exact text here")  // MOVED → line 3
+        );
+        var idx = GutterAnchorIndex.build(lines, cache, "file.java", "R", K);
+        assertEquals(1, idx.size(), "should be exactly one entry at display line 3");
+        assertTrue(idx.containsKey(3));
+        assertEquals("file.java:R:3", idx.get(3).ownerAnchor(),
+            "EXACT thread (recorded@3) must beat MOVED thread (recorded@1)");
+    }
 }

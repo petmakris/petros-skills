@@ -1,5 +1,6 @@
 package com.petros.ireview;
 
+import com.petros.ireview.AnchorResolver.Kind;
 import com.petros.ireview.ReviewSessionClient.ThreadState;
 
 import java.util.HashMap;
@@ -22,6 +23,8 @@ public final class GutterAnchorIndex {
                                                  Map<String, ThreadState> cache,
                                                  String label, String side, int k) {
         Map<Integer, LineAnchor> out = new HashMap<>();
+        // Parallel: candidate metadata needed for collision resolution.
+        Map<Integer, long[]> priority = new HashMap<>(); // display line → [kindRank, recordedLine]
         String prefix = label + ":" + side + ":";
         for (var e : cache.entrySet()) {
             String anchor = e.getKey();
@@ -33,10 +36,30 @@ public final class GutterAnchorIndex {
                 continue; // general/non-line anchor
             }
             var res = AnchorResolver.resolve(lines, recorded, e.getValue().anchorText(), k);
-            switch (res.kind()) {
-                case EXACT, MOVED -> out.put(res.line(), new LineAnchor(false, anchor));
-                case STALE -> out.put(recorded, new LineAnchor(true, anchor));
+            int displayLine;
+            Kind kind = res.kind();
+            boolean stale;
+            switch (kind) {
+                case EXACT, MOVED -> { displayLine = res.line(); stale = false; }
+                case STALE -> { displayLine = recorded; stale = true; }
+                default -> { continue; }
             }
+            // kindRank: EXACT=0, MOVED=1, STALE=2 — lower is higher priority
+            long kindRank = switch (kind) {
+                case EXACT -> 0L;
+                case MOVED -> 1L;
+                case STALE -> 2L;
+            };
+            long[] existing = priority.get(displayLine);
+            if (existing != null) {
+                long existingKindRank = existing[0];
+                long existingRecorded  = existing[1];
+                // Keep existing if it is strictly higher priority
+                if (existingKindRank < kindRank) continue;
+                if (existingKindRank == kindRank && existingRecorded <= recorded) continue;
+            }
+            out.put(displayLine, new LineAnchor(stale, anchor));
+            priority.put(displayLine, new long[]{kindRank, recorded});
         }
         return out;
     }
