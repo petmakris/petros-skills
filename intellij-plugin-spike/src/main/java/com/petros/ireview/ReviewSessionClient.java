@@ -43,7 +43,15 @@ public final class ReviewSessionClient {
         default void onStateChanged(State state) {}
     }
 
-    public enum State { DORMANT, CONNECTING, ACTIVE, DISCONNECTED }
+    public enum State { DORMANT, CONNECTING, ACTIVE, DISCONNECTED, STALE }
+
+    /**
+     * How long the watcher heartbeat may age before we treat the Claude
+     * session as gone. The watcher rewrites it every ~1s (even while blocked
+     * on an ack), so anything past this is dead, not slow. Mirrors the
+     * annotate web client's WATCHER_DEAD_AFTER_S.
+     */
+    private static final Duration STALE_AFTER = Duration.ofSeconds(15);
 
     private final String baseUrl;
     private final String projectCwd;
@@ -82,6 +90,8 @@ public final class ReviewSessionClient {
 
     public Optional<SessionInfo> currentSession() { return Optional.ofNullable(current); }
 
+    public State state() { return state; }
+
     public Optional<ThreadState> threadFor(String anchor) {
         return Optional.ofNullable(cache.get(anchor));
     }
@@ -96,6 +106,13 @@ public final class ReviewSessionClient {
     public CompletableFuture<Void> postComment(String anchor, String text) {
         SessionInfo s = current;
         if (s == null) return CompletableFuture.failedFuture(new IllegalStateException("no session"));
+        // The Claude session is gone — the server would 202 the submit but no
+        // watcher will ever process it. Reject so the user isn't fooled into
+        // thinking the question was asked.
+        if (state == State.STALE) {
+            return CompletableFuture.failedFuture(new IllegalStateException(
+                "Claude session is gone — re-run /interactive-review to resume"));
+        }
         markPending(anchor, true);
         String body = "{\"anchor\":" + jsonEscape(anchor)
                     + ",\"type\":\"comment\",\"text\":" + jsonEscape(text) + "}";
@@ -115,6 +132,27 @@ public final class ReviewSessionClient {
                 if (resp.statusCode() / 100 != 2) {
                     throw new RuntimeException("submit failed: HTTP " + resp.statusCode());
                 }
+            });
+    }
+
+    /**
+     * POST to /s/<sid>/api/cancel — ends the review session. The server marks
+     * it terminal; a live watcher picks up the marker and emits
+     * WEBCOMPANION_CANCELLED. On success we detach immediately rather than
+     * waiting for the next discovery poll to notice the session is gone.
+     */
+    public CompletableFuture<Void> cancelSession() {
+        SessionInfo s = current;
+        if (s == null) return CompletableFuture.failedFuture(new IllegalStateException("no session"));
+        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + s.sid() + "/api/cancel"))
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+        return http.sendAsync(req, HttpResponse.BodyHandlers.discarding())
+            .thenAccept(resp -> {
+                if (resp.statusCode() / 100 != 2) {
+                    throw new RuntimeException("cancel failed: HTTP " + resp.statusCode());
+                }
+                handleNoSession();
             });
     }
 
@@ -160,8 +198,44 @@ public final class ReviewSessionClient {
             if (current == null || !current.sid().equals(found.sid())) {
                 attach(found);
             }
+            checkWatcherHeartbeat(found.sid());
         } catch (Exception e) {
             handleNoSession();
+        }
+    }
+
+    /**
+     * Reachability of the HTTP server (it answers /api/sessions and keeps the
+     * SSE stream open) does NOT mean the Claude session is alive — the server
+     * is a long-lived process that outlives the session. The only liveness
+     * signal is the watcher heartbeat, which the session rewrites every ~1s.
+     * Poll it; if it has gone stale, flip to STALE so the UI stops claiming
+     * "live" and submissions are refused.
+     */
+    private void checkWatcherHeartbeat(String sid) {
+        long seenAt;
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/poll")).GET().build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return;
+            String v = jsonField(resp.body(), "watcher_seen_at");
+            seenAt = v.isEmpty() ? 0 : Long.parseLong(v);
+        } catch (Exception e) {
+            return; // transient — leave state as-is, next poll retries
+        }
+        // No heartbeat written yet (session just armed) → not dead, leave alone.
+        if (seenAt <= 0) return;
+        long ageMs = System.currentTimeMillis() - seenAt * 1000;
+        if (ageMs > STALE_AFTER.toMillis()) {
+            if (state != State.STALE) {
+                // Clear pending so spinners and the side-panel × recover —
+                // no ack is ever coming for these.
+                for (String a : new java.util.ArrayList<>(pending)) markPending(a, false);
+                setState(State.STALE);
+            }
+        } else if (state == State.STALE) {
+            // Watcher came back (user re-ran /interactive-review).
+            setState(State.ACTIVE);
         }
     }
 

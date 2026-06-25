@@ -22,6 +22,14 @@ public final class FakeReviewServer implements AutoCloseable {
     public final ConcurrentLinkedQueue<String> sseQueue = new ConcurrentLinkedQueue<>();
     public volatile String sessionsJson = "[]";
     public volatile String threadsJson = "{}";
+    /** Epoch seconds of the last watcher heartbeat returned by /poll; null → none yet (0). */
+    public volatile Long watcherSeenAt = null;
+    /** Count of POSTs that reached /api/submit. */
+    public final java.util.concurrent.atomic.AtomicInteger submitCount =
+        new java.util.concurrent.atomic.AtomicInteger();
+    /** Count of POSTs that reached /api/cancel. */
+    public final java.util.concurrent.atomic.AtomicInteger cancelCount =
+        new java.util.concurrent.atomic.AtomicInteger();
 
     public FakeReviewServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -50,6 +58,30 @@ public final class FakeReviewServer implements AutoCloseable {
             ex.getResponseHeaders().add("Content-Type", "application/json");
             ex.sendResponseHeaders(200, body.length);
             try (OutputStream os = ex.getResponseBody()) { os.write(body); }
+            return;
+        }
+        if (path.endsWith("/poll")) {
+            long seen = watcherSeenAt != null ? watcherSeenAt : 0;
+            byte[] body = ("{\"threads\":{},\"watcher_seen_at\":" + seen
+                + ",\"finished\":false}").getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream os = ex.getResponseBody()) { os.write(body); }
+            return;
+        }
+        if (path.endsWith("/api/submit")) {
+            submitCount.incrementAndGet();
+            ex.sendResponseHeaders(202, -1);
+            ex.close();
+            return;
+        }
+        if (path.endsWith("/api/cancel")) {
+            cancelCount.incrementAndGet();
+            // A cancelled session goes terminal — the real server drops it
+            // from /api/sessions, so mirror that here.
+            sessionsJson = "[]";
+            ex.sendResponseHeaders(200, -1);
+            ex.close();
             return;
         }
         if (path.endsWith("/stream")) {

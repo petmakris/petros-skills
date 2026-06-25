@@ -58,9 +58,11 @@ public final class AnnotationsPanel {
     private final DefaultListModel<AnnotationEntry> model = new DefaultListModel<>();
     private final JBList<AnnotationEntry> list = new JBList<>(model);
     private final JLabel titleLabel = new JLabel("Review · idle");
+    private final JLabel footer = new JLabel("● live", JLabel.LEFT);
     private final JLabel countLabel = new JLabel();
     private final JBTextField searchField = new JBTextField();
     private final JButton openDiffButton = new JButton("Open PR diff in IDE", AllIcons.Actions.Diff);
+    private final JButton endReviewButton = new JButton(AllIcons.Actions.Cancel);
     private final Map<String, Integer> seenVersions = new HashMap<>();
     private final JPanel root;
     /** Index of the row the mouse is currently over, or -1. Drives × visibility. */
@@ -154,9 +156,13 @@ public final class AnnotationsPanel {
         openDiffButton.setToolTipText("Diff every changed file against the PR base with the working tree "
             + "on the right — the only diff shape the ask-+ gutter icon attaches to");
         openDiffButton.addActionListener(e -> openPrDiff());
-        JPanel openRow = new JPanel(new BorderLayout());
+        endReviewButton.setToolTipText("End this review session — stops the watcher and "
+            + "clears it from the IDE. Cannot be undone.");
+        endReviewButton.addActionListener(e -> endReview());
+        JPanel openRow = new JPanel(new BorderLayout(6, 0));
         openRow.setBorder(JBUI.Borders.empty(0, 8, 4, 8));
         openRow.add(openDiffButton, BorderLayout.CENTER);
+        openRow.add(endReviewButton, BorderLayout.EAST);
 
         JPanel topStack = new JPanel(new BorderLayout());
         topStack.add(header, BorderLayout.NORTH);
@@ -167,9 +173,7 @@ public final class AnnotationsPanel {
         headerWrap.add(searchField, BorderLayout.SOUTH);
         headerWrap.setBorder(JBUI.Borders.emptyBottom(4));
 
-        JLabel footer = new JLabel("● live", JLabel.LEFT);
         footer.setFont(footer.getFont().deriveFont(10f));
-        footer.setForeground(new JBColor(new Color(0xb0, 0x90, 0x10), new Color(0xf1, 0xc4, 0x0f)));
         footer.setBorder(JBUI.Borders.empty(4, 8));
 
         root = new JPanel(new BorderLayout());
@@ -209,15 +213,58 @@ public final class AnnotationsPanel {
         return root;
     }
 
+    private static final JBColor LIVE_COLOR =
+        new JBColor(new Color(0xb0, 0x90, 0x10), new Color(0xf1, 0xc4, 0x0f));
+    private static final JBColor GONE_COLOR =
+        new JBColor(new Color(0xc0, 0x32, 0x21), new Color(0xf8, 0x73, 0x71));
+
     private void refreshTitle() {
         titleLabel.setText(client.currentSession()
             .map(s -> "Review · " + truncate(s.prRef(), 28))
             .orElse("Review · idle"));
         openDiffButton.setEnabled(client.currentSession().isPresent());
+        endReviewButton.setEnabled(client.currentSession().isPresent());
+        // The footer must tell the truth about the Claude session, not just
+        // about server reachability — a stale watcher means "session gone".
+        if (client.state() == ReviewSessionClient.State.STALE) {
+            footer.setText("● session gone — re-run /interactive-review");
+            footer.setForeground(GONE_COLOR);
+        } else {
+            footer.setText("● live");
+            footer.setForeground(LIVE_COLOR);
+        }
     }
 
     private void openPrDiff() {
         client.currentSession().ifPresent(s -> PrDiffOpener.open(project, s));
+    }
+
+    private void endReview() {
+        var session = client.currentSession();
+        if (session.isEmpty()) return;
+        int choice = com.intellij.openapi.ui.Messages.showYesNoDialog(
+            project,
+            "End the review of " + session.get().prRef()
+                + "? This stops the watcher and removes the session from the IDE. "
+                + "It cannot be undone.",
+            "End Interactive Review",
+            "End review", "Keep it",
+            com.intellij.openapi.ui.Messages.getWarningIcon());
+        if (choice != com.intellij.openapi.ui.Messages.YES) return;
+        endReviewButton.setEnabled(false);
+        client.cancelSession().whenComplete((v, t) -> SwingUtilities.invokeLater(() -> {
+            if (t != null) {
+                refreshTitle(); // re-enable the button if it's still attached
+                com.intellij.notification.Notifications.Bus.notify(
+                    new com.intellij.notification.Notification(
+                        "Interactive Review",
+                        "Couldn't end review",
+                        t.getMessage() == null ? t.toString() : t.getMessage(),
+                        com.intellij.notification.NotificationType.ERROR),
+                    project);
+            }
+            // Success: onDetached fires refreshTitle()+rebuild() via the listener.
+        }));
     }
 
     private void rebuild() {
