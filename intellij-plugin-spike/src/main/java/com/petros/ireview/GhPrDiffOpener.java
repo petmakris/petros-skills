@@ -15,8 +15,7 @@ import javax.swing.SwingUtilities;
 
 /**
  * Drive the REAL JetBrains GitHub PR diff (the "Diff for Pull Request #N" tab,
- * with inline GH review comments) — replacing the isolated {@link PrDiffOpener}
- * reconstruction.
+ * with inline GH review comments) — instead of an isolated, locally-rebuilt diff.
  *
  * The seam is the bundled GitHub plugin's {@link GHPRProjectViewModel} project
  * service → its connected VM's {@code openPullRequestDiff}. Once that diff is
