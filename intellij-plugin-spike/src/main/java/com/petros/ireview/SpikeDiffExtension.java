@@ -100,6 +100,13 @@ public final class SpikeDiffExtension extends DiffExtension {
     public void onViewerCreated(@NotNull FrameDiffTool.DiffViewer viewer,
                                 @NotNull DiffContext context,
                                 @NotNull DiffRequest request) {
+        // The GitHub combined PR diff renders each file as a SimpleDiffViewer (a
+        // TwosideTextDiffViewer), so we attach to those; empty placeholder blocks
+        // come through as ErrorDiffTool$MyViewer and are skipped here.
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("onViewerCreated viewer=" + viewer.getClass().getName()
+                + " twoSide=" + (viewer instanceof TwosideTextDiffViewer));
+        }
         if (!(viewer instanceof TwosideTextDiffViewer twoSide)) return;
         Project project = context.getProject();
         if (project == null) return;

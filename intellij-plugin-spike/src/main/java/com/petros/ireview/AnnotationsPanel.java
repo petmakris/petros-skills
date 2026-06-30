@@ -519,36 +519,58 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         seenVersions.put(entry.anchor(), entry.version());
         rebuild();
 
-        // Preferred: navigate to the original PR diff viewer where this
-        // annotation was created. That keeps the user inside the review
-        // context (before/after panes) instead of dropping them into the
-        // working copy.
+        // Preferred: the file's diff viewer is already open and registered with
+        // SpikeDiffExtension — scroll into it and show the ask-Claude popup,
+        // keeping the user in PR review context.
         com.intellij.openapi.editor.ex.EditorEx diffEditor =
             SpikeDiffExtension.editorFor(path + ":" + side);
         if (diffEditor != null) {
-            // Scroll the diff editor to the line and focus its window.
-            diffEditor.getCaretModel().moveToLogicalPosition(
-                new com.intellij.openapi.editor.LogicalPosition(line0, 0));
-            diffEditor.getScrollingModel().scrollToCaret(
-                com.intellij.openapi.editor.ScrollType.CENTER);
-            java.awt.Window window = SwingUtilities.getWindowAncestor(
-                diffEditor.getContentComponent());
-            if (window != null) {
-                window.toFront();
-                window.requestFocus();
-            }
-            diffEditor.getContentComponent().requestFocusInWindow();
-            SynthesisPopup.show(project, diffEditor, entry.anchor(), line0);
+            focusAndShowPopup(diffEditor, entry.anchor(), line0);
             return;
         }
 
-        // Fallback: no diff viewer is open for this file. Instead of dropping the
-        // user into the working-copy source (no PR context), drive the real
-        // GitHub PR diff to this file + line. When that diff renders, its child
-        // viewer registers with SpikeDiffExtension, so a second click takes the
-        // fast path above and shows the ask-Claude popup in PR context.
-        client.currentSession().ifPresent(s ->
-            GhPrDiffOpener.openAt(project, s, path, side, line0));
+        // Fallback: no diff viewer open for this file. Drive the real GitHub PR
+        // diff to this file + line, then show the popup once its viewer renders
+        // and registers with SpikeDiffExtension (one click does both).
+        client.currentSession().ifPresent(s -> {
+            GhPrDiffOpener.openAt(project, s, path, side, line0);
+            showPopupWhenDiffReady(entry.anchor(), path, side, line0);
+        });
+    }
+
+    /** Scroll the diff editor to {@code line0}, focus its window, and show the popup. */
+    private void focusAndShowPopup(com.intellij.openapi.editor.ex.EditorEx diffEditor,
+                                   String anchor, int line0) {
+        diffEditor.getCaretModel().moveToLogicalPosition(
+            new com.intellij.openapi.editor.LogicalPosition(line0, 0));
+        diffEditor.getScrollingModel().scrollToCaret(
+            com.intellij.openapi.editor.ScrollType.CENTER);
+        java.awt.Window window = SwingUtilities.getWindowAncestor(diffEditor.getContentComponent());
+        if (window != null) {
+            window.toFront();
+            window.requestFocus();
+        }
+        diffEditor.getContentComponent().requestFocusInWindow();
+        SynthesisPopup.show(project, diffEditor, anchor, line0);
+    }
+
+    /** Poll for the GH diff's viewer to register (it renders asynchronously) and,
+     *  once it's on screen, show the popup. Gives up after ~5s. */
+    private void showPopupWhenDiffReady(String anchor, String path, String side, int line0) {
+        Timer poll = new Timer(300, null);
+        final int[] tries = {0};
+        poll.addActionListener(e -> {
+            tries[0]++;
+            var ed = SpikeDiffExtension.editorFor(path + ":" + side);
+            if (ed != null && ed.getComponent().isShowing()) {
+                poll.stop();
+                focusAndShowPopup(ed, anchor, line0);
+            } else if (tries[0] >= 16) {
+                poll.stop();  // GH diff didn't register a viewer for this file — give up quietly
+            }
+        });
+        poll.setRepeats(true);
+        poll.start();
     }
 
     private static String truncate(String s, int max) {
