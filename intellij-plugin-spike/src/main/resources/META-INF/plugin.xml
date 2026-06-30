@@ -12,6 +12,9 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
+    <!-- Bundled GitHub plugin: lets us open the real PR diff view via
+         GHPRProjectViewModel.openPullRequestDiff (with inline PR comments). -->
+    <depends>org.jetbrains.plugins.github</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <diff.DiffExtension implementation="com.petros.ireview.SpikeDiffExtension"/>

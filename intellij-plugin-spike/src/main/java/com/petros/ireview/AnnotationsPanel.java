@@ -184,12 +184,19 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         headerWrap.setBorder(JBUI.Borders.emptyBottom(4));
 
         footer.setFont(footer.getFont().deriveFont(10f));
-        footer.setBorder(JBUI.Borders.empty(4, 8));
+        JLabel buildLabel = new JLabel(BuildInfo.label(), JLabel.RIGHT);
+        buildLabel.setFont(buildLabel.getFont().deriveFont(10f));
+        buildLabel.setForeground(JBColor.GRAY);
+        buildLabel.setToolTipText(BuildInfo.tooltip());
+        JPanel footerRow = new JPanel(new BorderLayout());
+        footerRow.setBorder(JBUI.Borders.empty(4, 8));
+        footerRow.add(footer, BorderLayout.WEST);
+        footerRow.add(buildLabel, BorderLayout.EAST);
 
         root = new JPanel(new BorderLayout());
         root.add(headerWrap, BorderLayout.NORTH);
         root.add(new JBScrollPane(list), BorderLayout.CENTER);
-        root.add(footer, BorderLayout.SOUTH);
+        root.add(footerRow, BorderLayout.SOUTH);
 
         listener = new ReviewSessionClient.Listener() {
             @Override public void onStateChanged(ReviewSessionClient.State state) {
@@ -274,7 +281,7 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
     }
 
     private void openPrDiff() {
-        client.currentSession().ifPresent(s -> PrDiffOpener.open(project, s));
+        client.currentSession().ifPresent(s -> GhPrDiffOpener.open(project, s));
     }
 
     private void endReview() {
@@ -539,41 +546,13 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
             return;
         }
 
-        // Fallback: original diff isn't open anymore. Open the working-copy
-        // file at the line and warn the user that PR context is missing.
-        String base = project.getBasePath();
-        if (base == null) return;
-        VirtualFile vf = LocalFileSystem.getInstance().findFileByPath(base + "/" + path);
-        if (vf == null) {
-            com.intellij.notification.Notifications.Bus.notify(
-                new com.intellij.notification.Notification(
-                    "Interactive Review",
-                    "File not found",
-                    path,
-                    com.intellij.notification.NotificationType.WARNING),
-                project);
-            return;
-        }
-        com.intellij.notification.Notifications.Bus.notify(
-            new com.intellij.notification.Notification(
-                "Interactive Review",
-                "PR diff not open",
-                "Showing working copy of " + lastSegment(path) + " — reopen the PR diff to see the original review context.",
-                com.intellij.notification.NotificationType.INFORMATION),
-            project);
-        new OpenFileDescriptor(project, vf, line0, 0).navigate(true);
-        // navigate(true) dispatches the open synchronously, but the editor
-        // component isn't mounted in the window hierarchy by the time we
-        // return. JBPopup.showInBestPositionFor asserts the editor is
-        // showing on screen — calling it now throws. Defer to the next EDT
-        // tick so layout has happened, and re-check isShowing() to be safe.
-        SwingUtilities.invokeLater(() -> {
-            var editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
-            if (editor instanceof com.intellij.openapi.editor.ex.EditorEx ex
-                    && ex.getComponent().isShowing()) {
-                SynthesisPopup.show(project, ex, entry.anchor(), line0);
-            }
-        });
+        // Fallback: no diff viewer is open for this file. Instead of dropping the
+        // user into the working-copy source (no PR context), drive the real
+        // GitHub PR diff to this file + line. When that diff renders, its child
+        // viewer registers with SpikeDiffExtension, so a second click takes the
+        // fast path above and shows the ask-Claude popup in PR context.
+        client.currentSession().ifPresent(s ->
+            GhPrDiffOpener.openAt(project, s, path, side, line0));
     }
 
     private static String truncate(String s, int max) {

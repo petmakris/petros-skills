@@ -1,6 +1,24 @@
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("java")
+    // Matches the IDE's bundled Kotlin (2.3.10) so the compiler can read the
+    // platform's Kotlin metadata. A small Kotlin file (GhPrDiffDriver) drives the
+    // GitHub diff view models — their coroutine/value-class APIs aren't callable
+    // from Java.
+    id("org.jetbrains.kotlin.jvm") version "2.3.10"
     id("org.jetbrains.intellij.platform") version "2.16.0"
+}
+
+// Target JVM 21 bytecode for Kotlin: the JBR is 25 (loads 21 fine) and Kotlin
+// has no JVM 25 target. Java stays on its 25 toolchain; mixed class versions in
+// one jar load fine.
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_21
+    }
 }
 
 group = "com.petros"
@@ -45,6 +63,10 @@ dependencies {
             .orElse(defaultPath)
         local(idePath)
         bundledPlugin("com.intellij.java")
+        // Bundled JetBrains GitHub plugin — gives us the real PR-diff seam
+        // (GHPRProjectViewModel.openPullRequestDiff) so we can drive the
+        // GitHub diff view (with inline PR comments) instead of an isolated one.
+        bundledPlugin("org.jetbrains.plugins.github")
         // Java code instrumentation is enabled by default in plugin 2.2+.
     }
 }
@@ -75,3 +97,22 @@ tasks.test {
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
 }
+
+// Bake a per-build stamp into the jar so the running plugin can show exactly
+// which build is loaded. Unlike the plugin version (git commit count, which
+// only moves on a commit), this refreshes on EVERY build — the task is never
+// up-to-date — so a plain rebuild + IDE restart is visibly distinguishable.
+val generateBuildInfo = tasks.register("generateBuildInfo") {
+    val outDir = layout.buildDirectory.dir("generated/buildinfo")
+    val gitCount = buildNumber
+    outputs.dir(outDir)
+    outputs.upToDateWhen { false }
+    doLast {
+        val stamp = LocalDateTime.now()
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        val f = outDir.get().file("com/petros/ireview/build-info.properties").asFile
+        f.parentFile.mkdirs()
+        f.writeText("buildTime=$stamp\ngitCount=$gitCount\n")
+    }
+}
+sourceSets["main"].resources.srcDir(generateBuildInfo)
