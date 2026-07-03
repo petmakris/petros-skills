@@ -25,6 +25,7 @@ from skills._shared.web_companion.handlers import HandlersProtocol
 from skills._shared.web_companion.sessions import Registry, SID_RE
 from skills._shared.web_companion import uploads as upload_module
 from skills._shared.web_companion import static_serve
+from skills._shared.web_companion import cleanup
 
 SHARED_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -90,7 +91,8 @@ class _ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
-        static_dirs: list[Path], shutdown_after_seconds: int | None = None) -> int:
+        static_dirs: list[Path], shutdown_after_seconds: int | None = None,
+        prune_globs: tuple[str, ...] = ()) -> int:
     """Long-lived HTTP server entrypoint. Returns the process exit code."""
 
     if shutdown_after_seconds is None:
@@ -100,6 +102,20 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
     public_host = _resolve_public_host()
 
     state_root = Path(os.path.expanduser(f"~/.claude/{skill_name}"))
+
+    # Garbage-collect state left behind by past sessions before we rehydrate,
+    # so dormant rows never get re-registered. Best-effort: a sweep failure
+    # must never stop the server from starting.
+    try:
+        retention_days = int(os.environ.get("WEBCOMPANION_RETENTION_DAYS", "7"))
+        gc = cleanup.sweep_state(
+            state_root, retention_days * 86400, time.time(), extra_globs=prune_globs)
+        if any(gc.values()):
+            sys.stdout.write(json.dumps({"type": "cleanup", "skill": skill_name, **gc}) + "\n")
+            sys.stdout.flush()
+    except Exception:
+        pass
+
     registry = Registry(state_root=state_root)
     registry.rehydrate()
     if hasattr(handlers, "set_registry"):

@@ -548,6 +548,9 @@ def main() -> int:
         port_range=PORT_RANGE,
         handlers=Handlers(),
         static_dirs=[SHARED_STATIC_DIR, STATIC_DIR],
+        # Per-session statusline snapshots accumulate here too; GC them on the
+        # same retention window as everything else.
+        prune_globs=("statusline/*.json",),
     )
 
 
