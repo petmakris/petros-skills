@@ -59,5 +59,13 @@ except ValueError:
 srv.task_done("oauth")
 check(srv.task_get("oauth")["status"] == "done", "task_done marks the task done")
 
+# task_spawn: neutralize the real launcher (claude -> `true`) so nothing spawns;
+# exercises the tool + the real cd/exec shell path, then times out to null.
+os.environ["MESH_CLAUDE_BIN"] = "true"
+srv.task_add("spawnme", "Spawn me")
+sp = srv.task_spawn("spawnme", "/tmp", wait_secs=1)
+check(sp["session_id"] is None and sp["status"] == "in_progress",
+      "task_spawn returns in_progress + null session when no worker registers")
+
 print(f"PASS={P} FAIL={F}")
 sys.exit(1 if F else 0)

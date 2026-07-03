@@ -188,5 +188,26 @@ assert_eq "keeper" "$(sqlite3 "$V2DB" "SELECT label FROM sessions WHERE session_
 assert_eq "3" "$(sqlite3 "$V2DB" "SELECT value FROM mesh_meta WHERE key='schema_version';")" "migrate is idempotent"
 rm -f "$V2DB" "$V2DB-wal" "$V2DB-shm"
 
+# --- Task 14: task_spawn orchestration (launcher stubbed — no real `claude`) ---
+sqlite3 "$MESH_DB" "DELETE FROM tasks; DELETE FROM task_sessions; DELETE FROM commands;"
+mesh_task_add "spawned" "Spawned task" >/dev/null
+# stub the launcher: simulate a worker that registers under the given label at once
+mesh_spawn_launch() { mesh_register "/tmp/wt/$2" "main" "$2" $$ >/dev/null; }
+sp_out=$(mesh_task_spawn "spawned" "/tmp" "spawnee" 5)
+echo "$sp_out" | python3 -m json.tool >/dev/null 2>&1
+assert_eq "0" "$?" "task_spawn returns valid JSON"
+assert_eq "in_progress" "$(sqlite3 "$MESH_DB" "SELECT status FROM tasks WHERE slug='spawned';")" "task_spawn sets the task in_progress"
+sid_sp=$(sqlite3 "$MESH_DB" "SELECT session_id FROM sessions WHERE label='spawnee';")
+assert_eq "$sid_sp" "$(sqlite3 "$MESH_DB" "SELECT session_id FROM task_sessions WHERE task_slug='spawned';")" "task_spawn assigns the registered worker to the task"
+assert_eq "1" "$(sqlite3 "$MESH_DB" "SELECT count(*) FROM commands WHERE target='$sid_sp' AND kind='prompt';")" "task_spawn dispatches the task to the worker"
+assert_eq "$sid_sp" "$(echo "$sp_out" | python3 -c 'import sys,json;print(json.load(sys.stdin)["session_id"])')" "task_spawn returns the worker session_id"
+# worker never registers -> session_id null, task still in_progress, no crash
+mesh_task_add "orphan" "Orphan task" >/dev/null
+mesh_spawn_launch() { :; }   # launcher that starts nothing
+orphan_out=$(mesh_task_spawn "orphan" "/tmp" "ghost" 2)
+assert_eq "None" "$(echo "$orphan_out" | python3 -c 'import sys,json;print(json.load(sys.stdin)["session_id"])')" "task_spawn reports null session when the worker never registers"
+assert_eq "in_progress" "$(sqlite3 "$MESH_DB" "SELECT status FROM tasks WHERE slug='orphan';")" "task_spawn still marks the task in_progress when unregistered"
+assert_eq "1" "$(mesh_task_spawn "nope" "/tmp" 2>/dev/null; [ $? -ne 0 ] && echo 1 || echo 0)" "task_spawn rejects an unknown task"
+
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

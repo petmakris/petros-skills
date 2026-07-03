@@ -146,6 +146,16 @@ def task_done(slug: str) -> dict:
     return {"slug": slug, "status": "done"}
 
 
+@mcp.tool()
+def task_spawn(slug: str, cwd: str, label: str = "", wait_secs: int = 25) -> dict:
+    """Auto-spawn a background worker for a task: launch a `claude --bg` session
+    in cwd that joins the mesh under `label` (defaults to the task slug), set the
+    task in_progress, then — once the worker registers — assign it and dispatch
+    the task to it. Blocks up to wait_secs for the worker to appear; if it hasn't
+    yet, returns session_id null with a note (assign it later from the board)."""
+    return json.loads(_mesh("mesh_task_spawn", slug, cwd, label or slug, str(wait_secs)))
+
+
 if __name__ == "__main__":
     # Ensure the store exists / is migrated to the current schema. Idempotent
     # and cheap, so every session that spawns this server is self-sufficient —

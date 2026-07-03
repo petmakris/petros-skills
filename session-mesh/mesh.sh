@@ -328,3 +328,49 @@ mesh_task_set_status() {  # slug status
 }
 
 mesh_task_done() { mesh_task_set_status "$1" done; }  # slug
+
+# ---------------------------------------------------------------------------
+# Phase 2: auto-spawn. The master launches a background worker for a task
+# instead of hand-starting it. The actual launch is isolated in
+# mesh_spawn_launch so tests can stub it (no real `claude` in the suite) and so
+# the exact CLI can change in one place.
+# ---------------------------------------------------------------------------
+
+mesh_spawn_launch() {  # cwd label prompt  -> start a detached background worker
+  # Background Claude agent: cwd = the worktree, first prompt joins the mesh.
+  # --plugin-dir points at this plugin's root (mesh.sh's parent's parent) so the
+  # worker has the mesh skills + MCP server no matter which worktree it runs in.
+  # `claude --bg` detaches and returns on its own; the trailing & only avoids
+  # blocking on a first-run "starting background service" delay.
+  local plugin_root; plugin_root="$(dirname "$MESH_CODE_DIR")"
+  ( cd "$1" 2>/dev/null || exit 1
+    exec "${MESH_CLAUDE_BIN:-claude}" --bg --plugin-dir "$plugin_root" "$3" ) >/dev/null 2>&1 &
+}
+
+mesh_task_spawn() {  # slug cwd [label] [wait_secs]  -> JSON {task,label,cwd,session_id,status,command_id}
+  local slug="$1" cwd="$2" label="${3:-$1}" wait="${4:-25}" t0 sid="" waited=0
+  [ -n "$(_sql "SELECT 1 FROM tasks WHERE slug='$(_esc "$slug")';")" ] \
+    || { echo "task_spawn: no such task '$slug'" >&2; return 1; }
+  [ -d "$cwd" ] || { echo "task_spawn: cwd is not a directory: $cwd" >&2; return 1; }
+  t0="$(_now)"
+  mesh_spawn_launch "$cwd" "$label" "/mesh-join $label"
+  mesh_task_set_status "$slug" in_progress >/dev/null
+  # Wait (bounded) for the worker to register under this label. Match only
+  # registrations at/after t0 so a pre-existing same-label session isn't taken.
+  while [ "$waited" -lt "$wait" ]; do
+    sid="$(_sql "SELECT session_id FROM sessions WHERE label='$(_esc "$label")' AND last_seen>='$t0' ORDER BY started_at DESC LIMIT 1;")"
+    [ -n "$sid" ] && break
+    sleep 1; waited=$((waited+1))
+  done
+  if [ -z "$sid" ]; then
+    _sql "SELECT json_object('task','$(_esc "$slug")','label','$(_esc "$label")','cwd','$(_esc "$cwd")',
+            'session_id',null,'status','in_progress','command_id',null,
+            'note','launched; worker has not registered yet — assign it once it appears on the board');"
+    return 0
+  fi
+  mesh_task_assign "$slug" "$label" lead force >/dev/null
+  local cid; cid="$(mesh_dispatch "$label" prompt \
+    "You are the mesh worker for task '$slug'. Work on it autonomously and report status when done." "spawn" | head -1)"
+  _sql "SELECT json_object('task','$(_esc "$slug")','label','$(_esc "$label")','cwd','$(_esc "$cwd")',
+          'session_id','$(_esc "$sid")','status','in_progress','command_id',${cid:-null});"
+}
