@@ -131,6 +131,23 @@
   pre{margin:0;font-family:var(--mono);font-size:13.5px;line-height:1.7;background:var(--code-bg);
     border:1px solid var(--divider-soft);border-radius:8px;padding:14px 16px;overflow-x:auto;color:var(--ink)}
   pre .c{color:#6a737d} pre .g{color:var(--primary-dark);font-weight:500}
+  pre .s{color:#0b7285} pre .k{color:var(--amber-ink)}
+
+  /* ---------- Guided walkthrough (I/O pairs) ---------- */
+  .walk .flow{margin-bottom:28px}
+  .say{margin:2px 0 11px;color:var(--ink-2);font-size:14.5px}
+  .say .q{font-style:italic}
+  .say b{font-weight:500;color:var(--ink)}
+  .io-label{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.09em;
+    text-transform:uppercase;margin:0 0 5px}
+  .io-label.in{color:var(--primary-dark)}
+  .io-label.out{color:var(--success)}
+  .io-label.out::before{content:"↳ ";opacity:.7}
+  pre.ret{background:#f2faf4;border-color:#cfe9d5}
+  pre.ret .g{color:var(--success);font-weight:500}
+  .take{margin:11px 0 0;font-size:13.5px;color:var(--ink-3);display:flex;gap:8px}
+  .take::before{content:"";flex:none;width:3px;border-radius:3px;background:var(--primary-light);opacity:.7}
+  .take b{color:var(--ink-2);font-weight:500}
 
   /* ---------- Alerts / notes ---------- */
   .notes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -354,38 +371,101 @@
     </div>
   </section>
 
-  <!-- FLOWS -->
-  <section>
-    <div class="sec-head"><h2>Typical flows</h2></div>
+  <!-- GUIDED FIRST RUN -->
+  <section class="walk">
+    <div class="sec-head"><h2>A guided first run</h2><span class="hint">every call &amp; response below is <b style="color:var(--ink-2);font-weight:500">real</b> — captured from an actual session</span></div>
+
+    <div class="alert info" style="margin-bottom:24px">
+      <span class="ai" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg></span>
+      <div><h4>You drive with plain language</h4><p>The <span class="mono">task_*</span> / <span class="mono">mesh_*</span> tools are <b>MCP tools</b> — you don't type them, you <b>ask Claude</b> and it makes the call. Each step shows the request in words, the tool call it becomes, and the exact JSON that came back. Paths are trimmed to <span class="mono">…/mesh-worker-1</span> for width.</p></div>
+    </div>
 
     <div class="flow"><div class="num">1</div><div>
-      <h4>Stand up a worker</h4>
-      <pre><span class="c"># in a session opened in the task's worktree</span>
-<span class="g">/mesh-join</span>   <span class="c"># registers + listens. leave it be — free while idle.</span></pre>
+      <h4>Put a task on the backlog</h4>
+      <p class="say"><span class="q">“Add a task <b>spawn-1</b>: create a file PROOF.txt containing <b>mesh-spawn-ok</b>, then confirm it exists.”</span></p>
+      <div class="io-label in">the call</div>
+      <pre><span class="g">task_add</span>(slug=<span class="s">"spawn-1"</span>, title=<span class="s">"Auto-spawn live test"</span>,
+         description=<span class="s">"Create PROOF.txt containing mesh-spawn-ok, verify it exists."</span>)</pre>
+      <div class="io-label out" style="margin-top:14px">returns</div>
+      <pre class="ret">{ "slug": "spawn-1", "status": <span class="g">"todo"</span> }</pre>
+      <p class="take"><span><b>A task exists before any session does.</b> The backlog lives in the store, independent of workers.</span></p>
     </div></div>
 
     <div class="flow"><div class="num">2</div><div>
-      <h4>Drive a worker from the master</h4>
-      <pre><span class="g">/mesh-board</span>                             <span class="c"># see who's live</span>
-<span class="g">/mesh-dispatch</span> docs-rewrite shell "npm test"  <span class="c"># queue work</span>
-<span class="g">/mesh-await</span>                             <span class="c"># get woken when it finishes</span></pre>
+      <h4>Spawn a worker for it</h4>
+      <p class="say"><span class="q">“Spawn a background worker for <b>spawn-1</b> in that directory.”</span></p>
+      <div class="io-label in">the call</div>
+      <pre><span class="g">task_spawn</span>(slug=<span class="s">"spawn-1"</span>, cwd=<span class="s">"…/mesh-worker-1"</span>)</pre>
+      <div class="io-label out" style="margin-top:14px">returns</div>
+      <pre class="ret">{ "task": "spawn-1", "label": "spawn-1",
+  "session_id": <span class="g">"5EBEFA89-7173-…"</span>,
+  "status": <span class="g">"in_progress"</span>, "command_id": 1 }</pre>
+      <p class="take"><span>One call did <b>four</b> things: launched a real <span class="mono">claude&nbsp;--bg</span> session, joined it to the mesh, assigned it the task, and dispatched the task as command <span class="mono">#1</span>. No hand-starting.</span></p>
     </div></div>
 
     <div class="flow"><div class="num">3</div><div>
-      <h4>Broadcast to everyone</h4>
-      <pre><span class="g">/mesh-dispatch</span> * prompt "pull main, rebase your branch, report conflicts"</pre>
+      <h4>Watch the board</h4>
+      <p class="say"><span class="q">“What's running?”</span></p>
+      <div class="io-label in">the call</div>
+      <pre><span class="g">mesh_board</span>()</pre>
+      <div class="io-label out" style="margin-top:14px">returns <span class="c">(trimmed)</span></div>
+      <pre class="ret">"sessions": [{ "label": "spawn-1", "liveness": <span class="g">"alive"</span>,
+               "status": "idle", "cwd": "…/mesh-worker-1" }],
+"commands": [{ "id": 1, "kind": "prompt", "state": <span class="k">"pending"</span> }],
+"tasks":    [{ "slug": "spawn-1", "status": <span class="g">"in_progress"</span>,
+               "sessions": ["spawn-1"] }]</pre>
+      <p class="take"><span>One JSON view of all three planes: <b>who's live</b>, <b>what's queued</b>, and the <b>backlog</b>. The worker is booting, so command #1 is still <span class="mono">pending</span>.</span></p>
     </div></div>
 
     <div class="flow"><div class="num">4</div><div>
-      <h4>Panic button</h4>
-      <pre><span class="g">/mesh-pause</span>    <span class="c"># everything holds</span>
-<span class="g">/mesh-resume</span>   <span class="c"># ...back to work</span></pre>
+      <h4>Collect the result</h4>
+      <p class="say">The worker claims #1, does the work, and reports back. <span class="q">“Any results in?”</span></p>
+      <div class="io-label in">the call</div>
+      <pre><span class="g">mesh_collect</span>()</pre>
+      <div class="io-label out" style="margin-top:14px">returns</div>
+      <pre class="ret">{ "id": 1, "label": "spawn-1", "exit_state": <span class="g">"ok"</span>,
+  "output": "Created PROOF.txt (mesh-spawn-ok) at
+             …/mesh-worker-1/PROOF.txt; verified it exists." }</pre>
+      <p class="take"><span>The worker's summary comes back as the command's <b>output</b>. Completing the dispatched task auto-advances <span class="mono">spawn-1</span> → <span class="mono">done</span>. Prefer <span class="mono">/mesh-await</span> to be <b>woken</b> the instant it lands — zero tokens while waiting.</span></p>
     </div></div>
 
     <div class="flow"><div class="num">5</div><div>
-      <h4>Retire a worker</h4>
-      <pre><span class="g">/mesh-dispatch</span> reporting-openapi control stop</pre>
+      <h4>Ask a live worker anything</h4>
+      <p class="say"><span class="q">“Ask spawn-1 for its status and whether PROOF.txt still exists.”</span></p>
+      <div class="io-label in">the call</div>
+      <pre><span class="g">mesh_ask</span>(target=<span class="s">"spawn-1"</span>, question=<span class="s">"status? does PROOF.txt still exist?"</span>)
+<span class="c">→ { "command_ids": [2] }   then  mesh_collect()</span></pre>
+      <div class="io-label out" style="margin-top:14px">returns</div>
+      <pre class="ret">{ "id": 2, "label": "spawn-1", "exit_state": <span class="g">"ok"</span>,
+  "output": "Idle and armed after completing spawn-1;
+             PROOF.txt still exists with contents 'mesh-spawn-ok'." }</pre>
+      <p class="take"><span>An <b>ask</b> is just a prompt whose answer returns as output — status, a decision, next move — without handing over a task.</span></p>
     </div></div>
+
+    <div class="flow"><div class="num">6</div><div>
+      <h4>Pause &amp; resume the fleet</h4>
+      <p class="say"><span class="q">“Hold everything.”</span> A dispatched command now <b>waits</b> instead of running.</p>
+      <div class="io-label in">the calls</div>
+      <pre><span class="g">mesh_pause</span>()   <span class="c">→ { "result": "paused" }</span>
+<span class="c"># dispatch a command now — it sits at</span> <span class="k">"pending"</span> <span class="c">and does not run</span>
+<span class="g">mesh_resume</span>()  <span class="c">→ { "result": "resumed" }   # the held command is claimed &amp; runs</span></pre>
+      <p class="take"><span><b>The global pause is the only stop.</b> Workers keep heartbeating (stay green) but claim nothing until you resume.</span></p>
+    </div></div>
+
+    <div class="flow"><div class="num">7</div><div>
+      <h4>Crash recovery — automatic</h4>
+      <p class="say">A worker dies while holding a <span class="mono">running</span> command. Nothing is lost.</p>
+      <div class="io-label in">what happens</div>
+      <pre><span class="c"># the reaper runs automatically inside</span> <span class="g">mesh_board</span> <span class="c">and</span> <span class="g">mesh_dispatch</span>
+<span class="c"># a running command whose worker's pid is gone is returned to the queue:</span>
+   command 4:  <span class="k">running</span>  →  <span class="g">pending</span>   <span class="c"># re-claimable by another worker</span></pre>
+      <p class="take"><span>No daemon, no manual step. A killed worker's in-flight work is requeued the next time you look at the board or dispatch.</span></p>
+    </div></div>
+
+    <div class="alert info" style="margin-top:8px">
+      <span class="ai" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg></span>
+      <div><h4>Hand-driven equivalents</h4><p>Prefer to type? The same moves exist as slash skills for hand-started workers: <span class="mono">/mesh-join</span> in a worker, then <span class="mono">/mesh-board</span> · <span class="mono">/mesh-dispatch &lt;label&gt; shell "npm test"</span> · <span class="mono">/mesh-await</span> · <span class="mono">/mesh-dispatch * prompt "…"</span> (broadcast) · <span class="mono">/mesh-dispatch &lt;label&gt; control stop</span> (retire) from the master.</p></div>
+    </div>
   </section>
 
   <!-- NOTES -->
