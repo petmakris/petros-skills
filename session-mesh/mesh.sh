@@ -15,6 +15,11 @@ unset _mesh_src
 : "${MESH_LEASE_SECS:=10800}"   # 3h: a still-alive worker's 'running' command older than this is presumed abandoned (dead workers recover instantly regardless)
 
 _sql() { sqlite3 "$MESH_DB" "$@"; }
+# Emit the result of a query that already builds a JSON value (via json_object /
+# json_group_array). Prints the raw JSON; falls back to the given empty literal
+# (default '[]') when the query yields NULL/empty. The MCP server returns this
+# verbatim, so all JSON shaping stays here — one source of truth, no Python SQL.
+_sqlj() { local out; out="$(_sql "$1")"; printf '%s' "${out:-${2:-[]}}"; }
 _now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _esc() { printf "%s" "${1:-}" | sed "s/'/''/g"; }   # escape single quotes for SQL literals
 
@@ -34,6 +39,14 @@ mesh_migrate() {  # idempotent schema upgrades; safe to run repeatedly
     _sql "ALTER TABLE sessions RENAME COLUMN ticket TO label;"
   fi
   _sql "UPDATE mesh_meta SET value='2' WHERE key='schema_version' AND value < '2';"
+  # v2 -> v3: add the Layer-2 task-manager tables (additive; safe repeatedly).
+  _sql "CREATE TABLE IF NOT EXISTS tasks (
+          slug TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
+          status TEXT NOT NULL DEFAULT 'todo', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS task_sessions (
+          task_slug TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT DEFAULT 'lead',
+          assigned_at TEXT NOT NULL, UNIQUE (task_slug, session_id));"
+  _sql "UPDATE mesh_meta SET value='3' WHERE key='schema_version' AND value < '3';"
 }
 
 mesh_is_paused() {
@@ -208,3 +221,110 @@ SQL
 
 mesh_cmd_state()  { _sql "SELECT state FROM commands WHERE id=$1;"; }
 mesh_cmd_output() { _sql "SELECT COALESCE(output,'') FROM commands WHERE id=$1;"; }
+
+# ---------------------------------------------------------------------------
+# JSON emitters for the MCP server (Layer 1 reads). Pure reads → no race; all
+# shaping via SQLite's json_object/json_group_array so the server stays a thin
+# adapter that returns these strings verbatim.
+# ---------------------------------------------------------------------------
+
+mesh_board_json() {  # {"sessions":[...],"commands":[...]}
+  mesh_reap >/dev/null 2>&1
+  local s c
+  s="$(_sqlj "SELECT json_group_array(json_object(
+          'label',label,'session_id',session_id,'pid',pid,
+          'liveness',CASE WHEN last_seen >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-90 seconds') THEN 'alive' ELSE 'stale' END,
+          'status',status,'current_task',COALESCE(current_task,''),'cwd',cwd))
+        FROM sessions;")"
+  c="$(_sqlj "SELECT json_group_array(json_object(
+          'id',id,'target',COALESCE((SELECT label FROM sessions s WHERE s.session_id=c.target),c.target),
+          'kind',kind,'state',state))
+        FROM (SELECT * FROM commands ORDER BY id DESC LIMIT 20) c;")"
+  printf '{"sessions":%s,"commands":%s}' "$s" "$c"
+}
+
+mesh_collect_json() {  # [ {id,label,exit_state,output}... ] for unacked-done commands, then ack them
+  local rows ids
+  rows="$(_sqlj "SELECT json_group_array(json_object(
+            'id',c.id,'label',COALESCE((SELECT label FROM sessions s WHERE s.session_id=c.target),c.target),
+            'exit_state',COALESCE(c.exit_state,''),'output',COALESCE(c.output,'')))
+          FROM (SELECT * FROM commands WHERE state='done' AND ack_at IS NULL ORDER BY id) c;")"
+  ids="$(_sql "SELECT group_concat(id) FROM commands WHERE state='done' AND ack_at IS NULL;")"
+  [ -n "$ids" ] && _sql "UPDATE commands SET ack_at='$(_now)' WHERE id IN ($ids);"
+  printf '%s' "$rows"
+}
+
+# ---------------------------------------------------------------------------
+# Layer 2: task manager. Tasks live in the store, independent of sessions; a
+# task is serviced by 0..N sessions via task_sessions. Mutations return an id /
+# status; reads emit JSON. Layer 1 never learns what a task is.
+# ---------------------------------------------------------------------------
+
+_mesh_task_json_select() {  # shared SELECT that shapes one-or-many tasks with their sessions; caller appends WHERE/;
+  cat <<'SQL'
+SELECT json_group_array(json_object(
+  'slug',t.slug,'title',t.title,'description',COALESCE(t.description,''),'status',t.status,
+  'created_at',t.created_at,'updated_at',t.updated_at,
+  'sessions', json(COALESCE((
+     SELECT json_group_array(json_object('session_id',ts.session_id,'label',s.label,'role',ts.role))
+     FROM task_sessions ts LEFT JOIN sessions s ON s.session_id=ts.session_id
+     WHERE ts.task_slug=t.slug),'[]'))
+)) FROM tasks t
+SQL
+}
+
+mesh_task_add() {  # slug title [description]  -> prints slug
+  local slug="$1" title="$2" desc="${3:-}" now; now="$(_now)"
+  { [ -z "$slug" ] || [ -z "$title" ]; } && { echo "task_add: slug and title required" >&2; return 1; }
+  if [ -n "$(_sql "SELECT 1 FROM tasks WHERE slug='$(_esc "$slug")';")" ]; then
+    echo "task_add: slug '$slug' already exists" >&2; return 1
+  fi
+  _sql "INSERT INTO tasks(slug,title,description,status,created_at,updated_at)
+        VALUES ('$(_esc "$slug")','$(_esc "$title")','$(_esc "$desc")','todo','$now','$now');" \
+    || { echo "task_add: insert failed" >&2; return 1; }
+  printf '%s' "$slug"
+}
+
+mesh_task_list() {  # [status]  -> JSON array of tasks (with sessions)
+  local st="${1:-}" where=""   # NB: not 'status' — that name is read-only in zsh
+  [ -n "$st" ] && where="WHERE t.status='$(_esc "$st")'"
+  _sqlj "$(_mesh_task_json_select) $where ORDER BY t.created_at;"
+}
+
+mesh_task_get() {  # slug  -> JSON array (0 or 1 task)
+  _sqlj "$(_mesh_task_json_select) WHERE t.slug='$(_esc "$1")';"
+}
+
+mesh_task_assign() {  # slug target [role] [force]  -> prints resolved session_id
+  local slug="$1" target="$2" role="${3:-lead}" force="${4:-}" sid other
+  sid="$(_mesh_resolve_targets "$target" | head -1)"
+  [ -n "$(_sql "SELECT 1 FROM sessions WHERE session_id='$(_esc "$sid")';")" ] \
+    || { echo "task_assign: no live session matches '$target'" >&2; return 1; }
+  [ -n "$(_sql "SELECT 1 FROM tasks WHERE slug='$(_esc "$slug")';")" ] \
+    || { echo "task_assign: no such task '$slug'" >&2; return 1; }
+  # one active task per session: reject if this session is already on another non-done task
+  other="$(_sql "SELECT ts.task_slug FROM task_sessions ts JOIN tasks t ON t.slug=ts.task_slug
+                 WHERE ts.session_id='$(_esc "$sid")' AND ts.task_slug<>'$(_esc "$slug")'
+                   AND t.status<>'done' LIMIT 1;")"
+  if [ -n "$other" ]; then
+    [ "$force" = "force" ] || { echo "task_assign: session already active on '$other' (pass force to reassign)" >&2; return 2; }
+    _sql "DELETE FROM task_sessions WHERE session_id='$(_esc "$sid")' AND task_slug='$(_esc "$other")';"
+  fi
+  _sql "INSERT OR REPLACE INTO task_sessions(task_slug,session_id,role,assigned_at)
+        VALUES ('$(_esc "$slug")','$(_esc "$sid")','$(_esc "$role")','$(_now)');"
+  printf '%s' "$sid"
+}
+
+mesh_task_unassign() {  # slug target
+  local sid; sid="$(_mesh_resolve_targets "$2" | head -1)"
+  _sql "DELETE FROM task_sessions WHERE task_slug='$(_esc "$1")' AND session_id='$(_esc "$sid")';"
+}
+
+mesh_task_set_status() {  # slug status
+  case "$2" in todo|in_progress|blocked|done) ;; *) echo "task_set_status: bad status '$2'" >&2; return 1;; esac
+  [ -n "$(_sql "SELECT 1 FROM tasks WHERE slug='$(_esc "$1")';")" ] \
+    || { echo "task_set_status: no such task '$1'" >&2; return 1; }
+  _sql "UPDATE tasks SET status='$(_esc "$2")', updated_at='$(_now)' WHERE slug='$(_esc "$1")';"
+}
+
+mesh_task_done() { mesh_task_set_status "$1" done; }  # slug

@@ -27,6 +27,25 @@ CREATE TABLE IF NOT EXISTS commands (
   ack_at     TEXT
 );
 
+-- Layer 2 (task manager): a backlog that lives in the store, independent of
+-- sessions. A task is serviced by 0..N sessions via the task_sessions link.
+CREATE TABLE IF NOT EXISTS tasks (
+  slug        TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  description TEXT,
+  status      TEXT NOT NULL DEFAULT 'todo',   -- todo | in_progress | blocked | done
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_sessions (
+  task_slug   TEXT NOT NULL,
+  session_id  TEXT NOT NULL,
+  role        TEXT DEFAULT 'lead',            -- lead | helper
+  assigned_at TEXT NOT NULL,
+  UNIQUE (task_slug, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS mesh_meta (key TEXT PRIMARY KEY, value TEXT);
 INSERT OR IGNORE INTO mesh_meta(key,value) VALUES ('paused','0');
-INSERT OR IGNORE INTO mesh_meta(key,value) VALUES ('schema_version','2');
+INSERT OR IGNORE INTO mesh_meta(key,value) VALUES ('schema_version','3');

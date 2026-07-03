@@ -1,13 +1,19 @@
 # Session Mesh
 
-Cross-session coordination for parallel Montblanc work. Master session sees a live board of workers; workers register, heartbeat, and (full autonomy) execute commands the master queues.
+Cross-session coordination for parallel Claude Code work. A master session sees a live board of workers; workers register, heartbeat, and (full autonomy) execute commands the master queues.
+
+The mesh is two orthogonal layers (see `specs/2026-07-03-mesh-mcp-task-manager-design.md`):
+- **Layer 1 — transport.** Reach and drive live sessions: `sessions` + `commands`, the doorbell watchers, the reaper. Task-agnostic.
+- **Layer 2 — task manager.** A backlog (`tasks`) that lives in the store, independent of sessions, and is *serviced by* 0..N of them (`task_sessions`). It touches Layer 1 only through `mesh_dispatch`.
+
+Both layers are exposed two ways: the **skills** (below) shell into `mesh.sh`, and an **MCP server** (`mcp/server.py`) offers the same operations as typed tools. Both front doors share the one SQLite DB — the DB is the hub; there is no daemon.
 
 ## Setup (once)
-Run `/mesh-init` in any session.
+Run `/mesh-init` in any session. (The MCP server also self-inits on start, so a session that has the plugin's MCP server needs no separate step.)
 
 ## Master session (e.g. ~/projects/montblanc)
 - `/mesh-board` — live roster + recent commands.
-- `/mesh-dispatch <PMP-XXX|session_id|*> <shell|prompt|control> "<payload>"` — queue work.
+- `/mesh-dispatch <label|session_id|*> <shell|prompt|control> "<payload>"` — queue work.
 - `/mesh-await` — arm a detached watcher that wakes this session once, the moment a dispatched command completes (event-driven, no polling).
 - `/mesh-collect` — one-shot: pull any already-finished results right now, no waiting.
 - `/mesh-pause` / `/mesh-resume` — emergency stop / restart.
@@ -31,8 +37,15 @@ Reap triggers (per `running` command):
 
 `mesh_complete` is guarded with `WHERE state='running'`: if a command was reaped and re-claimed elsewhere, a late completion from the original worker is a harmless no-op rather than clobbering the new run. Known limitation: a job that legitimately outruns the lease can be run twice (original + reaper's re-claim); the 3h default keeps this well clear of normal jobs, and prefer idempotent payloads for anything that could approach it.
 
+## MCP server & task manager (Layer 2)
+The plugin ships a stdio MCP server (`mcp/server.py`, Python/FastMCP, launched with `uv run --script` — no install step). Each session spawns its own instance over the shared DB. It is a thin adapter: every tool shells into a `mesh.sh` function, so `mesh.sh` stays the single source of truth. Tools:
+- **Layer 1** — `mesh_board`, `mesh_dispatch`, `mesh_collect`, `mesh_pause`, `mesh_resume`.
+- **Layer 2** — `task_add`, `task_list`, `task_get`, `task_assign` (one active task per session; `force` to move it), `task_unassign`, `task_set_status`, `task_done`.
+
+The doorbell (`/mesh-arm`, `/mesh-await`) is deliberately **not** an MCP tool — a blocking tool call would hold the model turn open; the background watcher stays token-free. MCP is for acting; the doorbell is for receiving.
+
 ## Store
-SQLite WAL at `~/.claude/session-mesh/mesh.db`. All logic in `mesh.sh`; tests in `tests/test_mesh.sh` (`bash tests/test_mesh.sh`). Schema upgrades go in `mesh_migrate` (idempotent; run by `mesh_init`). The `commands.ack_at` column marks results the master has already collected.
+SQLite WAL at `~/.claude/session-mesh/mesh.db`. All logic in `mesh.sh`; two test suites — `bash tests/test_mesh.sh` (engine + task functions) and `uv run --script tests/test_server.py` (MCP adapter). Schema upgrades go in `mesh_migrate` (idempotent; run by `mesh_init`, and by the MCP server on start). Current schema: **v3** (v1→v2 renamed `ticket`→`label`; v2→v3 added `tasks` + `task_sessions`). The `commands.ack_at` column marks results the master has already collected.
 
 ## Notes
 - Execution is full autonomy; the global pause is the only stop. Dispatch carefully.
