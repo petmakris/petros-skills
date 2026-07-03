@@ -17,7 +17,7 @@ MESH="${CLAUDE_PLUGIN_ROOT:-$(python3 -c 'import json,os;print(json.load(open(os
    ```
    source "$MESH" && mesh_collect
    ```
-   Prints one line per newly-done command — `id <TAB> ticket <TAB> exit_state` — and marks them collected. **Empty output = nothing new to report.**
+   Prints one line per newly-done command — `id <TAB> label <TAB> exit_state` — and marks them collected. **Empty output = nothing new to report.**
 2. For each `id`, fetch the full text:
    ```
    source "$MESH" && mesh_cmd_output <id>

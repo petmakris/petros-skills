@@ -2,7 +2,7 @@ PRAGMA journal_mode=WAL;
 
 CREATE TABLE IF NOT EXISTS sessions (
   session_id   TEXT PRIMARY KEY,
-  ticket       TEXT,
+  label        TEXT,
   cwd          TEXT NOT NULL UNIQUE,
   branch       TEXT,
   pid          INTEGER,
@@ -29,4 +29,4 @@ CREATE TABLE IF NOT EXISTS commands (
 
 CREATE TABLE IF NOT EXISTS mesh_meta (key TEXT PRIMARY KEY, value TEXT);
 INSERT OR IGNORE INTO mesh_meta(key,value) VALUES ('paused','0');
-INSERT OR IGNORE INTO mesh_meta(key,value) VALUES ('schema_version','1');
+INSERT OR IGNORE INTO mesh_meta(key,value) VALUES ('schema_version','2');

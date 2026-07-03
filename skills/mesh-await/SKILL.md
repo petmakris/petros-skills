@@ -31,10 +31,10 @@ MESH="${CLAUDE_PLUGIN_ROOT:-$(python3 -c 'import json,os;print(json.load(open(os
    ```
    source "$MESH" && mesh_collect
    ```
-   It prints one line per newly-done command — `id <TAB> ticket <TAB> exit_state` — and marks them collected so they are never shown twice.
+   It prints one line per newly-done command — `id <TAB> label <TAB> exit_state` — and marks them collected so they are never shown twice.
 4. For each `id`, fetch the full output to show the user:
    ```
    source "$MESH" && mesh_cmd_output <id>
    ```
-5. Present the results to the user: which worker (ticket), ok/fail, and the output.
+5. Present the results to the user: which worker (label), ok/fail, and the output.
 6. If commands are still outstanding (dispatched but not yet done) and you want to keep waiting, **re-arm** by going back to A.1. Otherwise stop.

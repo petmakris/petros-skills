@@ -6,7 +6,7 @@ Two roles, one rule of thumb:
 - **Master** = the session where *you* sit and drive the fleet.
 - **Worker** = a session parked in a task's worktree, listening for commands.
 
-> Terminology note: the code still calls a worker's label `ticket` internally, but it accepts **any** string (e.g. `reporting-openapi`, not just `PMP-211`). The ticket→task rename and the auto-spawn skills are designed in `specs/2026-07-03-task-manager-mesh-design.md` — see [Planned](#planned--task-manager-redesign) at the bottom.
+> Terminology note: a worker is identified by a free-form **label** (the `sessions.label` column). It accepts **any** string (e.g. `docs-rewrite` or `reporting-openapi`, not just `PMP-211`) — there is no Jira/branch coupling. The task-backlog and auto-spawn skills are designed in `specs/2026-07-03-task-manager-mesh-design.md` — see [Planned](#planned--task-manager-redesign) at the bottom.
 
 ## Command matrix
 
@@ -97,4 +97,4 @@ Designed in `specs/2026-07-03-task-manager-mesh-design.md`, not yet implemented:
 | `/mesh-task-start` | `<slug> [cwd]` | master | **Auto-spawn** a worker for the task (`claude --bg`) so you no longer hand-start it. Marks the task in-progress. |
 | `/mesh-task-done` | `<slug>` | master | Mark a task done (optionally stop its worker). |
 
-Plus: `ticket → task` rename throughout, and `/mesh-board` gains a backlog section grouped by status.
+Plus: `/mesh-board` gains a backlog section grouped by status. (The identifier de-Jira-ification is **done** — the old `ticket` column is now the free-form `label` column; the spec's `task` naming was superseded by `label`.)

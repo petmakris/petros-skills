@@ -11,9 +11,11 @@ The mesh already works and is nearly identifier-agnostic under the hood (`_mesh_
 1. **Vocabulary and one real behavior are ticket-specific.** The `sessions.ticket` column, the word "ticket" throughout the skills, and — the only genuine coupling — `mesh-join` deriving the ticket from the branch via the regex `^[A-Z]+-[0-9]+`. Anything not named like a Jira ticket falls through to an awkward "ask the user" path.
 2. **Every worker must be started by hand.** The user opens a Claude Code session in each worktree and types `/mesh-join`. This makes the "master" a viewer of sessions that already exist, not a manager that can *create* work. A backlog is pointless if you still hand-start every session to service it.
 
+> **Update (2026-07-03):** the identifier de-Jira-ification below is **done**, with one change from this spec — the worker-handle column and vocabulary were finalized as **`label`**, not `task`. Rationale: the mesh is meant to grow beyond work-management, and `label` is neutral where `task` re-couples to it. So wherever this doc says the `ticket → task` rename, read it as `ticket → label` (schema v1→v2, `sessions.label`, `mesh-join` asks for a free-form label with no Jira regex). The **backlog** and **auto-spawn** goals below remain unbuilt future work.
+
 ## Goals
 
-- Rename the domain from **ticket → task** everywhere (column, prose, skill descriptions). Drop the Jira regex; a task label is free-form.
+- ~~Rename the domain from **ticket → task**~~ → Rename the worker handle **ticket → label** everywhere (column, prose, skill descriptions). Drop the Jira regex; a label is free-form. **[done]**
 - The master owns a **task backlog**: tasks can exist before any session, with a title, description, and lifecycle status.
 - The master can **auto-spawn** a worker session for a task — no hand-starting — using a real, subscription-billed session.
 - Preserve the existing doorbell/queue architecture and all its tested infra (arming, heartbeat, reaper, dispatch, collect/await).

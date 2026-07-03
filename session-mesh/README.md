@@ -12,7 +12,7 @@ Run `/mesh-init` in any session.
 - `/mesh-collect` — one-shot: pull any already-finished results right now, no waiting.
 - `/mesh-pause` / `/mesh-resume` — emergency stop / restart.
 
-## Worker session (a ticket worktree)
+## Worker session (a worktree)
 - `/mesh-join` — the only command you type here: registers this session (via `mesh_register`), then arms the doorbell (`/mesh-arm`).
 - `/mesh-arm` — event-driven worker: launches a detached background watcher (`mesh_watch_worker`) that heartbeats and blocks until a command is queued, then wakes the model **once** to execute it and re-arms. Zero tokens while idle; no terminal spam.
 - `/mesh-poll` — legacy per-tick engine for the old `/loop 1m /mesh-poll` polling model. Superseded by `/mesh-arm`; kept for backward compat.

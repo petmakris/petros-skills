@@ -26,6 +26,14 @@ mesh_init() {
 
 mesh_migrate() {  # idempotent schema upgrades; safe to run repeatedly
   _sql "ALTER TABLE commands ADD COLUMN ack_at TEXT;" 2>/dev/null || true
+  # v1 -> v2: rename the worker-handle column ticket -> label. Guarded on the old
+  # column existing and the new one not, so it is a no-op on an already-migrated
+  # or freshly-created (label) DB, and safe to run repeatedly.
+  local cols; cols="$(_sql "PRAGMA table_info(sessions);")"
+  if printf "%s" "$cols" | grep -q '|ticket|' && ! printf "%s" "$cols" | grep -q '|label|'; then
+    _sql "ALTER TABLE sessions RENAME COLUMN ticket TO label;"
+  fi
+  _sql "UPDATE mesh_meta SET value='2' WHERE key='schema_version' AND value < '2';"
 }
 
 mesh_is_paused() {
@@ -40,15 +48,15 @@ mesh_session_id() { # cwd
   [ -f "$f" ] && cat "$f" || true
 }
 
-mesh_register() { # cwd branch ticket pid
-  local cwd="$1" branch="${2:-}" ticket="${3:-}" pid="${4:-}"
+mesh_register() { # cwd branch label pid
+  local cwd="$1" branch="${2:-}" label="${3:-}" pid="${4:-}"
   local f sid now; f="$(_mesh_live_file "$cwd")"; now="$(_now)"
   if [ -f "$f" ]; then sid="$(cat "$f")"; else sid="$(uuidgen)"; fi
   mkdir -p "$MESH_HOME/live"; printf "%s" "$sid" > "$f"
   _sql <<SQL
 DELETE FROM sessions WHERE cwd='$(_esc "$cwd")';
-INSERT INTO sessions(session_id,ticket,cwd,branch,pid,status,current_task,started_at,last_seen)
-VALUES ('$(_esc "$sid")','$(_esc "$ticket")','$(_esc "$cwd")','$(_esc "$branch")',
+INSERT INTO sessions(session_id,label,cwd,branch,pid,status,current_task,started_at,last_seen)
+VALUES ('$(_esc "$sid")','$(_esc "$label")','$(_esc "$cwd")','$(_esc "$branch")',
         ${pid:-NULL},'idle',NULL,'$now','$now');
 SQL
   printf "%s" "$sid"
@@ -64,11 +72,11 @@ _mesh_resolve_targets() { # target -> newline-separated session_ids
     _sql "SELECT session_id FROM sessions;"
     return
   fi
-  # Match a live session by ticket OR by session_id (robust to any ticket
-  # naming, e.g. "reporting-openapi" as well as "PMP-211"). Only fall back to
+  # Match a live session by label OR by session_id (robust to any label,
+  # e.g. "reporting-openapi" as well as "PMP-211"). Only fall back to
   # treating the target as a literal session_id when nothing matches.
   local rows
-  rows="$(_sql "SELECT session_id FROM sessions WHERE ticket='$(_esc "$t")' OR session_id='$(_esc "$t")';")"
+  rows="$(_sql "SELECT session_id FROM sessions WHERE label='$(_esc "$t")' OR session_id='$(_esc "$t")';")"
   if [ -n "$rows" ]; then printf "%s\n" "$rows"; else printf "%s\n" "$t"; fi
 }
 
@@ -138,16 +146,16 @@ mesh_resume() { _sql "UPDATE mesh_meta SET value='0' WHERE key='paused';"; }
 mesh_board() {
   mesh_reap >/dev/null 2>&1   # recover orphaned work so the board reflects truth
   _sql -separator $'\t' <<SQL
-SELECT ticket,
+SELECT label,
        CASE WHEN last_seen >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-90 seconds')
             THEN 'alive' ELSE 'stale' END,
        status, COALESCE(current_task,''), cwd
-FROM sessions ORDER BY ticket;
+FROM sessions ORDER BY label;
 SQL
   printf "\n"
   _sql -separator $'\t' <<SQL
 SELECT c.id,
-       COALESCE((SELECT ticket FROM sessions s WHERE s.session_id=c.target), c.target),
+       COALESCE((SELECT label FROM sessions s WHERE s.session_id=c.target), c.target),
        c.kind, c.state
 FROM commands c ORDER BY c.id DESC LIMIT 20;
 SQL
@@ -183,11 +191,11 @@ mesh_watch_collect() { # [interval] -> exits 0 as soon as >=1 unacked done comma
   done
 }
 
-mesh_collect() { # print "id \t ticket \t exit_state" per unacked-done command, then ack them
+mesh_collect() { # print "id \t label \t exit_state" per unacked-done command, then ack them
   local rows ids
   rows="$(_sql -separator $'\t' <<SQL
 SELECT c.id,
-       COALESCE((SELECT ticket FROM sessions s WHERE s.session_id=c.target), c.target),
+       COALESCE((SELECT label FROM sessions s WHERE s.session_id=c.target), c.target),
        COALESCE(c.exit_state,'')
 FROM commands c WHERE c.state='done' AND c.ack_at IS NULL ORDER BY c.id;
 SQL

@@ -1,6 +1,6 @@
 ---
 name: mesh-board
-description: Show the live Session Mesh board from the master session — every registered worker, its ticket, whether it is alive or stale, its current task, and recent commands. Use when the user asks what sessions are running, mesh status, or the board.
+description: Show the live Session Mesh board from the master session — every registered worker, its label, whether it is alive or stale, its current task, and recent commands. Use when the user asks what sessions are running, mesh status, or the board.
 allowed-tools:
   - Bash
 ---
@@ -14,6 +14,6 @@ MESH="${CLAUDE_PLUGIN_ROOT:-$(python3 -c 'import json,os;print(json.load(open(os
 ```
 
 1. Run: `source "$MESH" && mesh_board`. If the DB is missing, tell the user to run /mesh-init.
-2. The output is two tab-separated blocks: sessions (`ticket, alive|stale, status, current_task, cwd`) then recent commands (`id, target_ticket, kind, state`).
-3. For each session, additionally cross-check the OS process: read its pid via `sqlite3 ~/.claude/session-mesh/mesh.db "SELECT ticket,pid FROM sessions;"` and mark a session **dead** if `kill -0 <pid>` fails (process gone) even when last_seen looks recent.
-4. Present a clean markdown table to the user: Ticket | Liveness (alive/stale/dead) | Status | Current task, followed by a short list of the most recent commands and their states. Call out any stale/dead sessions explicitly.
+2. The output is two tab-separated blocks: sessions (`label, alive|stale, status, current_task, cwd`) then recent commands (`id, target_label, kind, state`).
+3. For each session, additionally cross-check the OS process: read its pid via `sqlite3 ~/.claude/session-mesh/mesh.db "SELECT label,pid FROM sessions;"` and mark a session **dead** if `kill -0 <pid>` fails (process gone) even when last_seen looks recent.
+4. Present a clean markdown table to the user: Label | Liveness (alive/stale/dead) | Status | Current task, followed by a short list of the most recent commands and their states. Call out any stale/dead sessions explicitly.
