@@ -134,25 +134,21 @@
   pre .s{color:#0b7285} pre .k{color:var(--amber-ink)}
 
 
-  /* ---------- Sequence diagrams ---------- */
-  .seq-legend{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;margin:0 0 22px;
-    font-size:13px;color:var(--ink-2);background:var(--surface);border-radius:10px;
-    box-shadow:var(--e1);padding:13px 18px}
-  .seq-legend span{display:inline-flex;align-items:center;gap:7px}
-  .seq-legend .ln{width:26px;border-top:2px solid var(--primary-dark)}
-  .seq-legend .ln.dashed{border-top-style:dashed}
-  .seq-legend .ln.self{width:14px;height:11px;border:2px solid var(--primary-dark);
-    border-left:none;border-radius:0 4px 4px 0}
-  .seq-legend .sw{width:12px;height:12px;border-radius:3px;border:1px solid}
-  .seq-legend .sw.db{background:#eceff1;border-color:#78909c}
-  .seq-legend .sw.wk{background:#e8f5e9;border-color:#2e7d32}
-  .seq-legend .sw.ms{background:#e3f2fd;border-color:#1976d2}
-  .seq-legend .sep{color:var(--divider)}
+  /* ---------- Sequence diagrams (TYPE / ASK / SEE) ---------- */
+  .seq-legend{display:flex;flex-wrap:wrap;gap:10px 26px;align-items:center;margin:0 0 22px;
+    font-size:13.5px;color:var(--ink-2);background:var(--surface);border-radius:10px;
+    box-shadow:var(--e1);padding:14px 18px}
+  .seq-legend span{display:inline-flex;align-items:center;gap:9px}
+  .seq-pill{display:inline-flex;align-items:center;height:20px;padding:0 9px;border-radius:10px;
+    font-size:10.5px;font-weight:700;letter-spacing:.04em;color:#fff}
+  .seq-pill.type{background:#1976d2}
+  .seq-pill.ask{background:#7b1fa2}
+  .seq-pill.see{background:#eef1f4;color:#607d8b}
   .seq-card{background:var(--surface);border-radius:12px;box-shadow:var(--e1);
     padding:20px 22px 14px;margin-bottom:22px;overflow-x:auto}
-  .seq-cap{font-size:14.5px;color:var(--ink-2);margin:0 0 4px}
+  .seq-cap{font-size:14.5px;color:var(--ink-2);margin:0 0 8px}
   .seq-cap b{color:var(--ink);font-weight:500}
-  .seq-svg{width:100%;min-width:640px;height:auto;display:block}
+  .seq-svg{width:100%;min-width:660px;height:auto;display:block}
 
   /* ---------- Guided walkthrough (I/O pairs) ---------- */
   .walk .flow{margin-bottom:28px}
@@ -394,162 +390,179 @@
 
   <!-- SEQUENCE DIAGRAMS -->
   <section>
-    <div class="sec-head"><h2>Step by step</h2><span class="hint">who talks to whom, in order — the choreography behind the calls</span></div>
+    <div class="sec-head"><h2>Step by step</h2><span class="hint">what you type, and what you see — one lane per terminal</span></div>
 
     <div class="seq-legend">
-      <span><i class="ln"></i> call</span>
-      <span><i class="ln dashed"></i> async · return</span>
-      <span><i class="ln self"></i> local work</span>
-      <span class="sep">|</span>
-      <span><i class="sw ms"></i> master</span>
-      <span><i class="sw db"></i> queue</span>
-      <span><i class="sw wk"></i> worker</span>
+      <span><b class="seq-pill type">TYPE</b> a command you type in the terminal</span>
+      <span><b class="seq-pill ask">ASK</b> something you tell Claude in plain English</span>
+      <span><b class="seq-pill see">SEE</b> what appears back</span>
     </div>
 
     <div class="seq-card">
-      <div class="seq-cap"><b>1 · Auto-spawn your first worker</b> — One call stands up a real <span class='mono'>claude&nbsp;--bg</span> session, joins it, assigns the task, and dispatches it — then you collect the result.</div>
-      <svg class="seq-svg" viewBox="0 0 900 724" role="img" aria-label="Sequence diagram: d1">
+      <div class="seq-cap"><b>1 · First run — start the mesh and connect a worker</b> — Do this once. The left terminal becomes your <b>master</b>; a second terminal joins as a <b>worker</b> it can drive. <span class='mono'>/mesh-init</span> is only needed the very first time on a machine.</div>
+      <svg class="seq-svg" viewBox="0 0 900 584" role="img" aria-label="First run — connect two terminals">
 <defs>
-<marker id="ah-d1-master" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#1565c0"/></marker>
-<marker id="ah-d1-db" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#546e7a"/></marker>
-<marker id="ah-d1-worker" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#2e7d32"/></marker>
-<marker id="ah-d1-worker2" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#5e35b1"/></marker>
+<marker id="lk-First run — connect two terminals" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#90a4ae"/></marker>
 </defs>
-<rect x="780" y="266" width="10" height="300" rx="3" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1" opacity="0.9"/>
-<line x1="130" y1="70" x2="130" y2="710" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="460" y1="70" x2="460" y2="710" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="785" y1="70" x2="785" y2="710" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<rect x="55" y="8" width="150" height="42" rx="9" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.4"/>
-<text x="130" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#0d47a1">You</text>
-<text x="130" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#0d47a1" opacity="0.85">master</text>
-<rect x="375" y="8" width="170" height="42" rx="9" fill="#eceff1" stroke="#78909c" stroke-width="1.4"/>
-<text x="460" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#37474f">Mesh queue</text>
-<text x="460" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#37474f" opacity="0.85">SQLite</text>
-<rect x="705" y="8" width="160" height="42" rx="9" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4"/>
-<text x="785" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#1b5e20">Worker</text>
-<text x="785" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#1b5e20" opacity="0.85">build-1</text>
-<line x1="130" y1="96" x2="454" y2="96" stroke="#1565c0" stroke-width="1.7" marker-end="url(#ah-d1-master)"/>
-<text x="295" y="89" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">task_add("build-1", …)</text>
-<rect x="476" y="128" width="108" height="24" rx="6" fill="#fff8e1" stroke="#ffe082" stroke-width="1"/>
-<text x="530" y="144" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#8a6d00">backlog: todo</text>
-<line x1="130" y1="188" x2="454" y2="188" stroke="#1565c0" stroke-width="1.7" marker-end="url(#ah-d1-master)"/>
-<text x="295" y="181" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">task_spawn(slug, cwd)</text>
-<line x1="460" y1="234" x2="779" y2="234" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d1-db)"/>
-<text x="622" y="227" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">launch  claude --bg</text>
-<line x1="785" y1="280" x2="466" y2="280" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d1-worker)"/>
-<text x="622" y="273" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">/mesh-join → register</text>
-<rect x="801" y="312" width="101" height="24" rx="6" fill="#e3f2fd" stroke="#90caf9" stroke-width="1"/>
-<text x="852" y="328" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#0d47a1">alive · idle</text>
-<path d="M460,363 h30 v18 h-30" fill="none" stroke="#546e7a" stroke-width="1.6" marker-end="url(#ah-d1-db)"/>
-<text x="500" y="374" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">assign + dispatch  #1</text>
-<line x1="460" y1="418" x2="136" y2="418" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d1-db)"/>
-<text x="295" y="411" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">session_id, command #1</text>
-<line x1="785" y1="464" x2="466" y2="464" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d1-worker)"/>
-<text x="622" y="457" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">claim  #1</text>
-<path d="M785,501 h-30 v18 h30" fill="none" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#ah-d1-worker)"/>
-<text x="745" y="512" text-anchor="end" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">create PROOF.txt</text>
-<line x1="785" y1="556" x2="466" y2="556" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d1-worker)"/>
-<text x="622" y="549" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">mesh_complete(output)</text>
-<line x1="130" y1="602" x2="454" y2="602" stroke="#1565c0" stroke-width="1.7" marker-end="url(#ah-d1-master)"/>
-<text x="295" y="595" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">mesh_collect</text>
-<line x1="460" y1="648" x2="136" y2="648" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d1-db)"/>
-<text x="295" y="641" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">{ exit_state: ok, output }</text>
+<rect x="30" y="10" width="410" height="566" rx="12" fill="#f3f8fd" stroke="#bbdefb" stroke-width="1"/>
+<rect x="30" y="10" width="410" height="46" rx="12" fill="#e3f2fd"/>
+<rect x="30" y="44" width="410" height="12" fill="#e3f2fd"/>
+<text x="235" y="30" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0d47a1">Terminal 1  ·  your master session</text>
+<text x="235" y="47" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#0d47a1" opacity="0.8">the one you drive from</text>
+<rect x="460" y="10" width="410" height="566" rx="12" fill="#f3faf5" stroke="#c8e6c9" stroke-width="1"/>
+<rect x="460" y="10" width="410" height="46" rx="12" fill="#e8f5e9"/>
+<rect x="460" y="44" width="410" height="12" fill="#e8f5e9"/>
+<text x="665" y="30" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1b5e20">Terminal 2  ·  a worker</text>
+<text x="665" y="47" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#1b5e20" opacity="0.8">does the work, then reports</text>
+<path d="M462,400 C450,400 450,460 438,460" fill="none" stroke="#b0bec5" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lk-First run — connect two terminals)"/>
+<rect x="42" y="78" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="54" y="90" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="78" y="104" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="115" y="104" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">claude            (start Claude Code)</text>
+<rect x="42" y="138" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="54" y="150" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="78" y="164" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="115" y="164" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">/mesh-init        (first time on this machine)</text>
+<rect x="42" y="198" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="210" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="224" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="224" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  mesh database ready</text>
+<rect x="472" y="258" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="484" y="270" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="508" y="284" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="545" y="284" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">claude            (a second terminal)</text>
+<rect x="472" y="318" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="484" y="330" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="508" y="344" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="545" y="344" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">/mesh-join build-1</text>
+<rect x="472" y="378" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="484" y="390" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="505" y="404" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="538" y="404" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  joined as build-1 · listening (idle)</text>
+<rect x="42" y="438" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="54" y="450" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="78" y="464" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="115" y="464" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">/mesh-board       (who's connected?)</text>
+<rect x="42" y="498" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="510" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="524" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="524" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  build-1  —  alive · idle</text>
+<rect x="382" y="420" width="136" height="20" rx="10" fill="#ffffff" stroke="#e0e4ea" stroke-width="1"/>
+<text x="450" y="434" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#78909c">→ visible to master</text>
 </svg>
     </div>
 
     <div class="seq-card">
-      <div class="seq-cap"><b>2 · The doorbell — token-free wake</b> — Both sides block in detached watchers and wake <b>exactly once</b> when real work lands. Idle costs zero tokens; no polling.</div>
-      <svg class="seq-svg" viewBox="0 0 900 586" role="img" aria-label="Sequence diagram: d2">
+      <div class="seq-cap"><b>2 · Give a worker a job and wait for the result</b> — From the master you queue a command, then <span class='mono'>/mesh-await</span> wakes you the moment it finishes — no polling, zero tokens while waiting.</div>
+      <svg class="seq-svg" viewBox="0 0 900 464" role="img" aria-label="Dispatch a job and wait for the result">
 <defs>
-<marker id="ah-d2-master" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#1565c0"/></marker>
-<marker id="ah-d2-db" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#546e7a"/></marker>
-<marker id="ah-d2-worker" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#2e7d32"/></marker>
-<marker id="ah-d2-worker2" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#5e35b1"/></marker>
+<marker id="lk-Dispatch a job and wait for the result" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#90a4ae"/></marker>
 </defs>
-<rect x="785" y="312" width="10" height="116" rx="3" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1" opacity="0.9"/>
-<line x1="150" y1="70" x2="150" y2="572" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="470" y1="70" x2="470" y2="572" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="790" y1="70" x2="790" y2="572" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<rect x="75" y="8" width="150" height="42" rx="9" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.4"/>
-<text x="150" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#0d47a1">You</text>
-<text x="150" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#0d47a1" opacity="0.85">master</text>
-<rect x="385" y="8" width="170" height="42" rx="9" fill="#eceff1" stroke="#78909c" stroke-width="1.4"/>
-<text x="470" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#37474f">Mesh queue</text>
-<text x="470" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#37474f" opacity="0.85">SQLite</text>
-<rect x="702" y="8" width="175" height="42" rx="9" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4"/>
-<text x="790" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#1b5e20">Worker</text>
-<text x="790" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#1b5e20" opacity="0.85">build-1 (armed)</text>
-<rect x="580" y="82" width="194" height="24" rx="6" fill="#e3f2fd" stroke="#90caf9" stroke-width="1"/>
-<text x="677" y="98" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#0d47a1">doorbell blocks · 0 tokens</text>
-<line x1="150" y1="142" x2="464" y2="142" stroke="#1565c0" stroke-width="1.7" marker-end="url(#ah-d2-master)"/>
-<text x="310" y="135" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">dispatch #7 (prompt)</text>
-<path d="M150,179 h30 v18 h-30" fill="none" stroke="#1565c0" stroke-width="1.6" marker-end="url(#ah-d2-master)"/>
-<text x="190" y="190" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">/mesh-await</text>
-<rect x="166" y="220" width="134" height="24" rx="6" fill="#e3f2fd" stroke="#90caf9" stroke-width="1"/>
-<text x="233" y="236" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#0d47a1">blocks · 0 tokens</text>
-<line x1="470" y1="280" x2="784" y2="280" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d2-db)"/>
-<text x="630" y="273" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">doorbell fires → wake once</text>
-<line x1="790" y1="326" x2="476" y2="326" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d2-worker)"/>
-<text x="630" y="319" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">claim  #7</text>
-<path d="M790,363 h-30 v18 h30" fill="none" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#ah-d2-worker)"/>
-<text x="750" y="374" text-anchor="end" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">do the task</text>
-<line x1="790" y1="418" x2="476" y2="418" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d2-worker)"/>
-<text x="630" y="411" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">mesh_complete</text>
-<line x1="470" y1="464" x2="156" y2="464" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d2-db)"/>
-<text x="310" y="457" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">await wakes master · once</text>
-<path d="M150,501 h30 v18 h-30" fill="none" stroke="#1565c0" stroke-width="1.6" marker-end="url(#ah-d2-master)"/>
-<text x="190" y="512" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">read result · re-arm</text>
+<rect x="30" y="10" width="410" height="446" rx="12" fill="#f3f8fd" stroke="#bbdefb" stroke-width="1"/>
+<rect x="30" y="10" width="410" height="46" rx="12" fill="#e3f2fd"/>
+<rect x="30" y="44" width="410" height="12" fill="#e3f2fd"/>
+<text x="235" y="30" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0d47a1">Terminal 1  ·  your master session</text>
+<text x="235" y="47" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#0d47a1" opacity="0.8">the one you drive from</text>
+<rect x="460" y="10" width="410" height="446" rx="12" fill="#f3faf5" stroke="#c8e6c9" stroke-width="1"/>
+<rect x="460" y="10" width="410" height="46" rx="12" fill="#e8f5e9"/>
+<rect x="460" y="44" width="410" height="12" fill="#e8f5e9"/>
+<text x="665" y="30" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1b5e20">Terminal 2  ·  a worker</text>
+<text x="665" y="47" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#1b5e20" opacity="0.8">does the work, then reports</text>
+<path d="M438,160 C450,160 450,280 462,280" fill="none" stroke="#b0bec5" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lk-Dispatch a job and wait for the result)"/>
+<path d="M462,340 C450,340 450,400 438,400" fill="none" stroke="#b0bec5" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lk-Dispatch a job and wait for the result)"/>
+<rect x="42" y="78" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="54" y="90" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="78" y="104" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="115" y="104" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">/mesh-dispatch build-1 shell "npm test"</text>
+<rect x="42" y="138" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="150" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="164" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="164" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  queued for build-1</text>
+<rect x="42" y="198" width="386" height="44" rx="9" fill="#ffffff" stroke="#c5dcef" stroke-width="1.4"/>
+<rect x="54" y="210" width="49" height="20" rx="10" fill="#1976d2"/>
+<text x="78" y="224" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">TYPE</text>
+<text x="115" y="224" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0d47a1">/mesh-await       (wait to be woken)</text>
+<rect x="472" y="258" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="484" y="270" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="505" y="284" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="538" y="284" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  running:  npm test …</text>
+<rect x="472" y="318" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="484" y="330" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="505" y="344" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="538" y="344" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  3 passed · 0 failed</text>
+<rect x="42" y="378" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="390" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="404" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="404" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  build-1 finished → 3 passed · 0 failed</text>
+<rect x="392" y="210" width="117" height="20" rx="10" fill="#ffffff" stroke="#e0e4ea" stroke-width="1"/>
+<text x="450" y="224" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#78909c">→ runs on worker</text>
+<rect x="417" y="360" width="66" height="20" rx="10" fill="#ffffff" stroke="#e0e4ea" stroke-width="1"/>
+<text x="450" y="374" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#78909c">← result</text>
 </svg>
     </div>
 
     <div class="seq-card">
-      <div class="seq-cap"><b>3 · Fan-out to two workers</b> — Broadcast with <span class='mono'>*</span>; each worker claims its own copy and runs <b>in parallel</b>; you collect every reply.</div>
-      <svg class="seq-svg" viewBox="0 0 900 632" role="img" aria-label="Sequence diagram: d3">
+      <div class="seq-cap"><b>3 · Work with tasks — add, check status, mark done</b> — You don't type these — just <b>tell Claude in plain English</b> and it runs the task tools for you. Spawning a task's worker is automatic.</div>
+      <svg class="seq-svg" viewBox="0 0 900 704" role="img" aria-label="Work with tasks">
 <defs>
-<marker id="ah-d3-master" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#1565c0"/></marker>
-<marker id="ah-d3-db" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#546e7a"/></marker>
-<marker id="ah-d3-worker" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#2e7d32"/></marker>
-<marker id="ah-d3-worker2" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#5e35b1"/></marker>
+<marker id="lk-Work with tasks" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="#90a4ae"/></marker>
 </defs>
-<rect x="600" y="220" width="10" height="208" rx="3" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1" opacity="0.9"/>
-<rect x="820" y="266" width="10" height="208" rx="3" fill="#ede7f6" stroke="#5e35b1" stroke-width="1" opacity="0.9"/>
-<line x1="110" y1="70" x2="110" y2="618" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="350" y1="70" x2="350" y2="618" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="605" y1="70" x2="605" y2="618" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<line x1="825" y1="70" x2="825" y2="618" stroke="#cfd8dc" stroke-width="1.4" stroke-dasharray="2 5"/>
-<rect x="40" y="8" width="140" height="42" rx="9" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.4"/>
-<text x="110" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#0d47a1">You</text>
-<text x="110" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#0d47a1" opacity="0.85">master</text>
-<rect x="275" y="8" width="150" height="42" rx="9" fill="#eceff1" stroke="#78909c" stroke-width="1.4"/>
-<text x="350" y="33" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#37474f">Mesh queue</text>
-<rect x="535" y="8" width="140" height="42" rx="9" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.4"/>
-<text x="605" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#1b5e20">Worker A</text>
-<text x="605" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#1b5e20" opacity="0.85">api</text>
-<rect x="755" y="8" width="140" height="42" rx="9" fill="#ede7f6" stroke="#5e35b1" stroke-width="1.4"/>
-<text x="825" y="25" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#4527a0">Worker B</text>
-<text x="825" y="41" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#4527a0" opacity="0.85">web</text>
-<line x1="110" y1="96" x2="344" y2="96" stroke="#1565c0" stroke-width="1.7" marker-end="url(#ah-d3-master)"/>
-<text x="230" y="89" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">dispatch  *  prompt "rebase"</text>
-<line x1="350" y1="142" x2="599" y2="142" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d3-db)"/>
-<text x="478" y="135" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">queue → A</text>
-<line x1="350" y1="188" x2="819" y2="188" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d3-db)"/>
-<text x="588" y="181" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">queue → B</text>
-<line x1="605" y1="234" x2="356" y2="234" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d3-worker)"/>
-<text x="478" y="227" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">claim</text>
-<line x1="825" y1="280" x2="356" y2="280" stroke="#5e35b1" stroke-width="1.7" marker-end="url(#ah-d3-worker2)"/>
-<text x="588" y="273" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">claim</text>
-<path d="M605,317 h-30 v18 h30" fill="none" stroke="#2e7d32" stroke-width="1.6" marker-end="url(#ah-d3-worker)"/>
-<text x="565" y="328" text-anchor="end" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">rebase (parallel)</text>
-<path d="M825,363 h-30 v18 h30" fill="none" stroke="#5e35b1" stroke-width="1.6" marker-end="url(#ah-d3-worker2)"/>
-<text x="785" y="374" text-anchor="end" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#455a64">rebase (parallel)</text>
-<line x1="605" y1="418" x2="356" y2="418" stroke="#2e7d32" stroke-width="1.7" marker-end="url(#ah-d3-worker)"/>
-<text x="478" y="411" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">complete (A)</text>
-<line x1="825" y1="464" x2="356" y2="464" stroke="#5e35b1" stroke-width="1.7" marker-end="url(#ah-d3-worker2)"/>
-<text x="588" y="457" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">complete (B)</text>
-<line x1="110" y1="510" x2="344" y2="510" stroke="#1565c0" stroke-width="1.7" marker-end="url(#ah-d3-master)"/>
-<text x="230" y="503" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">mesh_collect</text>
-<line x1="350" y1="556" x2="116" y2="556" stroke="#546e7a" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#ah-d3-db)"/>
-<text x="230" y="549" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#37474f">[ A result, B result ]</text>
+<rect x="30" y="10" width="410" height="686" rx="12" fill="#f3f8fd" stroke="#bbdefb" stroke-width="1"/>
+<rect x="30" y="10" width="410" height="46" rx="12" fill="#e3f2fd"/>
+<rect x="30" y="44" width="410" height="12" fill="#e3f2fd"/>
+<text x="235" y="30" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0d47a1">Terminal 1  ·  your master session</text>
+<text x="235" y="47" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#0d47a1" opacity="0.8">the one you drive from</text>
+<rect x="460" y="10" width="410" height="686" rx="12" fill="#f3faf5" stroke="#c8e6c9" stroke-width="1"/>
+<rect x="460" y="10" width="410" height="46" rx="12" fill="#e8f5e9"/>
+<rect x="460" y="44" width="410" height="12" fill="#e8f5e9"/>
+<text x="665" y="30" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#1b5e20">Terminal 2  ·  a worker</text>
+<text x="665" y="47" text-anchor="middle" font-family="'Roboto Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="10.5" fill="#1b5e20" opacity="0.8">does the work, then reports</text>
+<path d="M438,280 C450,280 450,340 462,340" fill="none" stroke="#b0bec5" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lk-Work with tasks)"/>
+<path d="M462,520 C450,520 450,580 438,580" fill="none" stroke="#b0bec5" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#lk-Work with tasks)"/>
+<rect x="42" y="78" width="386" height="44" rx="9" fill="#ffffff" stroke="#e6cef0" stroke-width="1.4"/>
+<rect x="54" y="90" width="42" height="20" rx="10" fill="#7b1fa2"/>
+<text x="75" y="104" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">ASK</text>
+<text x="108" y="104" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-style="italic" fill="#4a148c">“add a task: refactor the OAuth flow”</text>
+<rect x="42" y="138" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="150" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="164" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="164" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  task  oauth-refactor  ·  todo</text>
+<rect x="42" y="198" width="386" height="44" rx="9" fill="#ffffff" stroke="#e6cef0" stroke-width="1.4"/>
+<rect x="54" y="210" width="42" height="20" rx="10" fill="#7b1fa2"/>
+<text x="75" y="224" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">ASK</text>
+<text x="108" y="224" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-style="italic" fill="#4a148c">“spawn a worker for oauth-refactor”</text>
+<rect x="42" y="258" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="270" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="284" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="284" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  launched &amp; assigned  ·  in_progress</text>
+<rect x="472" y="318" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="484" y="330" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="505" y="344" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="538" y="344" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  auto-spawned: oauth-refactor · working …</text>
+<rect x="42" y="378" width="386" height="44" rx="9" fill="#ffffff" stroke="#e6cef0" stroke-width="1.4"/>
+<rect x="54" y="390" width="42" height="20" rx="10" fill="#7b1fa2"/>
+<text x="75" y="404" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">ASK</text>
+<text x="108" y="404" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-style="italic" fill="#4a148c">“what's on the board?”</text>
+<rect x="42" y="438" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="450" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="464" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="464" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  oauth-refactor · in_progress · 1 worker</text>
+<rect x="472" y="498" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="484" y="510" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="505" y="524" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="538" y="524" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  finished ✓</text>
+<rect x="42" y="558" width="386" height="44" rx="9" fill="#ffffff" stroke="#e6cef0" stroke-width="1.4"/>
+<rect x="54" y="570" width="42" height="20" rx="10" fill="#7b1fa2"/>
+<text x="75" y="584" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#ffffff">ASK</text>
+<text x="108" y="584" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-style="italic" fill="#4a148c">“mark oauth-refactor done”</text>
+<rect x="42" y="618" width="386" height="44" rx="9" fill="#fbfcfd" stroke="#e4e8ee" stroke-width="1.4"/>
+<rect x="54" y="630" width="42" height="20" rx="10" fill="#eef1f4"/>
+<text x="75" y="644" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.04em" fill="#607d8b">SEE</text>
+<text x="108" y="644" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#455a64">↳  oauth-refactor  ·  done</text>
+<rect x="398" y="300" width="104" height="20" rx="10" fill="#ffffff" stroke="#e0e4ea" stroke-width="1"/>
+<text x="450" y="314" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#78909c">→ auto-started</text>
+<rect x="423" y="540" width="54" height="20" rx="10" fill="#ffffff" stroke="#e0e4ea" stroke-width="1"/>
+<text x="450" y="554" text-anchor="middle" font-family="Roboto, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#78909c">← done</text>
 </svg>
     </div>
 
