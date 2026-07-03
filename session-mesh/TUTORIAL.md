@@ -87,14 +87,17 @@ That's it. The session registers and starts listening. Leave it be — it costs 
 - **The doorbell.** Detection (heartbeat + claim) runs in a detached background shell that blocks until there's real work, then exits — and a background command exiting wakes the session model exactly once. So the model runs only when there's something to do; idle cost is zero. (`/mesh-await` is the master-side twin: it waits the same way for results.)
 - **Crash recovery.** A claimed command whose worker dies is automatically re-queued (the reaper runs inside `/mesh-board` and `/mesh-dispatch`) — no daemon, no manual step.
 
-## Planned — task-manager redesign
+## Task manager (Layer 2) — built via MCP
 
-Designed in `specs/2026-07-03-task-manager-mesh-design.md`, not yet implemented:
+The task-manager redesign (`specs/2026-07-03-mesh-mcp-task-manager-design.md`) is **implemented** as MCP tools rather than more slash-commands. The mesh is now two orthogonal layers: **Layer 1** (transport — sessions/commands, this tutorial above) and **Layer 2** (a task backlog independent of sessions). A stdio MCP server (`mcp/server.py`, launched with `uv run --script`, one instance per session over the shared DB) exposes both as typed tools:
 
-| Command | Args | Role | Purpose |
-|---|---|---|---|
-| `/mesh-task-add` | `<slug> "<title/desc>"` | master | Add a task to the **backlog** — before any session exists. |
-| `/mesh-task-start` | `<slug> [cwd]` | master | **Auto-spawn** a worker for the task (`claude --bg`) so you no longer hand-start it. Marks the task in-progress. |
-| `/mesh-task-done` | `<slug>` | master | Mark a task done (optionally stop its worker). |
+| Tool | Role | Purpose |
+|---|---|---|
+| `task_add(slug, title, description?)` | master | Add a task to the **backlog** — before any session exists. |
+| `task_list` / `task_get` | master | See the backlog (with assigned workers). Also folded into `mesh_board`. |
+| `task_assign(slug, target, force?)` | master | Link a session to a task (one active task per session; `force` to move it). |
+| `task_spawn(slug, cwd, label?)` | master | **Auto-spawn** a worker (`claude --bg`) for the task, join it, assign it, and dispatch the task. No hand-starting. |
+| `task_ask(slug, question)` / `mesh_ask(target, q)` | master | Ask workers for status / next move; answers return as command output via `mesh_collect` / `/mesh-await`. |
+| `task_set_status` / `task_done` | master | Advance a task's lifecycle. |
 
-Plus: `/mesh-board` gains a backlog section grouped by status. (The identifier de-Jira-ification is **done** — the old `ticket` column is now the free-form `label` column; the spec's `task` naming was superseded by `label`.)
+Layer 1 stays task-agnostic; the two layers meet only where Layer 2 calls `mesh_dispatch`. The doorbell (`/mesh-arm`, `/mesh-await`) is deliberately **not** an MCP tool — a blocking tool call would hold the model turn open, defeating the token-free wake. (The identifier de-Jira-ification is also done — the old `ticket` column is the free-form `label` column.)

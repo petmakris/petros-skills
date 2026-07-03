@@ -67,5 +67,12 @@ sp = srv.task_spawn("spawnme", "/tmp", wait_secs=1)
 check(sp["session_id"] is None and sp["status"] == "in_progress",
       "task_spawn returns in_progress + null session when no worker registers")
 
+# Phase 3: board carries the backlog; ask queues a prompt to the worker.
+board = srv.mesh_board()
+check("tasks" in board and any(t["slug"] == "spawnme" for t in board["tasks"]),
+      "mesh_board includes the tasks backlog")
+ask = srv.mesh_ask("srv-worker", "what is your status?")
+check(len(ask["command_ids"]) == 1, "mesh_ask queues one prompt command")
+
 print(f"PASS={P} FAIL={F}")
 sys.exit(1 if F else 0)

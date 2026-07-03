@@ -209,5 +209,27 @@ assert_eq "None" "$(echo "$orphan_out" | python3 -c 'import sys,json;print(json.
 assert_eq "in_progress" "$(sqlite3 "$MESH_DB" "SELECT status FROM tasks WHERE slug='orphan';")" "task_spawn still marks the task in_progress when unregistered"
 assert_eq "1" "$(mesh_task_spawn "nope" "/tmp" 2>/dev/null; [ $? -ne 0 ] && echo 1 || echo 0)" "task_spawn rejects an unknown task"
 
+# --- Task 15: Phase 3 — board backlog + ask (status / next-move pulls) ---
+sqlite3 "$MESH_DB" "DELETE FROM tasks; DELETE FROM task_sessions; DELETE FROM commands;"
+mesh_task_add "review" "Review PR" >/dev/null
+mesh_task_set_status "review" "in_progress"
+mesh_board_json | python3 -m json.tool >/dev/null 2>&1
+assert_eq "0" "$?" "board_json is valid JSON with the tasks section"
+assert_eq "review" "$(mesh_board_json | python3 -c 'import sys,json;print(json.load(sys.stdin)["tasks"][0]["slug"])')" "board_json includes the Layer-2 backlog"
+# mesh_ask queues a prompt to a resolved worker, carrying the question
+askid=$(mesh_ask "reporting-openapi" "what is your status?" | head -1)
+assert_eq "prompt" "$(sqlite3 "$MESH_DB" "SELECT kind FROM commands WHERE id=$askid;")" "mesh_ask queues a prompt command"
+assert_eq "$sidR" "$(sqlite3 "$MESH_DB" "SELECT target FROM commands WHERE id=$askid;")" "mesh_ask targets the resolved session"
+assert_eq "1" "$(sqlite3 "$MESH_DB" "SELECT count(*) FROM commands WHERE id=$askid AND payload LIKE '%what is your status?%';")" "mesh_ask carries the question in the payload"
+# task_ask asks each session assigned to the task
+mesh_task_assign "review" "reporting-openapi" >/dev/null
+before_ask=$(sqlite3 "$MESH_DB" "SELECT count(*) FROM commands;")
+mesh_task_ask "review" "next move?" >/dev/null
+after_ask=$(sqlite3 "$MESH_DB" "SELECT count(*) FROM commands;")
+assert_eq "1" "$((after_ask-before_ask))" "task_ask dispatches one prompt per assigned session"
+mesh_task_add "lonely" "Lonely" >/dev/null
+mesh_task_ask "lonely" "hi?" >/dev/null 2>&1
+assert_eq "1" "$?" "task_ask errors when the task has no assigned sessions"
+
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

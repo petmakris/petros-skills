@@ -240,7 +240,16 @@ mesh_board_json() {  # {"sessions":[...],"commands":[...]}
           'id',id,'target',COALESCE((SELECT label FROM sessions s WHERE s.session_id=c.target),c.target),
           'kind',kind,'state',state))
         FROM (SELECT * FROM commands ORDER BY id DESC LIMIT 20) c;")"
-  printf '{"sessions":%s,"commands":%s}' "$s" "$c"
+  # Layer-2 backlog, most-actionable status first, each with its worker labels.
+  local t
+  t="$(_sqlj "SELECT json_group_array(json_object(
+          'slug',slug,'title',title,'status',status,
+          'sessions', json(COALESCE((SELECT json_group_array(s.label)
+             FROM task_sessions ts JOIN sessions s ON s.session_id=ts.session_id
+             WHERE ts.task_slug=tasks.slug),'[]'))))
+        FROM tasks ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1
+                                        WHEN 'todo' THEN 2 WHEN 'done' THEN 3 ELSE 4 END, created_at;")"
+  printf '{"sessions":%s,"commands":%s,"tasks":%s}' "$s" "$c" "$t"
 }
 
 mesh_collect_json() {  # [ {id,label,exit_state,output}... ] for unacked-done commands, then ack them
@@ -373,4 +382,31 @@ mesh_task_spawn() {  # slug cwd [label] [wait_secs]  -> JSON {task,label,cwd,ses
     "You are the mesh worker for task '$slug'. Work on it autonomously and report status when done." "spawn" | head -1)"
   _sql "SELECT json_object('task','$(_esc "$slug")','label','$(_esc "$label")','cwd','$(_esc "$cwd")',
           'session_id','$(_esc "$sid")','status','in_progress','command_id',${cid:-null});"
+}
+
+# ---------------------------------------------------------------------------
+# Phase 3: active project management. The master doesn't just queue work — it
+# asks satellites for status / next move. An "ask" is a prompt command whose
+# answer comes back as the command output (workers summarize prompt results),
+# collected via mesh_collect / the /mesh-await doorbell.
+# ---------------------------------------------------------------------------
+
+mesh_ask() {  # target question  -> queued command id(s)
+  local target="$1" q="$2"
+  [ -n "$q" ] || { echo "mesh_ask: question required" >&2; return 1; }
+  mesh_dispatch "$target" prompt \
+    "[Master question — reply concisely as your result; make no changes unless explicitly asked] $q" "ask"
+}
+
+mesh_task_ask() {  # slug question  -> queued command id(s), one per assigned session
+  local slug="$1" q="$2" sids sid out=""
+  sids="$(_sql "SELECT session_id FROM task_sessions WHERE task_slug='$(_esc "$slug")';")"
+  [ -n "$sids" ] || { echo "task_ask: no sessions assigned to task '$slug'" >&2; return 1; }
+  while IFS= read -r sid; do
+    [ -z "$sid" ] && continue
+    out="$out $(mesh_ask "$sid" "$q" | head -1)"
+  done <<EOF
+$sids
+EOF
+  printf '%s' "$(printf '%s' "$out" | tr ' ' '\n' | grep -v '^$' | paste -sd' ' -)"
 }

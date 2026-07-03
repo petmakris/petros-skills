@@ -39,8 +39,8 @@ Reap triggers (per `running` command):
 
 ## MCP server & task manager (Layer 2)
 The plugin ships a stdio MCP server (`mcp/server.py`, Python/FastMCP, launched with `uv run --script` — no install step). Each session spawns its own instance over the shared DB. It is a thin adapter: every tool shells into a `mesh.sh` function, so `mesh.sh` stays the single source of truth. Tools:
-- **Layer 1** — `mesh_board`, `mesh_dispatch`, `mesh_collect`, `mesh_pause`, `mesh_resume`.
-- **Layer 2** — `task_add`, `task_list`, `task_get`, `task_assign` (one active task per session; `force` to move it), `task_unassign`, `task_set_status`, `task_done`, `task_spawn`.
+- **Layer 1** — `mesh_board` (sessions + recent commands + backlog), `mesh_dispatch`, `mesh_collect`, `mesh_ask` (ask a worker for status / next move — answer returns as the command output), `mesh_pause`, `mesh_resume`.
+- **Layer 2** — `task_add`, `task_list`, `task_get`, `task_assign` (one active task per session; `force` to move it), `task_unassign`, `task_set_status`, `task_done`, `task_spawn`, `task_ask` (ask every worker on a task).
 
 **Auto-spawn** (`task_spawn slug cwd [label]`): launches a background worker with `claude --bg --plugin-dir <plugin> "/mesh-join <label>"` in `cwd` (so it self-registers and arms the doorbell), sets the task `in_progress`, then — once the worker appears — assigns it and dispatches the task to it. The launch is isolated in `mesh_spawn_launch` (override the binary with `MESH_CLAUDE_BIN`, which the tests use to stub it). No hand-starting workers.
 

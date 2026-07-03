@@ -51,8 +51,10 @@ def _mesh(fn: str, *args: str) -> str:
 
 @mcp.tool()
 def mesh_board() -> dict:
-    """Live mesh snapshot: every session (with alive/stale liveness, label,
-    status, current_task, pid, cwd) and the 20 most recent commands."""
+    """Live mesh snapshot with three sections: 'sessions' (each with alive/stale
+    liveness, label, status, current_task, pid, cwd), 'commands' (20 most
+    recent), and 'tasks' — the Layer-2 backlog, most-actionable status first,
+    each with the labels of its assigned workers."""
     return json.loads(_mesh("mesh_board_json"))
 
 
@@ -67,6 +69,25 @@ def mesh_dispatch(target: str, kind: str, payload: str) -> dict:
     out = _mesh("mesh_dispatch", target, kind, payload, "mcp").strip()
     ids = [int(t) for t in out.split() if t.isdigit()]
     return {"command_ids": ids}
+
+
+@mcp.tool()
+def mesh_ask(target: str, question: str) -> dict:
+    """Ask a live worker a question (status, next move, a decision) without
+    handing it a task: queues a 'prompt' command; the worker's concise answer
+    comes back as that command's output via mesh_collect / the await doorbell.
+    Returns the command id(s). target = label | session_id | '*'."""
+    out = _mesh("mesh_ask", target, question).strip()
+    return {"command_ids": [int(t) for t in out.split() if t.isdigit()]}
+
+
+@mcp.tool()
+def task_ask(slug: str, question: str) -> dict:
+    """Ask every session assigned to a task a question (e.g. 'status?', 'what's
+    the next move?'). Returns one command id per assigned worker; collect the
+    answers with mesh_collect / mesh-await."""
+    out = _mesh("mesh_task_ask", slug, question).strip()
+    return {"command_ids": [int(t) for t in out.split() if t.isdigit()]}
 
 
 @mcp.tool()
