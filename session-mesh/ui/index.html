@@ -89,10 +89,20 @@
   .wtag{font-size:10px;font-family:var(--mono);color:var(--ink-3);border:1px solid var(--divider);border-radius:7px;padding:1px 7px;align-self:center}
 
   .feed{padding:4px 10px 10px}
-  .cmd{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;padding:9px 8px;border-top:1px solid var(--divider-soft)}
-  .cmd:first-child{border-top:none}
+  .cmdwrap{border-top:1px solid var(--divider-soft)}
+  .cmdwrap:first-child{border-top:none}
+  .cmd{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;padding:9px 8px}
+  .cmd.x{cursor:pointer}.cmd.x:hover{background:#f7fafd;border-radius:7px}
   .cmd .id{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
   .cmd .tgt{font-family:var(--mono);font-size:12.5px;color:var(--ink);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cmd .payload{font-family:var(--mono);font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+  .cmd .caret{color:var(--ink-3);font-size:11px;transition:transform .12s}
+  .cmdwrap.open .caret{transform:rotate(90deg)}
+  .cmdout{display:none;padding:0 8px 12px 46px}
+  .cmdwrap.open .cmdout{display:block}
+  .cmdout pre{margin:0;background:#f6f8fa;border:1px solid var(--divider-soft);border-radius:7px;padding:9px 11px;
+    font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;color:var(--ink)}
+  .cmdout.err pre{background:var(--danger-bg);border-color:#f3c9c4}
   .st{font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;border-radius:8px;padding:3px 9px;white-space:nowrap}
   .st.pending{background:#eef1f4;color:#607d8b}.st.running{background:var(--primary-050);color:var(--primary-dark)}
   .st.done{background:var(--success-bg);color:var(--success)}.st.error{background:var(--danger-bg);color:var(--danger)}
@@ -117,6 +127,44 @@
     padding:11px 18px;border-radius:9px;font-size:13.5px;box-shadow:var(--e3);opacity:0;transition:.2s;z-index:50;pointer-events:none}
   .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
   .toast.err{background:var(--danger)}
+
+  /* task detail drawer */
+  .dscrim{position:fixed;inset:0;background:rgba(20,30,40,.34);display:none;z-index:35}
+  .dscrim.on{display:block}
+  .drawer{position:fixed;top:0;right:0;height:100vh;width:430px;max-width:calc(100vw - 24px);background:var(--surface);
+    box-shadow:-8px 0 28px rgba(0,0,0,.16);z-index:36;transform:translateX(100%);transition:transform .18s ease;overflow-y:auto}
+  .drawer.on{transform:translateX(0)}
+  .dhead{position:sticky;top:0;background:var(--surface);padding:18px 20px 14px;border-bottom:1px solid var(--divider-soft);display:flex;align-items:flex-start;gap:10px;z-index:1}
+  .dhead .x{margin-left:auto;border:none;background:none;font-size:22px;color:var(--ink-3);cursor:pointer;line-height:1;padding:0 4px}
+  .dhead .x:hover{color:var(--ink)}
+  .dslug{font-family:var(--mono);font-size:12.5px;color:var(--primary-dark);font-weight:500;word-break:break-all}
+  .dtitle{font-size:16px;font-weight:500;margin-top:3px;line-height:1.3}
+  .tchip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+    border-radius:8px;padding:3px 9px;margin-top:8px}
+  .tchip .k{width:8px;height:8px;border-radius:3px}
+  .tchip.todo{background:#eef1f4;color:#607d8b}.tchip.in_progress{background:var(--primary-050);color:var(--primary-dark)}
+  .tchip.blocked{background:var(--amber-bg);color:var(--amber-ink)}.tchip.done{background:var(--success-bg);color:var(--success)}
+  .dbody{padding:16px 20px 44px}
+  .dsec{margin-bottom:22px}
+  .dsec h4{margin:0 0 10px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+  .ddesc{font-size:13.5px;color:var(--ink-2);white-space:pre-wrap;line-height:1.5}
+  .ddesc.none{font-style:italic;color:var(--ink-3)}
+  .dmeta{font-size:12px;color:var(--ink-3);font-family:var(--mono);line-height:1.7}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{height:32px;padding:0 13px;border-radius:8px;border:1px solid var(--divider);background:#fff;font-size:12.5px;color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .seg button:hover{border-color:#c9d6e2}
+  .seg button.on{background:var(--primary);border-color:var(--primary);color:#fff}
+  .seg button.on .k{background:#fff}
+  .arow{display:flex;align-items:center;gap:9px;padding:9px 0;border-top:1px solid var(--divider-soft)}
+  .arow:first-child{border-top:none}
+  .arow .wdot{margin-top:0}
+  .arow .al{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+  .arow .ar{font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+  .arow .x{margin-left:auto;border:1px solid var(--divider);background:none;color:var(--ink-3);cursor:pointer;border-radius:7px;height:24px;padding:0 8px;font-size:11px}
+  .arow .x:hover{color:var(--danger);border-color:#f3c9c4}
+  .wassign{display:flex;gap:8px;align-items:center;margin-top:12px}
+  .wassign select{flex:1;min-width:0;height:34px;border:1px solid var(--divider);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:var(--mono);background:#fff}
+  .dhint{font-size:12.5px;color:var(--ink-3);font-style:italic}
 
   @media(max-width:980px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.kb{grid-template-columns:1fr 1fr}.col:nth-child(2n){border-right:none}}
 </style>
@@ -157,6 +205,8 @@
 </div>
 
 <div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
+<div class="dscrim" id="dscrim"></div>
+<div class="drawer" id="drawer"></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -236,6 +286,8 @@ function render(b){
 
 function taskCard(t,byLabel){
   const c=el("div","tcard"+(t.status==="done"?" dn":""));
+  c.style.cursor="pointer";
+  c.onclick=()=>openTask(t.slug);
   c.appendChild(el("div","slug",t.slug));
   c.appendChild(el("div","title",t.title||""));
   if(t.sessions && t.sessions.length){
@@ -248,14 +300,15 @@ function taskCard(t,byLabel){
     c.appendChild(chips);
   }
   const acts=el("div","tacts");
+  const stop=(fn)=>(e)=>{e.stopPropagation();fn();};
   if(t.status!=="done"){
-    const done=el("button","btn ok sm","✓ Done"); done.onclick=()=>doAction("task_done","Marked "+t.slug+" done",{slug:t.slug}); acts.appendChild(done);
+    const done=el("button","btn ok sm","✓ Done"); done.onclick=stop(()=>doAction("task_done","Marked "+t.slug+" done",{slug:t.slug})); acts.appendChild(done);
   }
   if(t.status!=="done" && (!t.sessions||!t.sessions.length)){
-    const sp=el("button","btn sm","Spawn"); sp.onclick=()=>openSpawn(t.slug); acts.appendChild(sp);
+    const sp=el("button","btn sm","Spawn"); sp.onclick=stop(()=>openSpawn(t.slug)); acts.appendChild(sp);
   }
   if(t.status==="blocked"){
-    const un=el("button","btn sm","Unblock"); un.onclick=()=>doAction("task_set_status","Unblocked "+t.slug,{slug:t.slug,status:"todo"}); acts.appendChild(un);
+    const un=el("button","btn sm","Unblock"); un.onclick=stop(()=>doAction("task_set_status","Unblocked "+t.slug,{slug:t.slug,status:"todo"})); acts.appendChild(un);
   }
   c.appendChild(acts);
   return c;
@@ -275,12 +328,29 @@ function workerRow(s){
 }
 
 function cmdRow(c){
-  const r=el("div","cmd");
+  const wrap=el("div","cmdwrap");
+  const hasOut=(c.output||"").length>0;
+  const r=el("div","cmd"+(hasOut?" x":""));
   r.appendChild(el("span","id","#"+c.id));
-  const body=el("div"); const k=el("span","kind "+c.kind,c.kind); body.appendChild(k);
-  const tgt=el("span","tgt",c.target); body.appendChild(tgt); r.appendChild(body);
-  r.appendChild(el("span","st "+c.state,c.state));
-  return r;
+  const body=el("div");
+  const line=el("div"); line.style.display="flex"; line.style.alignItems="center";
+  line.appendChild(el("span","kind "+c.kind,c.kind));
+  line.appendChild(el("span","tgt",c.target));
+  body.appendChild(line);
+  if(c.payload) body.appendChild(el("div","payload",c.payload));
+  r.appendChild(body);
+  const right=el("div"); right.style.display="flex"; right.style.alignItems="center"; right.style.gap="7px";
+  right.appendChild(el("span","st "+c.state,c.state));
+  if(hasOut) right.appendChild(el("span","caret","▸"));
+  r.appendChild(right);
+  wrap.appendChild(r);
+  if(hasOut){
+    const out=el("div","cmdout"+(c.exit_state==="error"||c.state==="error"?" err":""));
+    const pre=el("pre"); pre.textContent=c.output; out.appendChild(pre);
+    wrap.appendChild(out);
+    r.onclick=()=>wrap.classList.toggle("open");
+  }
+  return wrap;
 }
 
 // ---- actions with optimistic refresh ----
@@ -340,11 +410,111 @@ function openSpawn(prefillSlug){
 $("#addBtn").onclick=openAdd;
 $("#spawnBtn").onclick=()=>openSpawn("");
 
-// ---- poll loop ----
+// ---- task detail drawer ----
+let drawerSlug=null;
+function closeDrawer(){ drawerSlug=null; $("#dscrim").className="dscrim"; $("#drawer").className="drawer"; }
+$("#dscrim").addEventListener("click",closeDrawer);
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
+
+async function openTask(slug){
+  drawerSlug=slug;
+  $("#dscrim").className="dscrim on"; $("#drawer").className="drawer on";
+  $("#drawer").innerHTML='<div class="dbody"><div class="empty">Loading…</div></div>';
+  try{
+    const t=await fetch("/api/task?slug="+encodeURIComponent(slug)).then(r=>r.json());
+    if(!t){ $("#drawer").innerHTML='<div class="dbody"><div class="empty">Task not found.</div></div>'; return; }
+    renderDrawer(t);
+  }catch(e){ $("#drawer").innerHTML='<div class="dbody"><div class="empty">'+e.message+'</div></div>'; }
+}
+async function drawerAction(op,okMsg,args){   // (op, message, args) — mirrors doAction
+  try{
+    await action(op,args); if(okMsg)toast(okMsg);
+    await refresh();                       // refresh latestBoard FIRST so the drawer's
+    if(drawerSlug)await openTask(drawerSlug);  // free-worker list re-renders from fresh state
+  }catch(e){ toast(e.message,true); }
+}
+function statusLabel(s){ const f=COLS.find(c=>c[0]===s); return f?f[1]:s; }
+
+function renderDrawer(t){
+  const d=$("#drawer"); d.innerHTML="";
+  const sessions=(latestBoard&&latestBoard.sessions)||[];
+  const byLabel={}; sessions.forEach(s=>byLabel[s.label]=s);
+
+  // header
+  const head=el("div","dhead"); const hbox=el("div");
+  hbox.appendChild(el("div","dslug",t.slug));
+  hbox.appendChild(el("div","dtitle",t.title||""));
+  const chip=el("span","tchip "+t.status); chip.appendChild(el("span","k")); chip.appendChild(document.createTextNode(statusLabel(t.status))); hbox.appendChild(chip);
+  head.appendChild(hbox);
+  const x=el("button","x","×"); x.onclick=closeDrawer; head.appendChild(x);
+  d.appendChild(head);
+
+  const body=el("div","dbody");
+
+  // description
+  const s1=el("div","dsec"); s1.appendChild(el("h4",null,"Description"));
+  s1.appendChild(el("div","ddesc"+(t.description?"":" none"), t.description||"No description.")); body.appendChild(s1);
+
+  // status
+  const s2=el("div","dsec"); s2.appendChild(el("h4",null,"Status"));
+  const seg=el("div","seg");
+  COLS.forEach(([st,label])=>{
+    const b=el("button",st===t.status?"on":null); const k=el("span","k"); k.classList.add(st); b.appendChild(k);
+    b.appendChild(document.createTextNode(label));
+    if(st!==t.status) b.onclick=()=>drawerAction("task_set_status","→ "+label,{slug:t.slug,status:st});
+    seg.appendChild(b);
+  });
+  s2.appendChild(seg); body.appendChild(s2);
+
+  // workers
+  const s3=el("div","dsec"); s3.appendChild(el("h4",null,"Workers"));
+  if(t.sessions && t.sessions.length){
+    t.sessions.forEach(a=>{
+      const row=el("div","arow");
+      const live=byLabel[a.label];
+      row.appendChild(el("span","wdot "+(live&&live.liveness==="alive"?"alive":"stale")));
+      const info=el("div"); info.appendChild(el("div","al",a.label)); info.appendChild(el("div","ar",a.role||"lead")); row.appendChild(info);
+      const un=el("button","x","unassign"); un.onclick=()=>drawerAction("task_unassign","Unassigned "+a.label,{slug:t.slug,target:a.label}); row.appendChild(un);
+      s3.appendChild(row);
+    });
+  } else {
+    s3.appendChild(el("div","dhint","No workers assigned yet."));
+  }
+  // assign control
+  const assigned=new Set((t.sessions||[]).map(a=>a.label));
+  const free=sessions.filter(s=>!assigned.has(s.label));
+  if(free.length){
+    const row=el("div","wassign");
+    const sel=el("select"); free.forEach(s=>{const o=el("option",null,s.label+(s.liveness==="stale"?" (stale)":"")); o.value=s.label; sel.appendChild(o);});
+    const role=el("select"); ["lead","support"].forEach(r=>{const o=el("option",null,r);o.value=r;role.appendChild(o);}); role.style.flex="0 0 96px";
+    const go=el("button","btn pri sm","Assign");
+    go.onclick=()=>drawerAction("task_assign","Assigned "+sel.value,{slug:t.slug,target:sel.value,role:role.value,force:"force"});
+    row.appendChild(sel); row.appendChild(role); row.appendChild(go); s3.appendChild(row);
+  } else if(t.status!=="done"){
+    const row=el("div","wassign");
+    const sp=el("button","btn sm","Spawn a worker"); sp.onclick=()=>{closeDrawer();openSpawn(t.slug);};
+    row.appendChild(sp); s3.appendChild(row);
+  }
+  body.appendChild(s3);
+
+  d.appendChild(body);
+}
+
+// ---- live updates: Server-Sent Events, with polling fallback ----
 async function refresh(){ try{ const b=await getBoard(); render(b); }catch(e){ setLive(false); } }
-refresh();
-setInterval(refresh, 1500);
-// keep the "refreshed Ns ago" honest between polls
+let pollTimer=null, es=null;
+function startPolling(){ if(!pollTimer) pollTimer=setInterval(refresh,1500); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+function connectSSE(){
+  if(!("EventSource" in window)){ startPolling(); return; }      // ancient browser
+  try{ es=new EventSource("/api/stream"); }catch(_){ startPolling(); return; }
+  es.onopen=()=>stopPolling();                                    // stream is authoritative
+  es.onmessage=ev=>{ try{ render(JSON.parse(ev.data)); }catch(_){} };
+  es.onerror=()=>{ startPolling(); };   // EventSource auto-reconnects; poll covers the gap
+}
+refresh();       // instant first paint
+connectSSE();    // then switch to the live stream
+// keep the "refreshed Ns ago" text honest between updates
 setInterval(()=>{ if($("#live").className.includes("off"))return; const s=Math.round((Date.now()-lastOk)/1000);
   $("#livetxt").textContent = s<=1?"live · refreshed just now":("live · refreshed "+s+"s ago"); }, 1000);
 </script>

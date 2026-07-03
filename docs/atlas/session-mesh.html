@@ -207,7 +207,7 @@
     </div>
     <div class="title">Session Mesh <span>· Operator's Manual</span></div>
     <div class="spacer"></div>
-    <div class="ver">11 skills · 15 MCP tools</div>
+    <div class="ver">12 skills · 15 MCP tools · web board</div>
   </div>
 </div>
 
@@ -785,9 +785,48 @@
     </div>
   </section>
 
+  <!-- LIVE WEB BOARD -->
+  <section>
+    <div class="sec-head"><h2>The live web board</h2><span class="hint">a third front door — for when you'd rather see it than read it</span></div>
+
+    <div class="card" style="margin-bottom:20px">
+      <p>Prefer a dashboard to the text board? Run <span class="mono">/mesh-ui</span> and a local page opens with the whole mesh at a glance: the <b style="color:var(--ink);font-weight:500">worker roster</b> (alive / stale dots, current activity, cwd·pid), the <b style="color:var(--ink);font-weight:500">task backlog</b> as a Todo / In&nbsp;progress / Blocked / Done kanban, and the <b style="color:var(--ink);font-weight:500">recent-command feed</b> (click a finished command to read its output). Buttons add tasks, spawn workers, pause/resume the fleet; click any task for a detail drawer that reassigns workers and moves it through its lifecycle.</p>
+    </div>
+
+    <div class="group">
+      <div class="gh"><span class="role">How it's built</span><span class="where">same single source of truth</span></div>
+      <div class="row">
+        <span class="cmd">session-mesh/ui/server.py</span>
+        <span><span class="chip none">stdlib</span></span>
+        <span class="desc">A dependency-free HTTP server (<span class="mono">uv run --script</span>). Holds <b>no state</b>: every read/write shells into <span class="mono">mesh.sh</span> — the same functions the MCP tools call. Serves the page and a small JSON API.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">GET /api/board</span>
+        <span><span class="chip args">read</span></span>
+        <span class="desc">The board snapshot (<span class="mono">mesh_board_json</span> + the paused flag). The page also opens <span class="mono">/api/stream</span> — <b>Server-Sent Events</b> that push a fresh board the instant anything changes, falling back to a 1.5s poll if the stream drops.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">POST /api/action</span>
+        <span><span class="chip args">write</span></span>
+        <span class="desc">Every button routes here, to a <b>hard-whitelisted</b> map of ops → <span class="mono">mesh.sh</span> functions (pause/resume, task add/status/done/assign/spawn, dispatch, ask). The UI is a front door, <b>not</b> a second implementation.</span>
+      </div>
+    </div>
+
+    <div class="notes">
+      <div class="alert warn">
+        <span class="ai" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 1 21h22L12 2Zm1 14h-2v2h2v-2Zm0-6h-2v4h2v-4Z"/></svg></span>
+        <div><h4>Localhost only</h4><p>It binds to <span class="mono">127.0.0.1</span> and drives autonomous workers — so it must never be reachable off the machine. No auth, because nothing else can reach it.</p></div>
+      </div>
+      <div class="alert info">
+        <span class="ai" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg></span>
+        <div><h4>Launch &amp; stop</h4><p><span class="mono">/mesh-ui</span> opens it (default port 8787, <span class="mono">MESH_UI_PORT</span> overrides). Stop with <span class="mono">pkill -f session-mesh/ui/server.py</span>. It self-inits the DB, like the MCP server.</p></div>
+      </div>
+    </div>
+  </section>
+
   <footer>
     <div>Personal tooling under <span class="mono">~/.claude</span> — never committed to a product repo.</div>
-    <div style="margin-top:6px">Store: SQLite WAL at <span class="mono">~/.claude/session-mesh/mesh.db</span> (schema v3). All logic in <span class="mono">mesh.sh</span>; two front doors — the <span class="mono">/mesh-*</span> skills and the <span class="mono">session-mesh</span> MCP tools — share the one DB. The DB is the hub; no daemon.</div>
+    <div style="margin-top:6px">Store: SQLite WAL at <span class="mono">~/.claude/session-mesh/mesh.db</span> (schema v3). All logic in <span class="mono">mesh.sh</span>; <b>three</b> front doors — the <span class="mono">/mesh-*</span> skills, the <span class="mono">session-mesh</span> MCP tools, and the <span class="mono">/mesh-ui</span> web board — share the one DB. The DB is the hub; no daemon.</div>
   </footer>
 
 </div>

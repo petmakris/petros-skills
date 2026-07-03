@@ -23,9 +23,11 @@ import json
 import os
 import subprocess
 import sys
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 MESH_LIB = str(HERE.parent / "mesh.sh")          # session-mesh/mesh.sh
@@ -45,6 +47,7 @@ ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
     "task_done":       ("mesh_task_done",       ("slug",)),
     "task_set_status": ("mesh_task_set_status", ("slug", "status")),
     "task_spawn":      ("mesh_task_spawn",      ("slug", "cwd", "label", "wait_secs")),
+    "task_assign":     ("mesh_task_assign",     ("slug", "target", "role", "force")),
     "task_unassign":   ("mesh_task_unassign",   ("slug", "target")),
     "dispatch":        ("mesh_dispatch",        ("target", "kind", "payload", "created_by")),
     "ask":             ("mesh_ask",             ("target", "question")),
@@ -88,7 +91,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode(), "application/json")
 
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0]
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path in ("/", "/index.html"):
             try:
                 self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
@@ -99,8 +103,42 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, board())
             except MeshError as e:
                 self._json(500, {"error": str(e)})
+        elif path == "/api/task":
+            slug = (parse_qs(parsed.query).get("slug", [""]))[0]
+            try:
+                arr = json.loads(mesh("mesh_task_get", slug))
+                self._json(200, arr[0] if arr else None)
+            except MeshError as e:
+                self._json(500, {"error": str(e)})
+        elif path == "/api/stream":
+            self._stream()
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _stream(self) -> None:
+        """Server-Sent Events: push the board whenever it changes, ~1s cadence,
+        with a heartbeat comment in between so proxies keep the socket open."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        last = None
+        try:
+            while True:
+                try:
+                    snap = json.dumps(board())
+                except MeshError:
+                    snap = None
+                if snap is not None and snap != last:
+                    self.wfile.write(f"data: {snap}\n\n".encode())
+                    last = snap
+                else:
+                    self.wfile.write(b": hb\n\n")   # heartbeat
+                self.wfile.flush()
+                time.sleep(1)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return  # client closed the tab
 
     def do_POST(self) -> None:
         if self.path.split("?", 1)[0] != "/api/action":

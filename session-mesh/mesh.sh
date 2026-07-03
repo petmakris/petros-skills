@@ -238,7 +238,8 @@ mesh_board_json() {  # {"sessions":[...],"commands":[...]}
         FROM sessions;")"
   c="$(_sqlj "SELECT json_group_array(json_object(
           'id',id,'target',COALESCE((SELECT label FROM sessions s WHERE s.session_id=c.target),c.target),
-          'kind',kind,'state',state))
+          'kind',kind,'state',state,'payload',payload,
+          'output',COALESCE(output,''),'exit_state',COALESCE(exit_state,'')))
         FROM (SELECT * FROM commands ORDER BY id DESC LIMIT 20) c;")"
   # Layer-2 backlog, most-actionable status first, each with its worker labels.
   local t
