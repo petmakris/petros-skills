@@ -2,6 +2,30 @@
 
 Resume point for **live** testing of the two-layer mesh + MCP task manager. The automated suites already pass; this doc covers what only a real, interactive run can verify (spawning real `claude --bg` workers), so a fresh session can pick up exactly here.
 
+## ✅ LIVE TEST RESULT — 2026-07-03: ALL STEPS PASS
+
+Ran the full checklist below against real background workers. Every step passed on the first attempt, including the two paths the automated suites can't reach.
+
+| Step | Result |
+|---|---|
+| 0 — MCP server live | ✅ 15 tools callable; `mesh_board` returns `{sessions,commands,tasks}` |
+| 1 — Backlog CRUD | ✅ `todo → blocked → done`; board shows backlog section |
+| 2 — **Real auto-spawn** | ✅ `task_spawn` launched a real `claude --bg` worker (`mesh_spawn_launch` — the one untested path); worker **alive**, task **in_progress**, assignment + `prompt` cmd dispatched, agent confirmed via `claude agents` |
+| 3 — Worker executes + reports | ✅ worker claimed the prompt, did the work, `mesh_complete`; `mesh_collect` returned its summary (`exit_state: ok`); task auto-advanced to `done` |
+| 4 — Ask round-trip | ✅ `mesh_ask` → concise accurate answer back via `mesh_collect` |
+| 5 — Relationship rules | ✅ second-active-task assign **rejected**; `force` moves it; two workers coexist on one task (lead + support) |
+| 6 — Doorbell + pause | ✅ dispatch-to-joined-worker proven (Steps 2–3); `mesh_pause` held a command `pending` for 60s; `mesh_resume` → claimed & ran within 30s |
+| 7 — Teardown + **reaper** | ✅ killed a worker mid-`running` command → `mesh_reap` re-queued it to `pending`; DB wiped clean afterward |
+
+Notes for the record:
+- Worker boot-to-execute latency was ~30–40s per dispatched prompt (full `claude --bg` cold start + `/mesh-join` + doorbell arm).
+- `task_spawn` returned a real `session_id`/`command_id` within the default 25s wait window — no "not registered yet" fallback needed.
+- No code changes were required; the `Tweak points` below went unused. The live paths matched the design.
+
+The rest of this doc is the original pre-test plan, kept for reference.
+
+---
+
 ## Status snapshot (as of 2026-07-03)
 
 Built and pushed to `main`, all three phases:
