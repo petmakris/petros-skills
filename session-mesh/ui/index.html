@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Mesh — Live Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --primary:#1976d2; --primary-dark:#1565c0; --primary-050:#e3f2fd;
+    --success:#2e7d32; --success-bg:#e8f5e9; --warning:#ed6c02; --amber-bg:#fff8e1; --amber-ink:#b26a00;
+    --danger:#c62828; --danger-bg:#fdecea; --purple:#6a1b9a;
+    --bg:#f4f6f8; --surface:#fff; --divider:rgba(0,0,0,.10); --divider-soft:rgba(0,0,0,.06);
+    --ink:rgba(0,0,0,.87); --ink-2:rgba(0,0,0,.6); --ink-3:rgba(0,0,0,.4);
+    --sans:"Roboto",system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:"Roboto Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --e1:0 2px 1px -1px rgba(0,0,0,.10),0 1px 3px 0 rgba(0,0,0,.08);
+    --e2:0 3px 5px -1px rgba(0,0,0,.10),0 1px 10px 0 rgba(0,0,0,.05);
+    --e3:0 8px 24px rgba(0,0,0,.18);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 22px}
+  button{font-family:var(--sans)}
+
+  .appbar{position:sticky;top:0;z-index:20;background:var(--surface);box-shadow:var(--e1)}
+  .appbar .row{display:flex;align-items:center;gap:14px;height:62px;max-width:1240px;margin:0 auto;padding:0 22px}
+  .logo{width:32px;height:32px;border-radius:8px;background:var(--primary);display:grid;place-items:center;color:#fff;flex:none}
+  .brand{font-size:17px;font-weight:500}.brand span{color:var(--ink-2);font-weight:400}
+  .spacer{flex:1}
+  .live{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2);font-family:var(--mono)}
+  .live .dot{width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse 2s infinite}
+  .live.off .dot{background:var(--danger);animation:none}.live.off{color:var(--danger)}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(46,125,50,.45)}70%{box-shadow:0 0 0 7px rgba(46,125,50,0)}100%{box-shadow:0 0 0 0 rgba(46,125,50,0)}}
+  .btn{height:34px;padding:0 15px;border-radius:8px;border:1px solid var(--divider);background:var(--surface);
+    font-size:13.5px;font-weight:500;color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{background:#f7fafd;border-color:#c9d6e2}
+  .btn.pri{background:var(--primary);border-color:var(--primary);color:#fff}.btn.pri:hover{background:var(--primary-dark)}
+  .btn.warn{color:var(--amber-ink);border-color:#ffe0a3;background:var(--amber-bg)}
+  .btn.ok{color:var(--success);border-color:#b6dbb9;background:var(--success-bg)}
+  .btn.sm{height:26px;padding:0 10px;font-size:12px}
+
+  .banner{background:var(--amber-bg);border:1px solid #ffe0a3;color:var(--amber-ink);border-radius:10px;
+    padding:10px 16px;margin:18px 0 0;font-size:13.5px;display:flex;align-items:center;gap:9px}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:22px 0}
+  .stat{background:var(--surface);border-radius:12px;box-shadow:var(--e1);padding:16px 18px}
+  .stat .n{font-size:26px;font-weight:500;letter-spacing:-.01em}.stat .n b{font-weight:500;color:var(--ink-3);font-size:20px}
+  .stat .l{font-size:12.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}
+  .stat.ok .n{color:var(--success)}.stat.run .n{color:var(--primary)}.stat.blk .n{color:var(--amber-ink)}
+
+  .grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;padding-bottom:44px}
+  .panel{background:var(--surface);border-radius:12px;box-shadow:var(--e1)}
+  .ph{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--divider-soft)}
+  .ph h2{margin:0;font-size:15px;font-weight:500}.ph .cnt{font-size:12px;color:var(--ink-3);font-family:var(--mono)}.ph .spacer{flex:1}
+
+  .kb{display:grid;grid-template-columns:repeat(4,1fr)}
+  .col{padding:14px 12px;border-right:1px solid var(--divider-soft);min-height:120px}
+  .col:last-child{border-right:none}
+  .col .ch{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:0 4px 12px}
+  .col .ch .k{width:9px;height:9px;border-radius:3px}
+  .k.todo{background:#b0bec5}.k.in_progress{background:var(--primary)}.k.blocked{background:var(--warning)}.k.done{background:var(--success)}
+  .col .ch .num{margin-left:auto;background:#eef1f4;color:var(--ink-2);border-radius:9px;padding:1px 8px;font-size:11px;font-weight:500}
+  .tcard{background:#fff;border:1px solid var(--divider-soft);border-radius:9px;padding:11px 12px;margin-bottom:10px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .tcard:hover{box-shadow:var(--e2);border-color:#d5e2ee}
+  .tcard .slug{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--primary-dark);word-break:break-all}
+  .tcard .title{font-size:13px;color:var(--ink);margin:3px 0 8px;line-height:1.35}
+  .tcard.dn .title{color:var(--ink-3);text-decoration:line-through}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .wchip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10.5px;background:var(--success-bg);color:var(--success);border-radius:8px;padding:2px 8px}
+  .wchip .d{width:6px;height:6px;border-radius:50%;background:var(--success)}
+  .wchip.stale{background:var(--amber-bg);color:var(--amber-ink)}.wchip.stale .d{background:var(--warning)}
+  .tacts{display:flex;gap:6px;margin-top:9px;opacity:0;transition:opacity .12s}
+  .tcard:hover .tacts{opacity:1}
+  .empty{color:var(--ink-3);font-size:12.5px;font-style:italic;padding:6px 4px}
+
+  .wlist{padding:8px 12px}
+  .wrow{display:flex;gap:11px;padding:11px 8px;align-items:flex-start}
+  .wrow + .wrow{border-top:1px solid var(--divider-soft)}
+  .wdot{width:10px;height:10px;border-radius:50%;margin-top:4px;flex:none}
+  .wdot.alive{background:var(--success);box-shadow:0 0 0 3px rgba(46,125,50,.14)}
+  .wdot.stale{background:var(--warning);box-shadow:0 0 0 3px rgba(237,108,2,.14)}
+  .wmain{flex:1;min-width:0}
+  .wlabel{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink)}
+  .wact{font-size:12px;color:var(--ink-2);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wact.run{color:var(--primary-dark)}
+  .wmeta{font-size:11px;color:var(--ink-3);font-family:var(--mono);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wtag{font-size:10px;font-family:var(--mono);color:var(--ink-3);border:1px solid var(--divider);border-radius:7px;padding:1px 7px;align-self:center}
+
+  .feed{padding:4px 10px 10px}
+  .cmd{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;padding:9px 8px;border-top:1px solid var(--divider-soft)}
+  .cmd:first-child{border-top:none}
+  .cmd .id{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+  .cmd .tgt{font-family:var(--mono);font-size:12.5px;color:var(--ink);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .st{font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;border-radius:8px;padding:3px 9px;white-space:nowrap}
+  .st.pending{background:#eef1f4;color:#607d8b}.st.running{background:var(--primary-050);color:var(--primary-dark)}
+  .st.done{background:var(--success-bg);color:var(--success)}.st.error{background:var(--danger-bg);color:var(--danger)}
+  .kind{font-size:10px;font-family:var(--mono);color:#fff;border-radius:6px;padding:1px 6px;margin-right:6px}
+  .kind.shell{background:#455a64}.kind.prompt{background:var(--purple)}.kind.control{background:var(--warning)}
+
+  /* modal */
+  .scrim{position:fixed;inset:0;background:rgba(20,30,40,.42);display:none;align-items:center;justify-content:center;z-index:40}
+  .scrim.on{display:flex}
+  .modal{background:var(--surface);border-radius:14px;box-shadow:var(--e3);width:440px;max-width:calc(100vw - 32px);padding:22px 24px}
+  .modal h3{margin:0 0 4px;font-size:18px;font-weight:500}
+  .modal p{margin:0 0 16px;color:var(--ink-2);font-size:13.5px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;font-weight:500;color:var(--ink-2);margin-bottom:5px}
+  .field input,.field textarea{width:100%;border:1px solid var(--divider);border-radius:8px;padding:9px 11px;font-size:13.5px;font-family:var(--sans);color:var(--ink)}
+  .field input.mono{font-family:var(--mono);font-size:12.5px}
+  .field textarea{resize:vertical;min-height:56px}
+  .field input:focus,.field textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(25,118,210,.12)}
+  .mfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+  .merr{color:var(--danger);font-size:12.5px;min-height:16px;margin-top:2px}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:#263238;color:#fff;
+    padding:11px 18px;border-radius:9px;font-size:13.5px;box-shadow:var(--e3);opacity:0;transition:.2s;z-index:50;pointer-events:none}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{background:var(--danger)}
+
+  @media(max-width:980px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.kb{grid-template-columns:1fr 1fr}.col:nth-child(2n){border-right:none}}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="row">
+    <div class="logo"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="19" cy="19" r="2.4"/><path d="M7.2 11 16.8 6.2M7.2 13l9.6 4.8"/></svg></div>
+    <div class="brand">Session Mesh <span>· Live Board</span></div>
+    <div class="spacer"></div>
+    <div id="live" class="live"><span class="dot"></span> <span id="livetxt">connecting…</span></div>
+    <button class="btn pri" id="addBtn">+ Add task</button>
+    <button class="btn" id="spawnBtn">Spawn worker</button>
+    <button class="btn warn" id="pauseBtn">Pause fleet</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="banner"></div>
+  <div class="stats" id="stats"></div>
+  <div class="grid">
+    <div class="panel">
+      <div class="ph"><h2>Task board</h2><span class="cnt" id="taskCnt"></span><span class="spacer"></span><span class="cnt">schema v3</span></div>
+      <div class="kb" id="kb"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div class="panel">
+        <div class="ph"><h2>Workers</h2><span class="cnt" id="wCnt"></span></div>
+        <div class="wlist" id="workers"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h2>Recent commands</h2><span class="cnt">last 20</span></div>
+        <div class="feed" id="feed"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (tag, cls, txt) => { const e=document.createElement(tag); if(cls)e.className=cls; if(txt!=null)e.textContent=txt; return e; };
+const COLS = [["todo","Todo"],["in_progress","In progress"],["blocked","Blocked"],["done","Done"]];
+let lastOk = 0, latestBoard = null;
+
+async function getBoard(){ const r = await fetch("/api/board"); if(!r.ok) throw new Error("http "+r.status); return r.json(); }
+async function action(op, args={}){
+  const r = await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({op,...args})});
+  const j = await r.json();
+  if(!j.ok) throw new Error(j.error||"action failed");
+  return j.result;
+}
+function toast(msg, err){ const t=$("#toast"); t.textContent=msg; t.className="toast on"+(err?" err":""); setTimeout(()=>t.className="toast",2200); }
+
+function setLive(ok){
+  const l=$("#live");
+  if(ok){ l.className="live"; $("#livetxt").textContent="live · refreshed just now"; }
+  else { l.className="live off"; $("#livetxt").textContent="disconnected — is the server running?"; }
+}
+
+function render(b){
+  latestBoard = b;
+  const S=b.sessions||[], C=b.commands||[], T=b.tasks||[];
+  const byLabel={}; S.forEach(s=>byLabel[s.label]=s);
+
+  // stats
+  const alive=S.filter(s=>s.liveness==="alive").length;
+  const inprog=T.filter(t=>t.status==="in_progress").length;
+  const blocked=T.filter(t=>t.status==="blocked").length;
+  const running=C.filter(c=>c.state==="running").length;
+  const stats=$("#stats"); stats.innerHTML="";
+  const stat=(cls,n,sub,l)=>{const d=el("div","stat "+cls);const nn=el("div","n");nn.textContent=n;if(sub){const b=el("b");b.textContent=" "+sub;nn.appendChild(b);}d.appendChild(nn);d.appendChild(el("div","l",l));return d;};
+  stats.appendChild(stat("ok",alive,"/ "+S.length,"Workers alive"));
+  stats.appendChild(stat("run",inprog,"","Tasks in progress"));
+  stats.appendChild(stat("blk",blocked,"","Blocked"));
+  stats.appendChild(stat("",running,"","Commands running"));
+
+  // pause banner + button
+  $("#banner").innerHTML="";
+  if(b.paused){
+    const bn=el("div","banner"); bn.appendChild(el("span",null,"⏸")); bn.appendChild(el("span",null,"Fleet is paused — workers keep heartbeating but claim nothing until you resume."));
+    $("#banner").appendChild(bn);
+  }
+  const pb=$("#pauseBtn");
+  if(b.paused){ pb.textContent="Resume fleet"; pb.className="btn ok"; pb.onclick=()=>doAction("resume","Fleet resumed"); }
+  else { pb.textContent="Pause fleet"; pb.className="btn warn"; pb.onclick=()=>doAction("pause","Fleet paused"); }
+
+  // kanban
+  $("#taskCnt").textContent=T.length+" task"+(T.length===1?"":"s");
+  const kb=$("#kb"); kb.innerHTML="";
+  COLS.forEach(([status,label])=>{
+    const items=T.filter(t=>t.status===status);
+    const col=el("div","col");
+    const ch=el("div","ch"); ch.appendChild(el("span","k "+status)); ch.appendChild(el("span",null,label));
+    const num=el("span","num",items.length); ch.appendChild(num); col.appendChild(ch);
+    if(!items.length) col.appendChild(el("div","empty","—"));
+    items.forEach(t=>col.appendChild(taskCard(t,byLabel)));
+    kb.appendChild(col);
+  });
+
+  // workers
+  $("#wCnt").textContent=S.length+" session"+(S.length===1?"":"s");
+  const w=$("#workers"); w.innerHTML="";
+  if(!S.length) w.appendChild(el("div","empty","No workers connected. Spawn one, or run /mesh-join in a session."));
+  S.forEach(s=>w.appendChild(workerRow(s)));
+
+  // feed
+  const f=$("#feed"); f.innerHTML="";
+  if(!C.length) f.appendChild(el("div","empty","No commands yet."));
+  C.forEach(c=>f.appendChild(cmdRow(c)));
+
+  lastOk=Date.now(); setLive(true);
+}
+
+function taskCard(t,byLabel){
+  const c=el("div","tcard"+(t.status==="done"?" dn":""));
+  c.appendChild(el("div","slug",t.slug));
+  c.appendChild(el("div","title",t.title||""));
+  if(t.sessions && t.sessions.length){
+    const chips=el("div","chips");
+    t.sessions.forEach(lbl=>{
+      const stale=byLabel[lbl] && byLabel[lbl].liveness==="stale";
+      const ch=el("span","wchip"+(stale?" stale":"")); ch.appendChild(el("span","d")); ch.appendChild(document.createTextNode(lbl));
+      chips.appendChild(ch);
+    });
+    c.appendChild(chips);
+  }
+  const acts=el("div","tacts");
+  if(t.status!=="done"){
+    const done=el("button","btn ok sm","✓ Done"); done.onclick=()=>doAction("task_done","Marked "+t.slug+" done",{slug:t.slug}); acts.appendChild(done);
+  }
+  if(t.status!=="done" && (!t.sessions||!t.sessions.length)){
+    const sp=el("button","btn sm","Spawn"); sp.onclick=()=>openSpawn(t.slug); acts.appendChild(sp);
+  }
+  if(t.status==="blocked"){
+    const un=el("button","btn sm","Unblock"); un.onclick=()=>doAction("task_set_status","Unblocked "+t.slug,{slug:t.slug,status:"todo"}); acts.appendChild(un);
+  }
+  c.appendChild(acts);
+  return c;
+}
+
+function workerRow(s){
+  const r=el("div","wrow");
+  r.appendChild(el("span","wdot "+(s.liveness==="alive"?"alive":"stale")));
+  const m=el("div","wmain");
+  m.appendChild(el("div","wlabel",s.label));
+  const act = s.current_task ? ("▶ "+s.current_task) : (s.liveness==="stale" ? "stale — last seen >90s" : (s.status||"idle"));
+  m.appendChild(el("div","wact"+(s.current_task?" run":""),act));
+  const home = (s.cwd||"").replace(/^\/Users\/[^/]+/,"~").replace(/^\/home\/[^/]+/,"~");
+  m.appendChild(el("div","wmeta",home+(s.pid?"  · pid "+s.pid:"")));
+  r.appendChild(m);
+  return r;
+}
+
+function cmdRow(c){
+  const r=el("div","cmd");
+  r.appendChild(el("span","id","#"+c.id));
+  const body=el("div"); const k=el("span","kind "+c.kind,c.kind); body.appendChild(k);
+  const tgt=el("span","tgt",c.target); body.appendChild(tgt); r.appendChild(body);
+  r.appendChild(el("span","st "+c.state,c.state));
+  return r;
+}
+
+// ---- actions with optimistic refresh ----
+async function doAction(op,okMsg,args){
+  try{ await action(op,args); toast(okMsg); await refresh(); }
+  catch(e){ toast(e.message,true); }
+}
+
+// ---- modals ----
+function closeModal(){ $("#scrim").className="scrim"; }
+$("#scrim").addEventListener("click",e=>{ if(e.target===$("#scrim")) closeModal(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
+
+function showModal(node){ const m=$("#modal"); m.innerHTML=""; m.appendChild(node); $("#scrim").className="scrim on"; const f=m.querySelector("input,textarea"); if(f)f.focus(); }
+function fieldRow(label,input){ const d=el("div","field"); d.appendChild(el("label",null,label)); d.appendChild(input); return d; }
+function inp(ph,mono){ const i=el("input"); i.placeholder=ph||""; if(mono)i.className="mono"; return i; }
+
+function openAdd(){
+  const box=document.createElement("div");
+  box.appendChild(el("h3",null,"Add a task"));
+  box.appendChild(el("p",null,"Goes onto the backlog as todo. Slug is the short handle you'll reference it by."));
+  const slug=inp("oauth-refactor",true), title=inp("Refactor the OAuth flow"), desc=el("textarea"); desc.placeholder="Optional details for the worker…";
+  box.appendChild(fieldRow("Slug",slug)); box.appendChild(fieldRow("Title",title)); box.appendChild(fieldRow("Description (optional)",desc));
+  const err=el("div","merr");
+  const foot=el("div","mfoot"); const cancel=el("button","btn","Cancel"); cancel.onclick=closeModal;
+  const save=el("button","btn pri","Add task");
+  save.onclick=async()=>{ if(!slug.value.trim()||!title.value.trim()){err.textContent="Slug and title are required.";return;}
+    try{ await action("task_add",{slug:slug.value.trim(),title:title.value.trim(),description:desc.value.trim()}); closeModal(); toast("Task "+slug.value.trim()+" added"); refresh(); }
+    catch(e){ err.textContent=e.message; } };
+  foot.appendChild(cancel); foot.appendChild(save); box.appendChild(err); box.appendChild(foot);
+  showModal(box);
+}
+
+function openSpawn(prefillSlug){
+  const box=document.createElement("div");
+  box.appendChild(el("h3",null,"Spawn a worker"));
+  box.appendChild(el("p",null,"Launches a background Claude session in the given directory, joins it to the mesh, and hands it the task."));
+  const todo=(latestBoard?.tasks||[]).filter(t=>t.status!=="done").map(t=>t.slug);
+  const slug=inp("task slug",true); slug.value=prefillSlug||"";
+  const cwd=inp("/absolute/path/to/worktree",true);
+  const label=inp("(optional — defaults to the slug)",true);
+  box.appendChild(fieldRow("Task slug"+(todo.length?"  ("+todo.join(", ")+")":""),slug));
+  box.appendChild(fieldRow("Working directory",cwd));
+  box.appendChild(fieldRow("Label",label));
+  const err=el("div","merr");
+  const foot=el("div","mfoot"); const cancel=el("button","btn","Cancel"); cancel.onclick=closeModal;
+  const go=el("button","btn pri","Spawn");
+  go.onclick=async()=>{ if(!slug.value.trim()||!cwd.value.trim()){err.textContent="Task slug and working directory are required.";return;}
+    go.textContent="Spawning…"; go.disabled=true;
+    try{ const res=await action("task_spawn",{slug:slug.value.trim(),cwd:cwd.value.trim(),label:label.value.trim()||slug.value.trim(),wait_secs:"30"});
+      closeModal(); toast(res&&res.session_id?("Worker up for "+slug.value.trim()):"Launched — waiting for it to register"); refresh(); }
+    catch(e){ err.textContent=e.message; go.textContent="Spawn"; go.disabled=false; } };
+  foot.appendChild(cancel); foot.appendChild(go); box.appendChild(err); box.appendChild(foot);
+  showModal(box);
+}
+
+$("#addBtn").onclick=openAdd;
+$("#spawnBtn").onclick=()=>openSpawn("");
+
+// ---- poll loop ----
+async function refresh(){ try{ const b=await getBoard(); render(b); }catch(e){ setLive(false); } }
+refresh();
+setInterval(refresh, 1500);
+// keep the "refreshed Ns ago" honest between polls
+setInterval(()=>{ if($("#live").className.includes("off"))return; const s=Math.round((Date.now()-lastOk)/1000);
+  $("#livetxt").textContent = s<=1?"live · refreshed just now":("live · refreshed "+s+"s ago"); }, 1000);
+</script>
+</body>
+</html>
