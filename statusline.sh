@@ -103,12 +103,23 @@ fi
 
 # --- Model family + 1M badge ---
 model_family=""
-if [[ "$model_id" == *"opus"* ]]; then
+if [[ "$model_id" == *"fable"* ]]; then
+  model_family="${CYAN}Fable${RESET}"
+elif [[ "$model_id" == *"mythos"* ]]; then
+  model_family="${CYAN}Mythos${RESET}"
+elif [[ "$model_id" == *"opus"* ]]; then
   model_family="${MAGENTA}Opus${RESET}"
 elif [[ "$model_id" == *"sonnet"* ]]; then
   model_family="${BLUE}Sonnet${RESET}"
 elif [[ "$model_id" == *"haiku"* ]]; then
   model_family="${GREEN}Haiku${RESET}"
+elif [ -n "$model_id" ]; then
+  # Unknown family (future models): show the segment after "claude-",
+  # capitalized, instead of dropping the badge entirely.
+  fam=${model_id#claude-}
+  fam=${fam%%-*}
+  fam=${fam%%\[*}
+  [ -n "$fam" ] && model_family="${DIM}$(printf '%s' "$fam" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')${RESET}"
 fi
 
 badge=""
