@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Mesh — Operator's Manual</title>
+<style>
+  :root{
+    --navy:#0A1A33;        /* field */
+    --navy-2:#0D2140;      /* panel */
+    --navy-3:#102A4C;      /* raised */
+    --grid:rgba(120,180,220,.10);
+    --hair:rgba(130,190,230,.22);
+    --cyan:#58C6E8;        /* structure / master */
+    --cyan-dim:#3C88A6;
+    --amber:#FFB84D;       /* live signal / heartbeat */
+    --amber-dim:#C98A2E;
+    --red:#FF6B6B;         /* pause / danger */
+    --ink:#E4EDF7;
+    --muted:#8CA3C0;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:var(--sans);
+    color:var(--ink);
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/32px 32px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/32px 32px,
+      radial-gradient(1200px 700px at 78% -8%, #123056 0%, transparent 60%),
+      var(--navy);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.6;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* ---- shared type ---- */
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:12px;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--cyan);
+    display:flex;align-items:center;gap:12px;
+  }
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--cyan);opacity:.7}
+  h2.sec{
+    font-size:13px;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--muted);font-weight:700;margin:0 0 22px;
+    font-family:var(--mono);
+    display:flex;align-items:center;gap:14px;
+  }
+  h2.sec::after{content:"";flex:1;height:1px;background:var(--hair)}
+  code,kbd,.mono{font-family:var(--mono)}
+
+  /* ---- header / hero ---- */
+  header{border-bottom:1px solid var(--hair);position:relative;overflow:hidden}
+  .hero{padding:64px 0 48px;position:relative;z-index:2}
+  .hero h1{
+    font-size:clamp(34px,6vw,68px);
+    line-height:1.02;
+    letter-spacing:-.02em;
+    font-weight:800;
+    margin:22px 0 0;
+    text-transform:uppercase;
+  }
+  .hero h1 .thin{font-weight:300;color:var(--muted)}
+  .hero h1 .amber{color:var(--amber)}
+  .lede{max-width:52ch;margin:20px 0 0;color:var(--muted);font-size:18px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  /* ---- topology signature ---- */
+  .topo{width:100%;height:auto;display:block;margin:34px 0 4px}
+  .node-label{font-family:var(--mono);font-size:13px;letter-spacing:.02em}
+  .node-sub{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+  .wire{fill:none;stroke:var(--cyan);stroke-width:1.4;opacity:.32}
+  .signal{fill:none;stroke:var(--amber);stroke-width:2;stroke-linecap:round;
+    stroke-dasharray:6 190;filter:drop-shadow(0 0 5px rgba(255,184,77,.7));
+    animation:flow 2.6s linear infinite}
+  .signal.s2{animation-delay:.5s}
+  .signal.s3{animation-delay:1.05s}
+  @keyframes flow{from{stroke-dashoffset:196}to{stroke-dashoffset:0}}
+  .beat{transform-origin:center;transform-box:fill-box;animation:beat 2.6s ease-out infinite}
+  .beat.b2{animation-delay:.5s}
+  .beat.b3{animation-delay:1.05s}
+  @keyframes beat{0%,55%{opacity:0;r:6}70%{opacity:.55}100%{opacity:0;r:22}}
+  .master-glow{animation:glow 3s ease-in-out infinite}
+  @keyframes glow{0%,100%{opacity:.5}50%{opacity:1}}
+
+  /* ---- role cards (mental model) ---- */
+  section{padding:56px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{
+    background:linear-gradient(180deg,var(--navy-2),var(--navy-2));
+    border:1px solid var(--hair);border-radius:10px;padding:24px 24px 22px;
+    position:relative;
+  }
+  .card .tag{
+    font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    padding:4px 9px;border-radius:5px;display:inline-block;
+  }
+  .card.master .tag{color:var(--navy);background:var(--cyan)}
+  .card.worker .tag{color:var(--navy);background:var(--amber)}
+  .card h3{margin:14px 0 6px;font-size:22px;letter-spacing:-.01em}
+  .card p{margin:0;color:var(--muted)}
+  .card .pin{
+    position:absolute;top:22px;right:22px;width:9px;height:9px;border-radius:50%;
+  }
+  .card.master .pin{background:var(--cyan);box-shadow:0 0 0 4px rgba(88,198,232,.15)}
+  .card.worker .pin{background:var(--amber);box-shadow:0 0 0 4px rgba(255,184,77,.15)}
+
+  /* ---- command matrix ---- */
+  .group{margin-bottom:30px}
+  .group-head{
+    display:flex;align-items:baseline;gap:14px;margin:0 0 10px;
+  }
+  .group-head .role{
+    font-family:var(--mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--cyan);
+  }
+  .group-head .where{color:var(--muted);font-size:13px}
+  .rows{border:1px solid var(--hair);border-radius:10px;overflow:hidden}
+  .row{
+    display:grid;grid-template-columns:220px 96px 1fr;gap:16px;align-items:center;
+    padding:15px 20px;border-top:1px solid var(--hair);
+    transition:background .15s ease;
+  }
+  .row:first-child{border-top:none}
+  .row:hover{background:rgba(88,198,232,.06)}
+  .row .cmd{font-family:var(--mono);font-size:15px;color:var(--ink);font-weight:600}
+  .row .when{color:var(--muted);font-size:14.5px}
+  .row .when b{color:var(--ink);font-weight:600}
+  .badge{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+    padding:4px 8px;border-radius:5px;text-align:center;white-space:nowrap;
+    border:1px solid transparent;
+  }
+  .badge.none{color:var(--muted);border-color:var(--hair)}
+  .badge.args{color:var(--amber);border-color:var(--amber-dim);background:rgba(255,184,77,.08)}
+  .badge.legacy{color:var(--muted);border-color:var(--hair);opacity:.7}
+
+  /* ---- dispatch anatomy ---- */
+  .anatomy{
+    background:var(--navy-2);border:1px solid var(--hair);border-radius:12px;
+    padding:26px 24px;
+  }
+  .cmdline{
+    font-family:var(--mono);font-size:clamp(15px,2.4vw,21px);
+    padding:16px 18px;background:var(--navy);border:1px solid var(--hair);border-radius:8px;
+    overflow-x:auto;white-space:nowrap;
+  }
+  .cmdline .k{color:var(--cyan)}
+  .cmdline .t{color:var(--amber);border-bottom:1px dashed var(--amber-dim)}
+  .cmdline .ki{color:#8FE0B0;border-bottom:1px dashed #4f8a68}
+  .cmdline .p{color:var(--ink);border-bottom:1px dashed var(--muted)}
+  .parts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+  .part h4{margin:0 0 6px;font-family:var(--mono);font-size:13px;letter-spacing:.06em}
+  .part.t h4{color:var(--amber)} .part.ki h4{color:#8FE0B0} .part.p h4{color:var(--ink)}
+  .part p{margin:0;color:var(--muted);font-size:14px}
+  .part code{color:var(--ink);font-size:12.5px;background:var(--navy-3);padding:1px 5px;border-radius:4px}
+
+  /* ---- flows ---- */
+  .flow{display:grid;grid-template-columns:44px 1fr;gap:0 20px;margin-bottom:14px;align-items:stretch}
+  .flow .num{
+    font-family:var(--mono);font-size:13px;color:var(--cyan);
+    border:1px solid var(--hair);border-radius:8px;display:grid;place-items:center;
+    align-self:start;width:44px;height:44px;
+  }
+  .flow .body{}
+  .flow h4{margin:2px 0 8px;font-size:16px}
+  pre{
+    margin:0;font-family:var(--mono);font-size:13.5px;line-height:1.75;
+    background:var(--navy);border:1px solid var(--hair);border-radius:8px;
+    padding:14px 16px;overflow-x:auto;color:var(--ink);
+  }
+  pre .c{color:var(--muted)}
+  pre .g{color:var(--cyan)}
+
+  /* ---- notes ---- */
+  .notes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .note{border-left:2px solid var(--cyan);padding:2px 0 2px 18px}
+  .note.warn{border-color:var(--amber)}
+  .note h4{margin:0 0 4px;font-size:15px;font-family:var(--mono);letter-spacing:.02em}
+  .note p{margin:0;color:var(--muted);font-size:14.5px}
+
+  /* ---- planned ---- */
+  .planned{opacity:.86}
+  .planned .rows{border-style:dashed}
+  .future{
+    font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--amber);border:1px solid var(--amber-dim);border-radius:5px;padding:3px 9px;
+  }
+
+  footer{border-top:1px solid var(--hair);padding:34px 0 60px;color:var(--muted);font-size:13px}
+  footer .mono{color:var(--muted)}
+  a{color:var(--cyan);text-decoration:none}
+  a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:4px}
+
+  @media (max-width:760px){
+    .grid2,.parts,.notes{grid-template-columns:1fr}
+    .row{grid-template-columns:1fr auto;gap:6px 12px}
+    .row .when{grid-column:1 / -1}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .signal,.beat,.master-glow{animation:none}
+    .signal{stroke-dashoffset:60}
+    .beat{opacity:.5;r:14}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap hero">
+    <div class="eyebrow">Session Mesh · Operator's Manual</div>
+    <h1>One&nbsp;master.<br><span class="thin">Many</span> <span class="amber">workers.</span><br><span class="thin">One</span> queue.</h1>
+    <p class="lede">Drive a fleet of Claude Code sessions from a single seat. The master is a <b>task manager</b>; each worker owns <b>one task</b> in its own worktree. They coordinate through a small SQLite queue — no tty tricks, no shared memory. Idle workers cost <b>zero tokens</b>.</p>
+
+    <svg class="topo" viewBox="0 0 900 300" role="img" aria-label="Mesh topology: one master session wired to three worker sessions, with a live signal pulsing down each wire and heartbeats on the workers.">
+      <!-- wires -->
+      <path class="wire" d="M250,150 C360,150 400,64 560,64"/>
+      <path class="wire" d="M250,150 C380,150 430,150 560,150"/>
+      <path class="wire" d="M250,150 C360,150 400,236 560,236"/>
+      <!-- live signals -->
+      <path class="signal"    d="M250,150 C360,150 400,64 560,64"/>
+      <path class="signal s2" d="M250,150 C380,150 430,150 560,150"/>
+      <path class="signal s3" d="M250,150 C360,150 400,236 560,236"/>
+
+      <!-- master -->
+      <g>
+        <rect x="70" y="112" width="180" height="76" rx="12" fill="#0F2647" stroke="var(--cyan)" stroke-width="1.5"/>
+        <circle class="master-glow" cx="98" cy="150" r="6" fill="var(--cyan)"/>
+        <text x="122" y="145" class="node-label" fill="var(--ink)">master</text>
+        <text x="122" y="166" class="node-sub" fill="var(--cyan-dim)">task manager</text>
+      </g>
+
+      <!-- workers -->
+      <g>
+        <rect x="560" y="36" width="196" height="56" rx="10" fill="#0E223F" stroke="var(--hair)"/>
+        <circle cx="586" cy="64" r="5" fill="var(--amber)"/>
+        <circle class="beat" cx="586" cy="64" r="6" fill="none" stroke="var(--amber)" stroke-width="1.5"/>
+        <text x="606" y="60" class="node-label" fill="var(--ink)">worker</text>
+        <text x="606" y="77" class="node-sub" fill="var(--amber-dim)">one task</text>
+      </g>
+      <g>
+        <rect x="560" y="122" width="196" height="56" rx="10" fill="#0E223F" stroke="var(--hair)"/>
+        <circle cx="586" cy="150" r="5" fill="var(--amber)"/>
+        <circle class="beat b2" cx="586" cy="150" r="6" fill="none" stroke="var(--amber)" stroke-width="1.5"/>
+        <text x="606" y="146" class="node-label" fill="var(--ink)">worker</text>
+        <text x="606" y="163" class="node-sub" fill="var(--amber-dim)">one task</text>
+      </g>
+      <g>
+        <rect x="560" y="208" width="196" height="56" rx="10" fill="#0E223F" stroke="var(--hair)"/>
+        <circle cx="586" cy="236" r="5" fill="var(--amber)"/>
+        <circle class="beat b3" cx="586" cy="236" r="6" fill="none" stroke="var(--amber)" stroke-width="1.5"/>
+        <text x="606" y="232" class="node-label" fill="var(--ink)">worker</text>
+        <text x="606" y="249" class="node-sub" fill="var(--amber-dim)">one task</text>
+      </g>
+    </svg>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- MENTAL MODEL -->
+  <section>
+    <h2 class="sec">The mental model</h2>
+    <div class="grid2">
+      <div class="card master">
+        <span class="pin"></span>
+        <span class="tag">Master</span>
+        <h3>Where you sit</h3>
+        <p>The session you drive from. It never does task work itself — it watches the board, queues commands, and collects results. Keep it for steering.</p>
+      </div>
+      <div class="card worker">
+        <span class="pin"></span>
+        <span class="tag">Worker</span>
+        <h3>Parked on a task</h3>
+        <p>A session living in a task's worktree, listening. It executes whatever the master queues, at full autonomy, then reports back — and stays quiet until then.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMMAND MATRIX -->
+  <section>
+    <h2 class="sec">Command matrix</h2>
+
+    <div class="group">
+      <div class="group-head"><span class="role">Setup</span><span class="where">once per machine</span></div>
+      <div class="rows">
+        <div class="row">
+          <span class="cmd">/mesh-init</span>
+          <span class="badge none">no args</span>
+          <span class="when">First run on a machine, or when a skill reports <b>“database missing.”</b> Creates the SQLite store. Idempotent.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head"><span class="role">Worker</span><span class="where">run inside the task's session</span></div>
+      <div class="rows">
+        <div class="row">
+          <span class="cmd">/mesh-join</span>
+          <span class="badge none">no args</span>
+          <span class="when"><b>The one command you type in a worker.</b> Registers this session and arms the doorbell in one step. After it, the session listens.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-arm</span>
+          <span class="badge none">no args</span>
+          <span class="when">Re-arm the doorbell without re-registering. Rarely needed directly — <b>/mesh-join</b> already arms.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-poll</span>
+          <span class="badge legacy">legacy</span>
+          <span class="when">One poll tick for the old <b>/loop 1m /mesh-poll</b> model. Superseded by the event-driven doorbell; kept for back-compat.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-head"><span class="role">Master</span><span class="where">run in the driving session</span></div>
+      <div class="rows">
+        <div class="row">
+          <span class="cmd">/mesh-board</span>
+          <span class="badge none">no args</span>
+          <span class="when"><b>“What's running?”</b> Live roster: each worker's task, alive / stale / dead, current activity, and recent commands.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-dispatch</span>
+          <span class="badge args">args</span>
+          <span class="when">Queue work for a worker — or all of them. The <b>only</b> command that takes arguments (see below).</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-await</span>
+          <span class="badge none">no args</span>
+          <span class="when">After dispatching, wait quietly to be woken the <b>moment</b> a result lands. No polling, zero tokens while waiting.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-collect</span>
+          <span class="badge none">no args</span>
+          <span class="when">One-shot: pull any <b>already-finished</b> results right now, no waiting. An instant inbox check.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-pause</span>
+          <span class="badge none">no args</span>
+          <span class="when">Emergency-stop the whole fleet. Workers keep heartbeating (stay green) but execute nothing.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-resume</span>
+          <span class="badge none">no args</span>
+          <span class="when">Lift the pause; workers resume executing queued commands.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DISPATCH ANATOMY -->
+  <section>
+    <h2 class="sec">Anatomy of a dispatch</h2>
+    <div class="anatomy">
+      <div class="cmdline"><span class="k">/mesh-dispatch</span> <span class="t">PMP-211</span> <span class="ki">shell</span> <span class="p">"npm test"</span></div>
+      <div class="parts">
+        <div class="part t">
+          <h4>target</h4>
+          <p>Who runs it: a task label (<code>PMP-211</code>, <code>reporting-openapi</code>), a session id, or <code>*</code> to broadcast to everyone.</p>
+        </div>
+        <div class="part ki">
+          <h4>kind</h4>
+          <p><code>shell</code> runs a command in the worktree · <code>prompt</code> hands the worker a task to carry out · <code>control</code> takes it offline (<code>stop</code>).</p>
+        </div>
+        <div class="part p">
+          <h4>payload</h4>
+          <p>The quoted command, prompt, or verb. Free text — it may even contain <code>|</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FLOWS -->
+  <section>
+    <h2 class="sec">Typical flows</h2>
+
+    <div class="flow">
+      <div class="num">01</div>
+      <div class="body">
+        <h4>Stand up a worker</h4>
+        <pre><span class="c"># in a session opened in the task's worktree</span>
+<span class="g">/mesh-join</span>   <span class="c"># registers + listens. leave it be — free while idle.</span></pre>
+      </div>
+    </div>
+
+    <div class="flow">
+      <div class="num">02</div>
+      <div class="body">
+        <h4>Drive a worker from the master</h4>
+        <pre><span class="g">/mesh-board</span>                             <span class="c"># see who's live</span>
+<span class="g">/mesh-dispatch</span> PMP-211 shell "npm test"   <span class="c"># queue work</span>
+<span class="g">/mesh-await</span>                             <span class="c"># get woken when it finishes</span></pre>
+      </div>
+    </div>
+
+    <div class="flow">
+      <div class="num">03</div>
+      <div class="body">
+        <h4>Broadcast to everyone</h4>
+        <pre><span class="g">/mesh-dispatch</span> * prompt "pull main, rebase your branch, report conflicts"</pre>
+      </div>
+    </div>
+
+    <div class="flow">
+      <div class="num">04</div>
+      <div class="body">
+        <h4>Panic button</h4>
+        <pre><span class="g">/mesh-pause</span>    <span class="c"># everything holds</span>
+<span class="g">/mesh-resume</span>   <span class="c"># ...back to work</span></pre>
+      </div>
+    </div>
+
+    <div class="flow">
+      <div class="num">05</div>
+      <div class="body">
+        <h4>Retire a worker</h4>
+        <pre><span class="g">/mesh-dispatch</span> reporting-openapi control stop</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- NOTES -->
+  <section>
+    <h2 class="sec">Good to know</h2>
+    <div class="notes">
+      <div class="note warn">
+        <h4>Full autonomy</h4>
+        <p>Workers execute what they claim, unattended. The global pause is the only stop. Dispatch deliberately.</p>
+      </div>
+      <div class="note">
+        <h4>Don't drive a hand-typed session</h4>
+        <p>Arm workers in dedicated sessions; keep the one you're typing in as the master.</p>
+      </div>
+      <div class="note warn">
+        <h4>The doorbell</h4>
+        <p>Detection runs in a detached shell that blocks until real work, then exits — waking the model exactly once. Idle cost: zero. <span class="mono">/mesh-await</span> is its master-side twin.</p>
+      </div>
+      <div class="note">
+        <h4>Crash recovery</h4>
+        <p>A claimed command whose worker dies is auto-requeued (the reaper runs inside <span class="mono">/mesh-board</span> and <span class="mono">/mesh-dispatch</span>). No daemon, no manual step.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANNED -->
+  <section class="planned">
+    <h2 class="sec">Planned · task-manager redesign</h2>
+    <div class="group">
+      <div class="group-head"><span class="future">not yet built</span><span class="where">designed in&nbsp;<span class="mono">specs/2026-07-03-task-manager-mesh-design.md</span></span></div>
+      <div class="rows">
+        <div class="row">
+          <span class="cmd">/mesh-task-add</span>
+          <span class="badge args">args</span>
+          <span class="when">Add a task to the <b>backlog</b> — before any session exists. <code style="font-family:var(--mono);color:var(--muted)">&lt;slug&gt; "&lt;desc&gt;"</code></span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-task-start</span>
+          <span class="badge args">args</span>
+          <span class="when"><b>Auto-spawns</b> a worker for the task (<span class="mono">claude --bg</span>) — no more hand-starting. Marks it in-progress.</span>
+        </div>
+        <div class="row">
+          <span class="cmd">/mesh-task-done</span>
+          <span class="badge args">args</span>
+          <span class="when">Mark a task done, and optionally stop its worker.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="mono">SESSION MESH · personal tooling under ~/.claude · never committed to a product repo</div>
+    <div style="margin-top:8px">Store: SQLite WAL at <span class="mono">~/.claude/session-mesh/mesh.db</span>. Source in <span class="mono">mesh.sh</span>; the skills are the whole interface.</div>
+  </footer>
+
+</div>
+</body>
+</html>
