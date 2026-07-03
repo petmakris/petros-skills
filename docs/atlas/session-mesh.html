@@ -173,7 +173,7 @@
     </div>
     <div class="title">Session Mesh <span>· Operator's Manual</span></div>
     <div class="spacer"></div>
-    <div class="ver">10 skills</div>
+    <div class="ver">11 skills · 15 MCP tools</div>
   </div>
 </div>
 
@@ -183,7 +183,7 @@
   <div class="hero">
     <div class="overline">Coordination for parallel Claude Code</div>
     <h1>One master. Many <b>workers</b>. One&nbsp;queue.</h1>
-    <p>Drive a fleet of Claude Code sessions from a single seat. The master is a <b>task manager</b>; each worker owns <b>one task</b> in its own worktree. They coordinate through a small SQLite queue — no tty tricks, no shared memory. Idle workers cost <b>zero tokens</b>.</p>
+    <p>Drive a fleet of Claude Code sessions from a single seat. The mesh is <b>two orthogonal layers</b>: a transport that reaches and drives live sessions, and a task backlog that lives in the store, independent of any session. They coordinate through a small SQLite queue — no tty tricks, no shared memory. Idle workers cost <b>zero tokens</b>.</p>
   </div>
 
   <div class="topo-card">
@@ -206,22 +206,43 @@
         <rect x="556" y="26" width="188" height="52" rx="10" fill="#ffffff" stroke="#e0e0e0" stroke-width="1.4"/>
         <circle cx="582" cy="52" r="4.5" fill="#2e7d32"/>
         <text x="600" y="48" class="t-node" fill="rgba(0,0,0,.82)">worker</text>
-        <text x="600" y="65" class="t-sub" fill="#2e7d32">one task</text>
+        <text x="600" y="65" class="t-sub" fill="#2e7d32">live session</text>
       </g>
       <g>
         <rect x="556" y="94" width="188" height="52" rx="10" fill="#ffffff" stroke="#e0e0e0" stroke-width="1.4"/>
         <circle cx="582" cy="120" r="4.5" fill="#2e7d32"/>
         <text x="600" y="116" class="t-node" fill="rgba(0,0,0,.82)">worker</text>
-        <text x="600" y="133" class="t-sub" fill="#2e7d32">one task</text>
+        <text x="600" y="133" class="t-sub" fill="#2e7d32">live session</text>
       </g>
       <g>
         <rect x="556" y="162" width="188" height="52" rx="10" fill="#ffffff" stroke="#e0e0e0" stroke-width="1.4"/>
         <circle cx="582" cy="188" r="4.5" fill="#2e7d32"/>
         <text x="600" y="184" class="t-node" fill="rgba(0,0,0,.82)">worker</text>
-        <text x="600" y="201" class="t-sub" fill="#2e7d32">one task</text>
+        <text x="600" y="201" class="t-sub" fill="#2e7d32">live session</text>
       </g>
     </svg>
   </div>
+
+  <!-- TWO LAYERS -->
+  <section>
+    <div class="sec-head"><h2>Two orthogonal layers</h2><span class="hint">the two meet only at <code style="font-family:var(--mono)">mesh_dispatch</code></span></div>
+    <div class="grid2">
+      <div class="card master">
+        <div class="ic" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+        </div>
+        <h3>Layer 1 — transport</h3>
+        <p>Reach and drive live sessions: a roster (<code style="font-family:var(--mono)">sessions</code>), a command queue (<code style="font-family:var(--mono)">commands</code>), the doorbell, and the reaper. Task-agnostic — it knows nothing about tasks.</p>
+      </div>
+      <div class="card worker">
+        <div class="ic" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6-1.5 1.5L4.8 5"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+        </div>
+        <h3>Layer 2 — task manager</h3>
+        <p>A backlog (<code style="font-family:var(--mono)">tasks</code> + <code style="font-family:var(--mono)">task_sessions</code>, schema v3) that lives in the store, independent of sessions. A task is serviced by <b>0..N</b> sessions — 0: the master does it inline or via a subagent · 1: one worker · 2–3: several on the same task.</p>
+      </div>
+    </div>
+  </section>
 
   <!-- MENTAL MODEL -->
   <section>
@@ -232,14 +253,14 @@
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4 0-8 2-8 6v2h16v-2c0-4-4-6-8-6Z"/></svg>
         </div>
         <h3>Master — where you sit</h3>
-        <p>The session you drive from. It never does task work itself — it watches the board, queues commands, and collects results. Keep it for steering.</p>
+        <p>The session you drive from, and that owns the backlog. It watches the board, queues commands, and collects results — and can service a task itself, inline or via a subagent.</p>
       </div>
       <div class="card worker">
         <div class="ic" aria-hidden="true">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 4 4-4 4"/><path d="M13 16h6"/><rect x="2" y="3" width="20" height="18" rx="2"/></svg>
         </div>
-        <h3>Worker — parked on a task</h3>
-        <p>A session living in a task's worktree, listening. It executes whatever the master queues, at full autonomy, then reports back — and stays quiet until then.</p>
+        <h3>Worker — a live session</h3>
+        <p>A session addressed by a free-form <b>label</b>, listening in a worktree. It executes whatever the master queues, at full autonomy, then reports back — and stays quiet until then.</p>
       </div>
     </div>
   </section>
@@ -260,9 +281,9 @@
     <div class="group">
       <div class="gh"><span class="role">Worker</span><span class="where">run inside the task's session</span></div>
       <div class="row">
-        <span class="cmd">/mesh-join</span>
-        <span><span class="chip none">no args</span></span>
-        <span class="desc"><b>The one command you type in a worker.</b> Registers this session and arms the doorbell in one step. After it, the session listens.</span>
+        <span class="cmd">/mesh-join &lt;label&gt;</span>
+        <span><span class="chip args">label</span></span>
+        <span class="desc"><b>The one command you type in a worker.</b> Registers this session under a free-form label (auto-derived from the branch if omitted) and arms the doorbell in one step. After it, the session listens.</span>
       </div>
       <div class="row">
         <span class="cmd">/mesh-arm</span>
@@ -281,7 +302,7 @@
       <div class="row">
         <span class="cmd">/mesh-board</span>
         <span><span class="chip none">no args</span></span>
-        <span class="desc"><b>“What's running?”</b> Live roster: each worker's task, alive / stale / dead, current activity, and recent commands.</span>
+        <span class="desc"><b>“What's running?”</b> Live roster — each worker, alive / stale / dead, current activity, recent commands — plus the <b>task backlog</b> grouped by status.</span>
       </div>
       <div class="row">
         <span class="cmd">/mesh-dispatch</span>
@@ -315,11 +336,11 @@
   <section>
     <div class="sec-head"><h2>Anatomy of a dispatch</h2></div>
     <div class="anatomy">
-      <div class="cmdline"><span class="k">/mesh-dispatch</span> <span class="t">PMP-211</span> <span class="ki">shell</span> <span class="p">"npm test"</span></div>
+      <div class="cmdline"><span class="k">/mesh-dispatch</span> <span class="t">docs-rewrite</span> <span class="ki">shell</span> <span class="p">"npm test"</span></div>
       <div class="parts">
         <div class="part t">
           <h4>target</h4>
-          <p>Who runs it: a task label (<code>PMP-211</code>, <code>reporting-openapi</code>), a session id, or <code>*</code> to broadcast to everyone.</p>
+          <p>Who runs it: a free-form <b>label</b> (<code>docs-rewrite</code>, <code>db-migration</code>, or <code>PMP-211</code> if you like — no Jira coupling), a session id, or <code>*</code> to broadcast to everyone.</p>
         </div>
         <div class="part ki">
           <h4>kind</h4>
@@ -346,7 +367,7 @@
     <div class="flow"><div class="num">2</div><div>
       <h4>Drive a worker from the master</h4>
       <pre><span class="g">/mesh-board</span>                             <span class="c"># see who's live</span>
-<span class="g">/mesh-dispatch</span> PMP-211 shell "npm test"   <span class="c"># queue work</span>
+<span class="g">/mesh-dispatch</span> docs-rewrite shell "npm test"  <span class="c"># queue work</span>
 <span class="g">/mesh-await</span>                             <span class="c"># get woken when it finishes</span></pre>
     </div></div>
 
@@ -390,32 +411,106 @@
     </div>
   </section>
 
-  <!-- PLANNED -->
-  <section class="planned">
-    <div class="sec-head"><h2>Planned</h2><span class="hint">task-manager redesign — <span style="font-family:var(--mono)">specs/2026-07-03-task-manager-mesh-design.md</span></span></div>
+  <!-- MCP TOOLS -->
+  <section>
+    <div class="sec-head"><h2>The MCP tools</h2><span class="hint">shipped — you invoke these by asking Claude, not as <code style="font-family:var(--mono)">/slash</code> commands</span></div>
+
+    <div class="card" style="margin-bottom:20px">
+      <p>The task-manager redesign is <b style="color:var(--ink);font-weight:500">built</b> (Phases 1–3), delivered as typed <b style="color:var(--ink);font-weight:500">MCP tools</b> rather than more slash-commands. The plugin declares a stdio MCP server (<span style="font-family:var(--mono)">session-mesh</span>, Python/FastMCP, launched with <span style="font-family:var(--mono)">uv&nbsp;run&nbsp;--script</span> — no install); every session spawns its own instance over the shared SQLite DB. Each tool is a thin adapter that shells into <span style="font-family:var(--mono)">mesh.sh</span>, so the shell stays the single source of truth. <b style="color:var(--ink);font-weight:500">The DB is the hub — no daemon.</b></p>
+    </div>
+
     <div class="group">
-      <div class="gh"><span class="badge-future">Not yet built</span><span class="where">generalizes tickets → tasks, adds an auto-spawn backlog</span></div>
+      <div class="gh"><span class="role">Layer 1 · transport</span><span class="where">typed twins of the /mesh-* skills</span></div>
       <div class="row">
-        <span class="cmd">/mesh-task-add</span>
-        <span><span class="chip args">args</span></span>
+        <span class="cmd">mesh_board</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Sessions + liveness, recent commands, and the task backlog — one JSON view.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">mesh_dispatch</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Queue work for a <b>target</b> (label · session id · <span style="font-family:var(--mono)">*</span>). The one seam where Layer 2 reaches Layer 1.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">mesh_collect</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Pull newly-finished command results and mark them collected.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">mesh_ask</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Ask a worker for status / next move — the answer returns as the command's output.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">mesh_pause</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Emergency-stop the whole fleet.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">mesh_resume</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Lift the pause; workers resume executing queued commands.</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gh"><span class="role">Layer 2 · task manager</span><span class="where">a backlog independent of sessions — schema v3</span></div>
+      <div class="row">
+        <span class="cmd">task_add</span>
+        <span><span class="chip args">MCP</span></span>
         <span class="desc">Add a task to the <b>backlog</b> — before any session exists.</span>
       </div>
       <div class="row">
-        <span class="cmd">/mesh-task-start</span>
-        <span><span class="chip args">args</span></span>
-        <span class="desc"><b>Auto-spawns</b> a worker for the task (<span style="font-family:var(--mono)">claude --bg</span>) — no more hand-starting. Marks it in-progress.</span>
+        <span class="cmd">task_list</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">The backlog, optionally filtered by status; each task shows its assigned sessions.</span>
       </div>
       <div class="row">
-        <span class="cmd">/mesh-task-done</span>
-        <span><span class="chip args">args</span></span>
-        <span class="desc">Mark a task done, and optionally stop its worker.</span>
+        <span class="cmd">task_get</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">One task, with its assignments.</span>
       </div>
+      <div class="row">
+        <span class="cmd">task_assign</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Link a session to a task. <b>One active task per session</b> — pass <span style="font-family:var(--mono)">force</span> to move it.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">task_unassign</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Unlink a session from a task.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">task_set_status</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Advance a task's lifecycle: <span style="font-family:var(--mono)">todo · in_progress · blocked · done</span>.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">task_done</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Shorthand to mark a task done.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">task_spawn</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc"><b>Auto-spawn</b> a <span style="font-family:var(--mono)">claude --bg</span> worker for a task — it joins the mesh, is assigned, and gets the task dispatched. No hand-starting.</span>
+      </div>
+      <div class="row">
+        <span class="cmd">task_ask</span>
+        <span><span class="chip args">MCP</span></span>
+        <span class="desc">Ask <b>every</b> worker on a task for status / next move.</span>
+      </div>
+    </div>
+
+    <div class="alert info" style="margin-top:4px">
+      <span class="ai" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg></span>
+      <div><h4>MCP is for acting; the doorbell is for receiving</h4><p>The doorbell (<span class="mono">/mesh-arm</span>, <span class="mono">/mesh-await</span>) is deliberately <b>not</b> an MCP tool — a blocking MCP call would hold the model's turn open. The background watcher stays token-free.</p></div>
     </div>
   </section>
 
   <footer>
     <div>Personal tooling under <span class="mono">~/.claude</span> — never committed to a product repo.</div>
-    <div style="margin-top:6px">Store: SQLite WAL at <span class="mono">~/.claude/session-mesh/mesh.db</span>. Source in <span class="mono">mesh.sh</span>; the skills are the whole interface.</div>
+    <div style="margin-top:6px">Store: SQLite WAL at <span class="mono">~/.claude/session-mesh/mesh.db</span> (schema v3). All logic in <span class="mono">mesh.sh</span>; two front doors — the <span class="mono">/mesh-*</span> skills and the <span class="mono">session-mesh</span> MCP tools — share the one DB. The DB is the hub; no daemon.</div>
   </footer>
 
 </div>
