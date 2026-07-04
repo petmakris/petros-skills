@@ -4,11 +4,5 @@
   "description": "Personal cross-project Claude Code skills and a sandbox for experimentation",
   "author": {
     "name": "Petros Makris"
-  },
-  "mcpServers": {
-    "session-mesh": {
-      "command": "uv",
-      "args": ["run", "--script", "${CLAUDE_PLUGIN_ROOT}/session-mesh/mcp/server.py"]
-    }
   }
 }
