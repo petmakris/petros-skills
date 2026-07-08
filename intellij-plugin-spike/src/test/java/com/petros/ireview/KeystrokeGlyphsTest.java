@@ -42,4 +42,12 @@ class KeystrokeGlyphsTest {
                 KeystrokeGlyphs.tokens(KeyStroke.getKeyStroke(KeyEvent.VK_SLASH,
                         InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK)));
     }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void legacyModifierMasksStillRender() {
+        KeyStroke ks = KeyStroke.getKeyStroke(KeyEvent.VK_A,
+                InputEvent.CTRL_MASK | InputEvent.ALT_MASK);
+        assertEquals(List.of("⌃", "⌥", "A"), KeystrokeGlyphs.tokens(ks));
+    }
 }

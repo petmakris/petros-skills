@@ -15,13 +15,14 @@ public final class KeystrokeGlyphs {
 
     private KeystrokeGlyphs() {}
 
+    @SuppressWarnings("deprecation")
     public static List<String> tokens(KeyStroke ks) {
         List<String> out = new ArrayList<>();
         int m = ks.getModifiers();
-        if ((m & InputEvent.CTRL_DOWN_MASK) != 0)  out.add("⌃");
-        if ((m & InputEvent.ALT_DOWN_MASK) != 0)   out.add("⌥");
-        if ((m & InputEvent.SHIFT_DOWN_MASK) != 0) out.add("⇧");
-        if ((m & InputEvent.META_DOWN_MASK) != 0)  out.add("⌘");
+        if ((m & (InputEvent.CTRL_DOWN_MASK | InputEvent.CTRL_MASK)) != 0)  out.add("⌃");
+        if ((m & (InputEvent.ALT_DOWN_MASK | InputEvent.ALT_MASK)) != 0)   out.add("⌥");
+        if ((m & (InputEvent.SHIFT_DOWN_MASK | InputEvent.SHIFT_MASK)) != 0) out.add("⇧");
+        if ((m & (InputEvent.META_DOWN_MASK | InputEvent.META_MASK)) != 0)  out.add("⌘");
         out.add(keyGlyph(ks.getKeyCode()));
         return out;
     }
