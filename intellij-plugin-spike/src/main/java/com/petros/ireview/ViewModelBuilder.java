@@ -4,13 +4,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Function;
 
 /** Composes the featured (enabled) shortcuts into the grouped, A→Z {@link ResolvedSheet} for view mode. */
 public final class ViewModelBuilder {
 
     private ViewModelBuilder() {}
 
-    public static ResolvedSheet build(List<CatalogEntry> catalog, ShortcutPrefs prefs) {
+    /**
+     * @param categoryOf maps an actionId to its category (IntelliJ-derived); a null/blank
+     *                   result buckets the entry under {@link ShortcutCategories#OTHER}.
+     */
+    public static ResolvedSheet build(List<CatalogEntry> catalog, ShortcutPrefs prefs,
+                                      Function<String, String> categoryOf) {
         // TreeMap(CASE_INSENSITIVE_ORDER) → categories A→Z; catalog is pre-sorted A→Z so
         // insertion order within each category is already alphabetical.
         Map<String, List<ResolvedSheet.ResolvedEntry>> byCategory =
@@ -18,8 +24,8 @@ public final class ViewModelBuilder {
 
         for (CatalogEntry e : catalog) {
             if (!prefs.isEnabled(e.actionId())) continue;
-            String category = prefs.categoryOf(e.actionId());
-            if (category == null || category.isBlank()) category = ShortcutPrefs.DEFAULT_CATEGORY;
+            String category = categoryOf.apply(e.actionId());
+            if (category == null || category.isBlank()) category = ShortcutCategories.OTHER;
             byCategory.computeIfAbsent(category, k -> new ArrayList<>())
                       .add(new ResolvedSheet.ResolvedEntry(e.label(), e.groups(), false));
         }

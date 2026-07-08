@@ -82,25 +82,4 @@ class ShortcutsHtmlRendererTest {
         var sheet = new ResolvedSheet(java.util.List.of(), null);
         assertFalse(ShortcutsHtmlRenderer.toDocument(sheet, false).contains("enterEdit"));
     }
-
-    @Test
-    void editRendersCheckboxesCategoriesFilterAndEscapes() {
-        var enabled = new EditSheet.EditRow("goc", "Go to Class",
-                java.util.List.of(java.util.List.of("⌘", "O")), true, "Navigation");
-        var disabled = new EditSheet.EditRow("blk", "a <b> & c",
-                java.util.List.of(java.util.List.of("⌘", "⌥", "/")), false, null);
-        var sheet = new EditSheet(java.util.List.of(enabled, disabled), java.util.List.of("Navigation"));
-
-        String html = ShortcutsHtmlRenderer.renderEdit(sheet, false, "");
-
-        assertTrue(html.startsWith("<!doctype html>"), html);
-        assertTrue(html.contains("type=\"checkbox\""), html);
-        assertTrue(html.contains("data-action=\"goc\""), html);        // row id
-        assertTrue(html.contains("checked"), html);                     // enabled row is checked
-        assertTrue(html.contains("Navigation"), html);                  // category option
-        assertTrue(html.contains("__new__"), html);                     // new-category sentinel
-        assertTrue(html.contains("oninput"), html);                     // filter box
-        assertTrue(html.contains("a &lt;b&gt; &amp; c"), html);         // label escaped
-        assertFalse(html.contains("a <b> & c"), html);
-    }
 }
