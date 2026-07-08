@@ -82,6 +82,7 @@ public final class ShortcutsOverlay extends DialogWrapper {
     }
 
     private void handle(String payloadJson) {
+        if (browser == null || Disposer.isDisposed(getDisposable())) return;
         Msg m;
         try { m = gson.fromJson(payloadJson, Msg.class); } catch (Exception e) { return; }
         if (m == null || m.type == null) return;

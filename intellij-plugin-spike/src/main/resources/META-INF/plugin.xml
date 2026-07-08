@@ -44,7 +44,7 @@
         <action id="com.petros.ireview.ShowShortcutsAction"
                 class="com.petros.ireview.ShowShortcutsAction"
                 text="Show Shortcut Cheat-Sheet"
-                description="Open a read-only cheat-sheet of curated IDE shortcuts.">
+                description="Open an editable cheat-sheet of your keymap shortcuts.">
             <add-to-group group-id="HelpMenu" anchor="last"/>
             <!-- ⌃⌥⇧/ — literal control on the Mac keymaps so it stays Ctrl (not ⌘).
                  NOT ⌃⇧/: that is CommentByBlockComment in the "Mac OS X 10.5+" keymap.
