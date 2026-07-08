@@ -3,11 +3,9 @@ package com.petros.ireview;
 import java.util.List;
 
 /**
- * Renders the cheat-sheet as a self-contained HTML document. Two modes:
- * {@link #renderView} (read-only, optional Edit button) and {@link #renderEdit}
- * (checklist with checkboxes, category selectors, filter). Interaction is routed
- * through a page-defined {@code ireviewSend(json)} function whose body is supplied
- * as {@code bridgeScript} (a JCEF JS-query injection); empty string in tests.
+ * Renders the read-only cheat-sheet (view mode) as a self-contained HTML document,
+ * grouped into categories. Edit mode is a native-Swing component ({@link ShortcutEditPanel}),
+ * not HTML, because the JCEF JS→Java bridge is unreliable under out-of-process JCEF.
  */
 public final class ShortcutsHtmlRenderer {
 
@@ -56,73 +54,6 @@ public final class ShortcutsHtmlRenderer {
         sb.append("<div class=\"foot\">Press <span class=\"cap\">Esc</span> to close</div>");
         script(sb, bridgeScript, "");
         return sb.append("</body></html>").toString();
-    }
-
-    public static String renderEdit(EditSheet sheet, boolean dark, String bridgeScript) {
-        StringBuilder sb = new StringBuilder(8192);
-        head(sb, dark);
-        long selected = sheet.rows().stream().filter(EditSheet.EditRow::enabled).count();
-
-        sb.append("<div class=\"bar\"><h2>Keyboard Shortcuts &middot; <span class=\"muted\">Editing</span></h2>")
-          .append("<button class=\"btn primary\" onclick=\"ireviewSend('{&quot;type&quot;:&quot;exitEdit&quot;}')\">&#10003; Done</button></div>");
-        sb.append("<div class=\"search\"><input id=\"flt\" placeholder=\"Filter shortcuts…\" oninput=\"flt(this.value)\"></div>");
-        sb.append("<div class=\"count\">Showing all <b>").append(sheet.rows().size())
-          .append("</b> shortcuts &middot; <b id=\"selN\" class=\"acc\">").append(selected).append("</b> selected</div>");
-
-        sb.append("<div class=\"list\">");
-        for (EditSheet.EditRow r : sheet.rows()) {
-            String id = esc(r.actionId());
-            String jid = jsStr(r.actionId());
-            sb.append("<label class=\"erow ").append(r.enabled() ? "on" : "off")
-              .append("\" data-action=\"").append(id).append("\" data-label=\"").append(esc(r.label().toLowerCase())).append("\">");
-            sb.append("<input type=\"checkbox\"").append(r.enabled() ? " checked" : "")
-              .append(" onchange=\"tog(").append(jid).append(",this)\">");
-            sb.append("<span class=\"ename\">").append(esc(r.label())).append("</span>");
-            sb.append("<span class=\"ekeys\">");
-            for (List<String> group : r.groups()) {
-                sb.append("<span class=\"grp\">");
-                for (String token : group) sb.append("<span class=\"cap\">").append(esc(token)).append("</span>");
-                sb.append("</span>");
-            }
-            sb.append("</span>");
-            categorySelect(sb, r, sheet.categories(), jid);
-            sb.append("</label>");
-        }
-        sb.append("</div>");
-        sb.append("<div class=\"foot\">Changes save automatically &middot; <span class=\"cap\">Esc</span> or Done to finish</div>");
-
-        String editJs =
-            "function tog(id,el){var r=el.closest('.erow');r.classList.toggle('on',el.checked);r.classList.toggle('off',!el.checked);"
-          + "var s=r.querySelector('.catsel');if(s)s.style.visibility=el.checked?'visible':'hidden';"
-          + "var n=document.getElementById('selN');n.textContent=document.querySelectorAll('.erow input:checked').length;"
-          + "ireviewSend(JSON.stringify({type:'toggle',id:id,on:el.checked}));}"
-          + "function cat(id,el){if(el.value==='__new__'){ireviewSend(JSON.stringify({type:'newCategory',id:id}));return;}"
-          + "ireviewSend(JSON.stringify({type:'setCategory',id:id,category:el.value}));}"
-          + "function flt(q){q=q.toLowerCase();document.querySelectorAll('.erow').forEach(function(r){"
-          + "r.style.display=r.getAttribute('data-label').indexOf(q)>=0?'':'none';});}";
-        script(sb, bridgeScript, editJs);
-        return sb.append("</body></html>").toString();
-    }
-
-    private static void categorySelect(StringBuilder sb, EditSheet.EditRow r, List<String> categories, String jid) {
-        String current = (r.category() == null || r.category().isBlank())
-                ? ShortcutPrefs.DEFAULT_CATEGORY : r.category();
-        sb.append("<select class=\"catsel\" onchange=\"cat(").append(jid).append(",this)\"")
-          .append(r.enabled() ? "" : " style=\"visibility:hidden\"").append(">");
-        boolean seen = false;
-        // ensure DEFAULT + current are always options, plus the known categories
-        java.util.LinkedHashSet<String> opts = new java.util.LinkedHashSet<>();
-        opts.add(ShortcutPrefs.DEFAULT_CATEGORY);
-        opts.addAll(categories);
-        opts.add(current);
-        for (String c : opts) {
-            boolean sel = c.equalsIgnoreCase(current);
-            if (sel) seen = true;
-            sb.append("<option").append(sel ? " selected" : "").append(">").append(esc(c)).append("</option>");
-        }
-        if (!seen) sb.append("<option selected>").append(esc(current)).append("</option>");
-        sb.append("<option value=\"__new__\">＋ New category…</option>");
-        sb.append("</select>");
     }
 
     private static void head(StringBuilder sb, boolean dark) {
@@ -174,9 +105,4 @@ public final class ShortcutsHtmlRenderer {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
     }
 
-    /** A JS single-quoted string literal for an action id (ids are [A-Za-z0-9._$-]; escape defensively). */
-    private static String jsStr(String s) {
-        if (s == null) return "''";
-        return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'";
-    }
 }

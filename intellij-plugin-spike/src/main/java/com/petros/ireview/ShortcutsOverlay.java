@@ -1,111 +1,116 @@
 package com.petros.ireview;
 
-import com.google.gson.Gson;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
-import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.jcef.JBCefApp;
 import com.intellij.ui.jcef.JBCefBrowser;
-import com.intellij.ui.jcef.JBCefBrowserBase;
-import com.intellij.ui.jcef.JBCefJSQuery;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.Action;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JEditorPane;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.util.List;
+import java.awt.FlowLayout;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
- * Interactive shortcut cheat-sheet. View mode is read-only with an Edit button;
- * Edit mode is a checklist whose toggles/category changes post through a
- * {@link JBCefJSQuery} bridge into {@link ShortcutPrefs} (persisted immediately).
- * JCEF-gated; the {@link JEditorPane} fallback is view-only.
+ * Keyboard cheat-sheet overlay. View mode renders as HTML in a {@link JBCefBrowser}
+ * (display-only — no JS bridge). Edit mode is a native-Swing {@link ShortcutEditPanel},
+ * because the JCEF {@code JBCefJSQuery} JS→Java bridge is unreliable under the IDE's
+ * out-of-process JCEF. A native toolbar button toggles between the two; Esc closes.
  */
 public final class ShortcutsOverlay extends DialogWrapper {
 
     private final Project project;
     private final ShortcutPrefs prefs;
-    private final Gson gson = new Gson();
-    private JBCefBrowser browser;
-    private JBCefJSQuery query;
+
+    private JBCefBrowser browser;      // view component (JCEF), when supported
+    private JEditorPane fallbackPane;  // view component (Swing), when JCEF is unavailable
+    private JComponent viewComponent;  // whichever of the two is in use
+    private JPanel holder;             // center; swaps between view and edit
+    private JButton toggle;
+    private boolean editing = false;
+
+    /** actionId → IntelliJ category, derived once per open (stable while the dialog is up). */
+    private final Function<String, String> categoryOf;
 
     public ShortcutsOverlay(@Nullable Project project, ShortcutPrefs prefs) {
         super(project, false);
         this.project = project;
         this.prefs = prefs;
+        Map<String, String> categories = ShortcutCategories.byAction(project);
+        this.categoryOf = id -> categories.getOrDefault(id, ShortcutCategories.OTHER);
         setTitle("Keyboard Shortcuts");
         init();
     }
 
     @Override
     protected JComponent createCenterPanel() {
+        JPanel root = new JPanel(new BorderLayout());
+
+        toggle = new JButton("✎ Edit");   // ✎ Edit
+        toggle.addActionListener(a -> toggleMode());
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 6));
+        bar.setBorder(JBUI.Borders.emptyRight(6));
+        bar.add(toggle);
+        root.add(bar, BorderLayout.NORTH);
+
+        viewComponent = buildViewComponent();
+        holder = new JPanel(new BorderLayout());
+        holder.add(viewComponent, BorderLayout.CENTER);
+        root.add(holder, BorderLayout.CENTER);
+
+        renderViewContent();
+        root.setPreferredSize(new Dimension(940, 620));
+        return root;
+    }
+
+    private JComponent buildViewComponent() {
         if (JBCefApp.isSupported()) {
             browser = new JBCefBrowser();
             Disposer.register(getDisposable(), browser);
-            query = JBCefJSQuery.create((JBCefBrowserBase) browser);
-            query.addHandler(payload -> {
-                ApplicationManager.getApplication().invokeLater(() -> handle(payload));
-                return new JBCefJSQuery.Response(null);
-            });
-            renderView();
-            JComponent c = browser.getComponent();
-            c.setPreferredSize(new Dimension(940, 600));
-            return c;
+            return browser.getComponent();
         }
-        // Fallback: view-only (no bridge available in Swing HTML).
-        ResolvedSheet sheet = ViewModelBuilder.build(ShortcutCatalog.build(new IdeKeymapCatalog()), prefs);
-        JEditorPane pane = new JEditorPane("text/html", ShortcutsHtmlRenderer.toDocument(sheet, isDark()));
-        pane.setEditable(false);
-        JBScrollPane scroll = new JBScrollPane(pane);
-        scroll.setPreferredSize(new Dimension(760, 600));
-        return scroll;
+        fallbackPane = new JEditorPane("text/html", "");
+        fallbackPane.setEditable(false);
+        return new JBScrollPane(fallbackPane);
     }
 
-    private String bridge() {
-        return "function ireviewSend(json){" + query.inject("json") + "}";
-    }
-
-    private void renderView() {
-        ResolvedSheet sheet = ViewModelBuilder.build(ShortcutCatalog.build(new IdeKeymapCatalog()), prefs);
-        browser.loadHTML(ShortcutsHtmlRenderer.renderView(sheet, isDark(), true, bridge()));
-    }
-
-    private void renderEdit() {
-        EditSheet sheet = EditModelBuilder.build(ShortcutCatalog.build(new IdeKeymapCatalog()), prefs);
-        browser.loadHTML(ShortcutsHtmlRenderer.renderEdit(sheet, isDark(), bridge()));
-    }
-
-    private void handle(String payloadJson) {
-        if (browser == null || Disposer.isDisposed(getDisposable())) return;
-        Msg m;
-        try { m = gson.fromJson(payloadJson, Msg.class); } catch (Exception e) { return; }
-        if (m == null || m.type == null) return;
-        switch (m.type) {
-            case "enterEdit" -> renderEdit();
-            case "exitEdit"  -> renderView();
-            case "toggle"    -> { if (m.id != null) prefs.setEnabled(m.id, m.on); }   // no re-render
-            case "setCategory" -> { if (m.id != null) prefs.setCategory(m.id, m.category); }
-            case "newCategory" -> {
-                String name = Messages.showInputDialog(project, "New category name:", "New Category", null);
-                if (name != null && !name.isBlank() && m.id != null) prefs.setCategory(m.id, name.trim());
-                renderEdit();   // reflect the new option (or reset the <select> if cancelled)
-            }
-            default -> { /* ignore unknown */ }
+    private void renderViewContent() {
+        ResolvedSheet sheet = ViewModelBuilder.build(ShortcutCatalog.build(new IdeKeymapCatalog()), prefs, categoryOf);
+        String html = ShortcutsHtmlRenderer.renderView(sheet, isDark(), false, "");
+        if (browser != null) {
+            browser.loadHTML(html);
+        } else if (fallbackPane != null) {
+            fallbackPane.setText(html);
+            fallbackPane.setCaretPosition(0);
         }
     }
 
-    /** Bridge message shape. */
-    private static final class Msg {
-        String type;
-        String id;
-        boolean on;
-        String category;
+    private void toggleMode() {
+        editing = !editing;
+        holder.removeAll();
+        if (editing) {
+            ShortcutEditPanel edit = new ShortcutEditPanel(
+                    prefs, ShortcutCatalog.build(new IdeKeymapCatalog()), categoryOf);
+            holder.add(edit, BorderLayout.CENTER);
+            toggle.setText("✓ Done");   // ✓ Done
+        } else {
+            renderViewContent();             // reflect the edits just made
+            holder.add(viewComponent, BorderLayout.CENTER);
+            toggle.setText("✎ Edit");
+        }
+        holder.revalidate();
+        holder.repaint();
     }
 
     @Override
