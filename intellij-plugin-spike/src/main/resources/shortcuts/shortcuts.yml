@@ -1,4 +1,4 @@
-# Curated IDE shortcuts for the cheat-sheet overlay (⌃⇧/).
+# Curated IDE shortcuts for the cheat-sheet overlay (⌃⌥⇧/).
 # `action` is an IntelliJ action ID (Settings → Keymap → right-click → Copy Action ID).
 # Keys are resolved live from the active keymap. Flip `enabled` to show/hide.
 categories:
