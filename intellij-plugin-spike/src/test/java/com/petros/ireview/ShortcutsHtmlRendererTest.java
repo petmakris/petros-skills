@@ -53,4 +53,14 @@ class ShortcutsHtmlRendererTest {
         assertTrue(html.contains("a &lt;b&gt; &amp; c"), html);
         assertFalse(html.contains("a <b> & c"), html);
     }
+
+    @Test
+    void multiKeystrokeSequenceKeepsGroupsSeparate() {
+        var entry = new ResolvedSheet.ResolvedEntry("Commit and Push",
+                List.of(List.of("⌘", "K"), List.of("⌘", "⇧", "K")), false);
+        var cat = new ResolvedSheet.ResolvedCategory("VCS", List.of(entry));
+        String html = ShortcutsHtmlRenderer.toDocument(new ResolvedSheet(List.of(cat), null), false);
+        int grpCount = html.split("class=\"grp\"", -1).length - 1;
+        assertEquals(2, grpCount, html); // two distinct chord groups, not one flat run
+    }
 }

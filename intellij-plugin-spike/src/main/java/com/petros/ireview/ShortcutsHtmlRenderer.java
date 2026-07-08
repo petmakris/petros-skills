@@ -33,9 +33,11 @@ public final class ShortcutsHtmlRenderer {
                         sb.append("<span class=\"tag\">unassigned</span>");
                     } else {
                         for (List<String> group : e.groups()) {
+                            sb.append("<span class=\"grp\">");
                             for (String token : group) {
                                 sb.append("<span class=\"cap\">").append(esc(token)).append("</span>");
                             }
+                            sb.append("</span>");
                         }
                     }
                     sb.append("</span></div>");
@@ -70,7 +72,8 @@ public final class ShortcutsHtmlRenderer {
             + "text-transform:uppercase;margin:0 0 9px;}"
             + ".row{display:flex;align-items:center;gap:12px;padding:5px 0;}"
             + ".name{font-size:13px;}"
-            + ".keys{margin-left:auto;display:flex;gap:5px;flex:0 0 auto;}"
+            + ".keys{margin-left:auto;display:flex;gap:12px;flex:0 0 auto;}"
+            + ".grp{display:inline-flex;gap:5px;}"
             + ".cap{min-width:22px;height:22px;padding:0 6px;border-radius:6px;background:" + capBg + ";"
             + "border:1px solid " + capLine + ";border-bottom-width:2px;color:" + capInk + ";"
             + "font-size:11.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;"
