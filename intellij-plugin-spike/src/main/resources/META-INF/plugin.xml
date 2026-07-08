@@ -40,5 +40,15 @@
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift L"/>
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="control alt shift L"/>
         </action>
+        <action id="com.petros.ireview.ShowShortcutsAction"
+                class="com.petros.ireview.ShowShortcutsAction"
+                text="Show Shortcut Cheat-Sheet"
+                description="Open a read-only cheat-sheet of curated IDE shortcuts.">
+            <add-to-group group-id="HelpMenu" anchor="last"/>
+            <!-- Literal control on the Mac keymaps so ⌃⇧/ is not translated to ⌘. -->
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control shift SLASH"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control shift SLASH"/>
+            <keyboard-shortcut keymap="$default"        first-keystroke="control shift SLASH"/>
+        </action>
     </actions>
 </idea-plugin>
