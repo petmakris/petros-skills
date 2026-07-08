@@ -41,17 +41,18 @@ it as a sandboxed dev IDE with this plugin installed.
 
 ## Shortcut cheat-sheet
 
-Press **⌃⌥⇧/** (Ctrl+Alt+Shift+/) to open a read-only cheat-sheet of curated
-IDE shortcuts. The set lives in `src/main/resources/shortcuts/shortcuts.yml` —
-each entry names an IntelliJ action ID and the keys are read live from your
-active keymap. Toggle `enabled:` on an entry to show/hide it, then rebuild
-(`./gradlew prepareSandbox`) and restart the IDE.
+Press **⌃⌥⇧/** (Ctrl+Alt+Shift+/) to open the cheat-sheet. Click **✎ Edit** to
+turn it into a checklist of every shortcut in your keymap: tick the ones to
+feature, pick a category for each (they default to **General**), then **Done**.
+The panel is always alphabetical — categories A→Z, shortcuts A→Z within — so
+adding or removing one never shuffles the rest. Your choices are saved by the
+IDE (`ireview-shortcuts.xml`); no file editing or rebuild needed.
 
-> **Note:** The keystroke is bound only on the macOS keymaps. `⌃⇧/` was avoided
-> because it is **Comment with Block Comment** in the "Mac OS X 10.5+" keymap;
-> `⌃⌥⇧/` is free and mirrors this plugin's `⌃⌥⇧L` (Prettify). On other keymaps
-> or if the chord is taken, open the cheat-sheet from the **Help** menu or via
-> **Find Action** ("Show Shortcut Cheat-Sheet").
+> On first open, your previous `shortcuts.yml` selections are imported once.
+> The keystroke is macOS-only; elsewhere use **Help** or **Find Action**
+> ("Show Shortcut Cheat-Sheet"). `⌃⇧/` was avoided because it is
+> **Comment with Block Comment** in the "Mac OS X 10.5+" keymap; `⌃⌥⇧/` is
+> free and mirrors this plugin's `⌃⌥⇧L` (Prettify).
 
 ## Caveats discovered while writing
 
