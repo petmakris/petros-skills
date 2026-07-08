@@ -85,6 +85,10 @@ dependencies {
     implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
     implementation("com.google.code.gson:gson:2.11.0")
 
+    // Provided by the running IDE at runtime; here only for compile + tests.
+    compileOnly("org.yaml:snakeyaml:2.2")
+    testImplementation("org.yaml:snakeyaml:2.2")
+
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.0")
     testImplementation("org.junit.jupiter:junit-jupiter-engine:5.10.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.0")

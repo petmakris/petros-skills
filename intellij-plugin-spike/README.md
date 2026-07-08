@@ -39,6 +39,16 @@ it as a sandboxed dev IDE with this plugin installed.
 6. Open **Help → Show Log in Finder**, tail `idea.log`, grep for
    `SpikeDiffExtension` — you should see `Spike gutter click; user input: ...`.
 
+## Shortcut cheat-sheet
+
+Press **⌃⇧/** (Ctrl+Shift+/) to open a read-only cheat-sheet of curated IDE
+shortcuts. The set lives in `src/main/resources/shortcuts/shortcuts.yml` —
+each entry names an IntelliJ action ID and the keys are read live from your
+active keymap. Toggle `enabled:` on an entry to show/hide it, then rebuild
+(`./gradlew prepareSandbox`) and restart the IDE.
+
+> **Note:** The ⌃⇧/ keystroke is macOS-only; on Windows/Linux the `$default` binding was dropped (it collides with Comment with Block Comment). Open the cheat-sheet from the **Help** menu or via **Find Action** instead.
+
 ## Caveats discovered while writing
 
 - `DiffExtension.onViewerCreated` is the documented hook; signature in 2024.2

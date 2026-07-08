@@ -1,0 +1,40 @@
+# Curated IDE shortcuts for the cheat-sheet overlay (⌃⇧/).
+# `action` is an IntelliJ action ID (Settings → Keymap → right-click → Copy Action ID).
+# Keys are resolved live from the active keymap. Flip `enabled` to show/hide.
+categories:
+  - name: Navigation
+    entries:
+      - action: GotoClass
+        enabled: true
+      - action: GotoFile
+        enabled: true
+      - action: GotoSymbol
+        enabled: true
+      - action: FindUsages
+        enabled: true
+      - action: GotoDeclaration
+        label: Go to Declaration
+        enabled: true
+  - name: General
+    entries:
+      - action: SearchEverywhere
+        enabled: true
+      - action: GotoAction
+        label: Find Action
+        enabled: true
+      - action: RecentFiles
+        enabled: true
+      - action: ShowSettings
+        label: Settings
+        enabled: false
+  - name: Refactor
+    entries:
+      - action: RenameElement
+        label: Rename
+        enabled: true
+      - action: IntroduceVariable
+        label: Extract Variable
+        enabled: true
+      - action: ExtractMethod
+        label: Extract Method
+        enabled: true
