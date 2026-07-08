@@ -41,13 +41,17 @@ it as a sandboxed dev IDE with this plugin installed.
 
 ## Shortcut cheat-sheet
 
-Press **⌃⇧/** (Ctrl+Shift+/) to open a read-only cheat-sheet of curated IDE
-shortcuts. The set lives in `src/main/resources/shortcuts/shortcuts.yml` —
+Press **⌃⌥⇧/** (Ctrl+Alt+Shift+/) to open a read-only cheat-sheet of curated
+IDE shortcuts. The set lives in `src/main/resources/shortcuts/shortcuts.yml` —
 each entry names an IntelliJ action ID and the keys are read live from your
 active keymap. Toggle `enabled:` on an entry to show/hide it, then rebuild
 (`./gradlew prepareSandbox`) and restart the IDE.
 
-> **Note:** The ⌃⇧/ keystroke is macOS-only; on Windows/Linux the `$default` binding was dropped (it collides with Comment with Block Comment). Open the cheat-sheet from the **Help** menu or via **Find Action** instead.
+> **Note:** The keystroke is bound only on the macOS keymaps. `⌃⇧/` was avoided
+> because it is **Comment with Block Comment** in the "Mac OS X 10.5+" keymap;
+> `⌃⌥⇧/` is free and mirrors this plugin's `⌃⌥⇧L` (Prettify). On other keymaps
+> or if the chord is taken, open the cheat-sheet from the **Help** menu or via
+> **Find Action** ("Show Shortcut Cheat-Sheet").
 
 ## Caveats discovered while writing
 

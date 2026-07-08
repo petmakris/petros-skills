@@ -45,9 +45,11 @@
                 text="Show Shortcut Cheat-Sheet"
                 description="Open a read-only cheat-sheet of curated IDE shortcuts.">
             <add-to-group group-id="HelpMenu" anchor="last"/>
-            <!-- Literal control on the Mac keymaps so ⌃⇧/ is not translated to ⌘. -->
-            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control shift SLASH"/>
-            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control shift SLASH"/>
+            <!-- ⌃⌥⇧/ — literal control on the Mac keymaps so it stays Ctrl (not ⌘).
+                 NOT ⌃⇧/: that is CommentByBlockComment in the "Mac OS X 10.5+" keymap.
+                 ⌃⌥⇧/ is free and parallels this plugin's ⌃⌥⇧L (Prettify). -->
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift SLASH"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift SLASH"/>
         </action>
     </actions>
 </idea-plugin>
