@@ -62,3 +62,53 @@ def test_validate_rejects_cycle():
 def test_validate_unknown_role_tolerated():
     spec = _spec(); spec["nodes"][0]["role"] = "banana"
     validate(spec)  # no raise — unknown role renders neutral
+
+
+def test_render_contains_node_hit_targets():
+    svg = render(_spec(), block_id="section-1")
+    assert svg.startswith("<svg")
+    assert 'class="annotate-flow"' in svg
+    for nid in ("a", "b", "f", "g", "h"):
+        assert f'data-node-id="{nid}"' in svg
+    assert 'data-block-id="section-1"' in svg
+
+
+def test_render_role_classes():
+    svg = render(_spec(), block_id="s")
+    assert "node-entry" in svg
+    assert "node-decision" in svg
+    assert "node-success" in svg
+    assert "node-error" in svg
+
+
+def test_render_decision_is_polygon():
+    svg = render(_spec(), block_id="s")
+    assert "<polygon" in svg  # the diamond
+
+
+def test_render_ref_becomes_link_when_href():
+    spec = _spec()
+    spec["nodes"][1]["href"] = "jetbrains://idea/x?path=/p/File.java:154"
+    svg = render(spec, block_id="s")
+    assert "<a " in svg and "jetbrains://idea" in svg
+    assert 'class="flow-ref"' in svg
+
+
+def test_render_edge_labels_present():
+    svg = render(_spec(), block_id="s")
+    assert "OFF" in svg
+    assert "ON + doc missing" in svg
+
+
+def test_render_escapes_text():
+    spec = _spec()
+    spec["nodes"][0]["label"] = "a & <b>"
+    svg = render(spec, block_id="s")
+    assert "a &amp; &lt;b&gt;" in svg
+
+
+def test_render_unknown_role_defaults_neutral():
+    spec = _spec()
+    spec["nodes"][0]["role"] = "banana"
+    svg = render(spec, block_id="s")
+    assert "node-code" in svg  # neutral fallback class

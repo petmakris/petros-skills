@@ -9,6 +9,8 @@ from collections import deque
 from html import escape as _esc
 from typing import Any
 
+from .flowchart_layout import CONTENT_W, DIAMOND_HW, DIAMOND_HH, layout
+
 
 class ValidationError(ValueError):
     """Raised when a flowchart spec violates a structural rule."""
@@ -56,5 +58,112 @@ def validate(spec: dict[str, Any]) -> None:
         raise ValidationError("flowchart edges form a cycle (must be a DAG)")
 
 
-def render(spec: dict[str, Any], block_id: str) -> str:  # filled in Task 3
-    raise NotImplementedError
+_KNOWN_ROLES = {"entry", "code", "call", "decision", "success", "error"}
+
+
+def _role_class(node: dict[str, Any]) -> str:
+    role = node.get("role")
+    return f"node-{role}" if role in _KNOWN_ROLES else "node-code"
+
+
+def _defs() -> str:
+    return (
+        '<defs><marker id="fc-arrow" viewBox="0 0 10 10" refX="8" refY="5" '
+        'markerWidth="7" markerHeight="7" orient="auto">'
+        '<path d="M0,0 L10,5 L0,10 z" fill="#9aa3b0"/></marker></defs>'
+    )
+
+
+def _text_lines(node: dict[str, Any], cx: float, cy: float) -> str:
+    # ordered lines: label, ref(link), method, sub
+    lines: list[tuple[str, str]] = []
+    if node.get("label"):
+        cls = "flow-label-error" if node.get("role") == "error" else "flow-label"
+        lines.append((cls, node["label"]))
+    if node.get("ref"):
+        lines.append(("flow-ref", node["ref"]))
+    if node.get("method"):
+        lines.append(("flow-method", node["method"]))
+    if node.get("sub"):
+        lines.append(("flow-sub", node["sub"]))
+    if not lines:
+        lines.append(("flow-label", ""))
+
+    n = len(lines)
+    start = cy - (n * 17) / 2 + 13
+    href = node.get("href")
+    out: list[str] = []
+    for i, (cls, txt) in enumerate(lines):
+        y = start + i * 17
+        el = (f'<text class="{cls}" x="{cx:.1f}" y="{y:.1f}" '
+              f'text-anchor="middle">{_esc(txt)}</text>')
+        # wrap the primary link line (ref, else the first label) in <a>
+        if href and (cls == "flow-ref" or (cls == "flow-label" and not node.get("ref") and i == 0)):
+            el = f'<a href="{_esc(href, quote=True)}">{el}</a>'
+        out.append(el)
+    return "".join(out)
+
+
+def _node_svg(pos: dict[str, Any], block_id: str) -> str:
+    node = pos["node"]
+    cx, cy, w, h = pos["cx"], pos["cy"], pos["w"], pos["h"]
+    cls = _role_class(node)
+    parts = [
+        f'<g class="node {cls}" data-block-id="{_esc(block_id, quote=True)}" '
+        f'data-node-id="{_esc(node["id"], quote=True)}">'
+    ]
+    if node.get("role") == "decision":
+        pts = (f'{cx:.1f},{cy - DIAMOND_HH:.1f} {cx + DIAMOND_HW:.1f},{cy:.1f} '
+               f'{cx:.1f},{cy + DIAMOND_HH:.1f} {cx - DIAMOND_HW:.1f},{cy:.1f}')
+        parts.append(f'<polygon class="node-shape" points="{pts}"/>')
+    else:
+        x = cx - w / 2
+        y = cy - h / 2
+        parts.append(f'<rect class="node-shape" x="{x:.1f}" y="{y:.1f}" '
+                     f'width="{w}" height="{h}" rx="12"/>')
+    parts.append(_text_lines(node, cx, cy))
+    parts.append('</g>')
+    return "".join(parts)
+
+
+def _edge_svg(src: dict[str, Any], dst: dict[str, Any], label: str) -> str:
+    x1, y1 = src["cx"], src["cy"] + src["h"] / 2
+    x2, y2 = dst["cx"], dst["cy"] - dst["h"] / 2
+    end_y = y2 - 8
+    if abs(x1 - x2) < 1:
+        d = f'M{x1:.1f},{y1:.1f} L{x2:.1f},{end_y:.1f}'
+    else:
+        my = (y1 + y2) / 2
+        d = (f'M{x1:.1f},{y1:.1f} C{x1:.1f},{my:.1f} '
+             f'{x2:.1f},{my:.1f} {x2:.1f},{end_y:.1f}')
+    out = [f'<path class="flow-edge" d="{d}" marker-end="url(#fc-arrow)"/>']
+    if label:
+        lx, ly = (x1 + x2) / 2, (y1 + y2) / 2
+        tw = 8 + len(label) * 6.4
+        out.append(
+            f'<g class="edge-label"><rect x="{lx - tw / 2:.1f}" y="{ly - 11:.1f}" '
+            f'width="{tw:.1f}" height="20" rx="10"/>'
+            f'<text x="{lx:.1f}" y="{ly + 3:.1f}" text-anchor="middle">{_esc(label)}</text></g>'
+        )
+    return "".join(out)
+
+
+def render(spec: dict[str, Any], block_id: str) -> str:
+    """Render a validated flowchart spec to an SVG string with hit-target IDs."""
+    validate(spec)
+    nodes = spec["nodes"]
+    edges = spec.get("edges") or []
+    positions, total_h = layout(nodes, edges)
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CONTENT_W} {total_h}" '
+        f'class="annotate-flow">',
+        _defs(),
+    ]
+    # edges first (under nodes)
+    for e in edges:
+        parts.append(_edge_svg(positions[e["from"]], positions[e["to"]], e.get("label", "")))
+    for n in nodes:
+        parts.append(_node_svg(positions[n["id"]], block_id))
+    parts.append("</svg>")
+    return "".join(parts)
