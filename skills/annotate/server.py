@@ -22,6 +22,7 @@ from skills.annotate import blocks as blocks_model
 from skills.annotate import versions as versions_module
 from skills.annotate.diagrams.sequence import render
 from skills.annotate.diagrams.mermaid import render as render_mermaid
+from skills.annotate.diagrams.flowchart import render as render_flowchart
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 SHARED_STATIC_DIR = Path(__file__).resolve().parent.parent / "_shared" / "web_companion" / "static"
@@ -499,6 +500,28 @@ def _render_block_for_raw(blk: dict, version: int) -> dict:
                 f'class="annotate-seq annotate-seq-error" '
                 f'data-block-id="{html_escape(blk["id"])}" '
                 f'role="img" aria-label="sequence diagram failed to render">'
+                f'<rect x="0" y="0" width="360" height="36" rx="6" '
+                f'fill="#fde7e2" stroke="#e5b8af"/>'
+                f'<text x="14" y="22" font-size="12" font-weight="600" '
+                f'fill="#c1432f" font-family="ui-monospace, monospace">'
+                f'⚠ diagram render failed</text>'
+                f'<title>{html_escape(str(e))}</title>'
+                f'</svg>'
+            )
+        base["spec"] = spec
+        base["svg"] = svg
+    elif kind == "flowchart":
+        spec = blk.get("spec") or {}
+        try:
+            svg = render_flowchart(spec, block_id=blk["id"])
+        except Exception as e:
+            # Compact inline error pill — one malformed block must never
+            # crash /raw and blank the page (same pattern as sequence/diagram).
+            svg = (
+                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 36" '
+                f'class="annotate-flow annotate-flow-error" '
+                f'data-block-id="{html_escape(blk["id"])}" '
+                f'role="img" aria-label="flowchart failed to render">'
                 f'<rect x="0" y="0" width="360" height="36" rx="6" '
                 f'fill="#fde7e2" stroke="#e5b8af"/>'
                 f'<text x="14" y="22" font-size="12" font-weight="600" '
