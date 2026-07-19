@@ -16,7 +16,7 @@ Typical fits: code flows, request/response protocols, event lifecycles, deployme
 **Do NOT use a sequence-diagram block for:**
 
 - Single-actor flows (a numbered list does the job).
-- Branching/decision logic where time isn't the dominant axis — use a `kind: "diagram"` block (flowchart).
+- Branching/decision logic where time isn't the dominant axis — use a `kind: "flowchart"` block.
 - Static structure: class hierarchies, data shapes, dependency graphs, system architecture — use a `kind: "diagram"` block.
 - Anything that fits in 1–2 sentences.
 
