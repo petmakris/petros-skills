@@ -70,6 +70,7 @@
       // Choice blocks are answered by picking an option, not by commenting —
       // suppress the comment/reject strip the same way diagrams do.
       if (block.dataset.kind === "choice") return;
+      if (block.dataset.kind === "flowchart") return;
       if (HEADING_TAGS.has(block.tagName)) return;
       if (block.querySelector(".hover-actions")) return;
       const wrap = document.createElement("div");
