@@ -70,6 +70,7 @@
       // Choice blocks are answered by picking an option, not by commenting —
       // suppress the comment/reject strip the same way diagrams do.
       if (block.dataset.kind === "choice") return;
+      if (block.dataset.kind === "flowchart") return;
       if (HEADING_TAGS.has(block.tagName)) return;
       if (block.querySelector(".hover-actions")) return;
       const wrap = document.createElement("div");
@@ -197,13 +198,15 @@
         selectedText = sel.toString().split("\n")[0];
       }
     }
-    // Sub-unit lookup: prefer the closest data-step-id (used by the
-    // diagram renderer) and otherwise fall back to data-annotate-id
-    // (the convention Claude uses inside free-HTML markdown blocks).
+    // Sub-unit lookup: prefer the closest data-step-id/data-node-id (used by
+    // the diagram and flowchart renderers respectively) and otherwise fall
+    // back to data-annotate-id (the convention Claude uses inside free-HTML
+    // markdown blocks). Both step and node scopes share the annotation
+    // schema's step_id field — no separate node_id field is needed.
     let stepId = null;
-    const stepNode = event?.target?.closest("[data-step-id]");
+    const stepNode = event?.target?.closest("[data-step-id],[data-node-id]");
     if (stepNode && block.contains(stepNode)) {
-      stepId = stepNode.dataset.stepId;
+      stepId = stepNode.dataset.stepId || stepNode.dataset.nodeId;
     } else {
       const annotNode = event?.target?.closest("[data-annotate-id]");
       if (annotNode && block.contains(annotNode)) {
@@ -592,6 +595,35 @@
       // no step-click listener — whole-diagram comments come from the
       // hover-actions strip (renderHoverActions does not skip "diagram").
       content.innerHTML = blk.svg || "";
+    } else if (kind === "flowchart") {
+      // Server pre-rendered the hand-built SVG; inject as-is — trusted
+      // server output, deliberately bypasses sanitizeFreeHtml so the
+      // class/data-* hit targets survive.
+      content.innerHTML = blk.svg || "";
+      // Any click inside the SVG either follows an in-page cross-block
+      // anchor (href="#<block-id>") by smooth-scrolling to that block, or
+      // opens a comment scoped to the node that was clicked; onHoverAction
+      // extracts the scope id from event.target.closest via data-step-id or
+      // data-node-id. Listener lives on content so updateBlockContent's
+      // innerHTML swap doesn't drop it.
+      content.addEventListener("click", (ev) => {
+        const anchor = ev.target.closest && ev.target.closest("a[href]");
+        if (anchor) {
+          const href = anchor.getAttribute("href");
+          if (href.startsWith("#")) {
+            ev.preventDefault();
+            const targetId = href.slice(1);
+            const target = document.querySelector(
+              `[data-block-id="${cssEsc(targetId)}"]`
+            );
+            if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+          // Any other anchor (e.g. a jetbrains:// code-ref link) is left to
+          // navigate normally — never also open a node comment on top of it.
+          return;
+        }
+        onHoverAction(section, "comment", ev);
+      });
     } else if (kind === "choice") {
       renderChoice(section, content, blk);
     } else if (kind === "mockup") {

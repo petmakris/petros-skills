@@ -45,6 +45,39 @@
 .annotate-seq .step-row[data-card-focus] .arr-event,
 .annotate-seq .step-row[data-card-focus] .arr-self { stroke-width: 2.4; }
 
+/* ── flowchart block (kind: "flowchart") — hand-built SVG, Direction B ── */
+.annotate-flow { display: block; width: 100%; height: auto; }
+
+.annotate-flow .node-shape { stroke-width: 1.3; filter: drop-shadow(0 1.5px 2.5px rgba(29,29,31,.10)); }
+
+/* role fills = 10% tint over white; strokes = 55% */
+.annotate-flow .node-entry    .node-shape { fill: color-mix(in srgb,#0071e3 10%,white); stroke: color-mix(in srgb,#0071e3 55%,white); }
+.annotate-flow .node-code     .node-shape,
+.annotate-flow .node-call     .node-shape { fill: color-mix(in srgb,#5b6472 10%,white); stroke: color-mix(in srgb,#5b6472 55%,white); }
+.annotate-flow .node-decision .node-shape { fill: color-mix(in srgb,#b45309 10%,white); stroke: #b45309; }
+.annotate-flow .node-success  .node-shape { fill: color-mix(in srgb,#047857 10%,white); stroke: color-mix(in srgb,#047857 55%,white); }
+.annotate-flow .node-error    .node-shape { fill: color-mix(in srgb,#c0392b 10%,white); stroke: color-mix(in srgb,#c0392b 55%,white); }
+
+.annotate-flow .flow-label       { fill: var(--text-strong); font-size: 13.5px; font-weight: 600; font-family: inherit; }
+.annotate-flow .flow-label-error { fill: #c0392b; font-size: 13px; font-weight: 700; font-family: inherit; }
+.annotate-flow .flow-sub         { fill: var(--text-dim); font-size: 11px; font-style: italic; }
+.annotate-flow .flow-ref         { fill: var(--accent); font-size: 12px; font-weight: 600;
+                                   font-family: 'Monaspace Radon', ui-monospace, monospace; text-decoration: underline; }
+.annotate-flow .flow-method      { fill: var(--text); font-size: 11.5px;
+                                   font-family: 'Monaspace Radon', ui-monospace, monospace; }
+.annotate-flow a { cursor: pointer; }
+
+.annotate-flow .flow-edge        { fill: none; stroke: #9aa3b0; stroke-width: 1.6; }
+.annotate-flow .edge-label rect  { fill: var(--surface-soft); stroke: var(--border); }
+.annotate-flow .edge-label text  { fill: var(--text-dim); font-size: 11px; font-weight: 600; font-family: inherit; }
+
+/* per-node interactivity — parity with .annotate-seq .step-row */
+.annotate-flow .node { cursor: pointer; }
+.annotate-flow .node:hover .node-shape { stroke-width: 2.2; }
+.annotate-flow .node[data-card-focus] .node-shape { stroke-width: 2.4; }
+.annotate-flow .node[data-engaged-type="comment"] .node-shape { stroke: var(--type-comment-fg); }
+.annotate-flow .node[data-engaged-type="reject"]  .node-shape { stroke: var(--type-reject-fg); }
+
 /* Mermaid-rendered diagram blocks (kind: "diagram"). The SVG carries its own
    inline styling from mmdc; we only constrain its size and center it within
    the card so wide diagrams scale down instead of overflowing. */

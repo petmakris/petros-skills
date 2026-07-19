@@ -17,7 +17,7 @@ You wake here when a task-notification arrives whose first stdout line is one of
 1. Parse the banner: `skill`, `sid`, `event_id`.
 2. Read the event payload between the `---payload---` and `---end---` markers in the notification body. **If `type == "choice"`, jump to the `choice` subsection below.** Otherwise, fields are:
    - `block_id` — the block to update, or `null` for a general comment.
-   - `step_id` — for `kind: "sequence"` blocks: the step row the user clicked, or `null` for whole-diagram comments. For `kind: "diagram"` blocks: always `null` (whole-diagram only in v1). Absent/null for markdown blocks.
+   - `step_id` — for `kind: "sequence"` blocks: the step row the user clicked, or `null` for whole-diagram comments. For `kind: "flowchart"` blocks: the clicked node's id (the DOM carries it as `data-node-id`, but it arrives on the wire in this same `step_id` field — there is no separate `node_id` field), or `null` for whole-flowchart comments. For `kind: "diagram"` blocks: always `null` (whole-diagram only in v1). Absent/null for markdown blocks.
    - `type` — `"comment"`, `"reject"`, `"choice"`, or `"dismiss"`.
    - `selected_options` — for `type: "choice"`: the option id(s) the user picked (a list). Absent otherwise.
    - `text` — the user's free-text feedback.
@@ -110,6 +110,31 @@ then persist with `blocks.update_spec_block(doc, block_id, new_spec)` — the sa
 content-hash-safe helper used for sequence specs — and `save_atomic`. To convert
 a diagram to/from prose, treat it as a kind change (drop `kind`/`spec`, set
 `markdown`) exactly as for other spec blocks.
+
+### Flowchart block-rewrite contract
+
+`kind: "flowchart"` blocks carry per-node targeting the same way sequence
+blocks carry per-step targeting: a click on a node arrives with `step_id` set
+to that node's `id` (see the `step_id` field note above — there is no
+separate `node_id` field on the wire).
+
+1. **Targeted by default when `step_id` is present.** A comment on node `f`
+   ("does this decision also fire on a partial save?") rewrites just that
+   node's `label`/`sub`/`method`/`ref`/`href`, or the edges touching it if the
+   branch structure itself needs to change. Other nodes untouched. Node ids
+   are author-assigned and stay stable across rewrites — don't renumber a
+   node just because you touched it.
+2. **Whole-flowchart comments (`step_id: null`)** apply across the spec as
+   needed — add/remove nodes, rewire edges, retitle. Analogous to general
+   comments with `block_id: null` in the markdown contract.
+3. **Reject on a node** — either soften/withdraw the claim by rewriting the
+   node, or hold the line by rewriting its `sub` with reasoning. Don't drop
+   the node silently.
+
+Persist updates via `blocks.update_spec_block(doc, block_id, new_spec)` — the
+same content-hash-safe helper used for sequence and diagram specs — then
+`save_atomic`. To convert a flowchart to/from prose, treat it as a kind
+change (drop `kind`/`spec`, set `markdown`) exactly as for other spec blocks.
 
 ## Glossary term-set diff at rewrite time
 
