@@ -8,7 +8,10 @@ should be a Mermaid diagram, and you need the exact contract to emit or rewrite 
 Emit a `kind: "diagram"` block when content is clearer seen than read AND it is
 one of these shapes (the cases a sequence diagram does NOT cover):
 
-- **flowchart** — branching/decision logic, process flows, block diagrams.
+- **flowchart** — DEPRECATED here. Use the first-class `kind: "flowchart"`
+  block (structured nodes/edges, role color, jump-to-source links, per-node
+  comments). See `references/block-kinds/flowchart.md`. `kind: "diagram"` now
+  covers architecture / state / er / class only.
 - **architecture** — system/service architecture, how components connect.
 - **state** — state machines, lifecycle transitions.
 - **er** — entity-relationship / data-model shapes.
@@ -19,6 +22,8 @@ The block carries Mermaid source; the server renders it to SVG with `mmdc`.
 **Do NOT use a `kind: "diagram"` block for:**
 
 - Temporal actor↔actor flows — that's a `kind: "sequence"` block.
+- Branching/decision logic, process flows, block diagrams — that's a
+  `kind: "flowchart"` block (see `references/block-kinds/flowchart.md`).
 - Anything that fits in 1–2 sentences, or a short list that reads fine as prose.
 
 **One diagram per concept.** Like sequence blocks, diagrams are heavier than

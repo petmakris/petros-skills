@@ -55,7 +55,8 @@ Every block defaults to `kind: "markdown"` (plain markdown; may contain inline H
 |------|----------|---------------|
 | `markdown` (default) | Prose, lists, code, tables, callouts. | `references/pushing.md` (How to push + Inline HTML) |
 | `sequence` | ≥2 named entities interacting **in temporal order**, where who-talks-to-whom matters (code flows, request/response, event lifecycles). | `references/block-kinds/sequence.md` |
-| `diagram` | Better seen than read AND non-temporal: flowchart, architecture, state machine, ER, class. Mermaid source → server renders SVG. | `references/block-kinds/diagram.md` |
+| `flowchart` | Branching/decision/process-flow logic — guard clauses, validation pipelines, fan-in from multiple callers, success/error outcomes. Structured nodes/edges, role color, jump-to-source links, per-node comments. | `references/block-kinds/flowchart.md` |
+| `diagram` | Better seen than read AND non-temporal, non-branching: architecture, state machine, ER, class. Mermaid source → server renders SVG. | `references/block-kinds/diagram.md` |
 | `choice` | A decision point with 2–4 discrete options where the pick drives the next step. | `references/block-kinds/choice.md` |
 | `mockup` | A high-fidelity, interactive UI mock is clearer than prose or a static diagram — real `<style>`/`<script>`/Tailwind, hover, interaction. Renders in a sandboxed iframe. | `references/block-kinds/mockup.md` |
 
