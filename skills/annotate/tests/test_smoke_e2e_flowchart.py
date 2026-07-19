@@ -34,7 +34,9 @@ def test_full_flowchart_renders():
     assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
     for nid in ("a", "b", "c", "d", "e", "f", "g", "h"):
         assert f'data-node-id="{nid}"' in svg
-    assert "jetbrains://idea" in svg           # jump-to-source link
+    # jump-to-source link: href must sit inside an <a>, not just appear
+    # anywhere in the SVG (e.g. a stray data attribute).
+    assert '<a href="jetbrains://idea/navigate/reference?project=p' in svg
     assert "<polygon" in svg                    # decision diamond
     assert "OFF" in svg and "ON + doc missing" in svg  # edge labels
     assert "render failed" not in svg

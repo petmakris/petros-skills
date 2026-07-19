@@ -92,6 +92,39 @@ def test_render_ref_becomes_link_when_href():
     svg = render(spec, block_id="s")
     assert "<a " in svg and "jetbrains://idea" in svg
     assert 'class="flow-ref"' in svg
+    # ref still wins over label/method when all three are present.
+    assert '<a href="jetbrains://idea/x?path=/p/File.java:154">' \
+        '<text class="flow-ref"' in svg
+    assert '<a href="jetbrains://idea/x?path=/p/File.java:154">' \
+        '<text class="flow-method"' not in svg
+
+
+def test_render_method_only_node_with_href_wraps_method():
+    spec = {
+        "nodes": [
+            {"id": "m", "role": "call", "method": "doThing()",
+             "href": "jetbrains://idea/x"},
+        ],
+        "edges": [],
+    }
+    svg = render(spec, block_id="s")
+    assert "<a " in svg
+    assert "jetbrains://idea/x" in svg
+    assert '<a href="jetbrains://idea/x"><text class="flow-method"' in svg
+
+
+def test_render_label_only_node_with_href_wraps_label():
+    spec = {
+        "nodes": [
+            {"id": "n", "role": "entry", "label": "User SAVES",
+             "href": "jetbrains://idea/y"},
+        ],
+        "edges": [],
+    }
+    svg = render(spec, block_id="s")
+    assert "<a " in svg
+    assert "jetbrains://idea/y" in svg
+    assert '<a href="jetbrains://idea/y"><text class="flow-label"' in svg
 
 
 def test_render_edge_labels_present():

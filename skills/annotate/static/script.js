@@ -607,14 +607,19 @@
       // data-node-id. Listener lives on content so updateBlockContent's
       // innerHTML swap doesn't drop it.
       content.addEventListener("click", (ev) => {
-        const anchor = ev.target.closest && ev.target.closest('a[href^="#"]');
+        const anchor = ev.target.closest && ev.target.closest("a[href]");
         if (anchor) {
-          ev.preventDefault();
-          const targetId = anchor.getAttribute("href").slice(1);
-          const target = document.querySelector(
-            `[data-block-id="${cssEsc(targetId)}"]`
-          );
-          if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+          const href = anchor.getAttribute("href");
+          if (href.startsWith("#")) {
+            ev.preventDefault();
+            const targetId = href.slice(1);
+            const target = document.querySelector(
+              `[data-block-id="${cssEsc(targetId)}"]`
+            );
+            if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+          // Any other anchor (e.g. a jetbrains:// code-ref link) is left to
+          // navigate normally — never also open a node comment on top of it.
           return;
         }
         onHoverAction(section, "comment", ev);

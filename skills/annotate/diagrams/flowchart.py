@@ -75,30 +75,44 @@ def _defs() -> str:
 
 
 def _text_lines(node: dict[str, Any], cx: float, cy: float) -> str:
-    # ordered lines: label, ref(link), method, sub
-    lines: list[tuple[str, str]] = []
+    # ordered lines: label, ref(link), method, sub. Each line is tagged with
+    # a "kind" (label/ref/method/sub) distinct from its CSS class, since the
+    # label class varies (flow-label vs flow-label-error) but its kind
+    # doesn't — that's what the primary-link priority below matches on.
+    lines: list[tuple[str, str, str]] = []
     if node.get("label"):
         cls = "flow-label-error" if node.get("role") == "error" else "flow-label"
-        lines.append((cls, node["label"]))
+        lines.append((cls, node["label"], "label"))
     if node.get("ref"):
-        lines.append(("flow-ref", node["ref"]))
+        lines.append(("flow-ref", node["ref"], "ref"))
     if node.get("method"):
-        lines.append(("flow-method", node["method"]))
+        lines.append(("flow-method", node["method"], "method"))
     if node.get("sub"):
-        lines.append(("flow-sub", node["sub"]))
+        lines.append(("flow-sub", node["sub"], "sub"))
     if not lines:
-        lines.append(("flow-label", ""))
+        lines.append(("flow-label", "", "label"))
+
+    # Primary jump-to-source link line, in priority order ref > label >
+    # method (sub is never the link target). Deterministic and wraps at
+    # most one line.
+    href = node.get("href")
+    primary_kind = None
+    if href:
+        if node.get("ref"):
+            primary_kind = "ref"
+        elif node.get("label"):
+            primary_kind = "label"
+        elif node.get("method"):
+            primary_kind = "method"
 
     n = len(lines)
     start = cy - (n * 17) / 2 + 13
-    href = node.get("href")
     out: list[str] = []
-    for i, (cls, txt) in enumerate(lines):
+    for i, (cls, txt, kind) in enumerate(lines):
         y = start + i * 17
         el = (f'<text class="{cls}" x="{cx:.1f}" y="{y:.1f}" '
               f'text-anchor="middle">{_esc(txt)}</text>')
-        # wrap the primary link line (ref, else the first label) in <a>
-        if href and (cls == "flow-ref" or (cls == "flow-label" and not node.get("ref") and i == 0)):
+        if kind == primary_kind:
             el = f'<a href="{_esc(href, quote=True)}">{el}</a>'
         out.append(el)
     return "".join(out)
