@@ -55,6 +55,91 @@ def _watcher_age(dirs: dict) -> int | None:
     return int(time.time()) - hb
 
 
+LIVE_WINDOW = 10  # seconds; heartbeat fresher than this => "live"
+
+
+def _read_hb(state_dir):
+    p = Path(state_dir) / "watcher_heartbeat"
+    if not p.exists():
+        return None
+    try:
+        return int(p.read_text().strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _comment_count(dirs):
+    ann = dirs.get("annotations_dir")
+    if not ann:
+        return 0
+    ann = Path(ann)
+    return sum(1 for _ in ann.glob("*.json")) if ann.is_dir() else 0
+
+
+def _session_meta(registry, dirs, sid):
+    """Legacy meta source: state_dir/meta.json (NOT registry meta), preserved
+    byte-for-byte from the pre-scope=all behavior so interactive_review is
+    unaffected."""
+    meta = {}
+    mp = Path(dirs["state_dir"]) / "meta.json"
+    if mp.exists():
+        try:
+            meta = json.loads(mp.read_text())
+        except json.JSONDecodeError:
+            meta = {}
+    return meta
+
+
+def session_row(sid, dirs, meta, now, legacy=False):
+    if legacy:
+        return {"sid": sid, "pr_ref": meta.get("pr_ref", ""),
+                "title": meta.get("title", ""), "state_dir": str(dirs["state_dir"])}
+    hb = _read_hb(dirs["state_dir"])
+    if _is_terminal(dirs):
+        status = "done"
+    elif hb is not None and (now - hb) < LIVE_WINDOW:
+        status = "live"
+    else:
+        status = "idle"
+    return {
+        "sid": sid, "slug": meta.get("slug", sid),
+        "title": meta.get("title", ""), "project": meta.get("project", ""),
+        "pr_ref": meta.get("pr_ref", ""),
+        "last_active": hb or meta.get("created_at", 0),
+        "comment_count": _comment_count(dirs),
+        "status": status, "state_dir": str(dirs["state_dir"]),
+    }
+
+
+def list_rows(registry, cwd, scope, now):
+    if cwd:
+        pairs = registry.find_by_cwd(cwd)
+        out = []
+        for sid, dirs in pairs:
+            age = _watcher_age(dirs)
+            if _is_terminal(dirs) or (age is not None and age > REAP_AFTER):
+                continue
+            out.append(session_row(sid, dirs, _session_meta(registry, dirs, sid), now, legacy=True))
+        out.sort(key=lambda r: r["sid"], reverse=True)
+        return out
+    if scope != "all":
+        return []          # handler renders the legacy 400 for this case
+    # scope=all -> all live sessions, extended
+    out = []
+    for sid, dirs in registry.list_all():
+        # Reap age measured against the injected `now` (not wall-clock
+        # time.time() like the legacy _watcher_age helper) so it stays
+        # consistent with session_row's own live/idle computation below,
+        # and so callers can pass a fixed `now` deterministically in tests.
+        hb = _read_hb(dirs["state_dir"])
+        age = None if hb is None else now - hb
+        if age is not None and age > REAP_AFTER and not _is_terminal(dirs):
+            continue
+        out.append(session_row(sid, dirs, registry.get_meta(sid), now))
+    out.sort(key=lambda r: r["last_active"], reverse=True)
+    return out
+
+
 def create_or_attach(registry, skill_name, payload, cwd, mkdirs):
     """Return ({sid, slug, dirs, created}, created_bool).
 
@@ -308,40 +393,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                 from urllib.parse import urlparse, parse_qs
                 qs = parse_qs(urlparse(self.path).query)
                 cwd = (qs.get("cwd") or [""])[0]
-                if not cwd:
-                    self._send_text(400, "missing cwd")
+                scope = (qs.get("scope") or [""])[0]
+                if not cwd and scope != "all":
+                    self._send_text(400, "missing cwd")   # legacy contract intact
                     return
-                rows = []
-                for sid, dirs in registry.find_by_cwd(cwd):
-                    # Skip terminated sessions and watcher-dead "zombies". A
-                    # session that is cancelled/finished, OR whose watcher has
-                    # been silent past REAP_AFTER, can't answer anything — so
-                    # surfacing it makes the IDE attach to a dead review and
-                    # accept input nobody reads. (rehydrate() after a server
-                    # restart re-registers such sessions from disk; reaping them
-                    # here is intentional — nothing re-arms their watcher.)
-                    age = _watcher_age(dirs)
-                    if _is_terminal(dirs) or (age is not None and age > REAP_AFTER):
-                        continue
-                    meta_path = Path(dirs["state_dir"]) / "meta.json"
-                    meta = {}
-                    if meta_path.exists():
-                        try:
-                            meta = json.loads(meta_path.read_text())
-                        except json.JSONDecodeError:
-                            meta = {}
-                    rows.append({
-                        "sid": sid,
-                        "pr_ref": meta.get("pr_ref", ""),
-                        "title": meta.get("title", ""),
-                        "state_dir": str(dirs["state_dir"]),
-                    })
-                # Newest first. sids start with `YYMMDD-HHMMSS-...`, so a
-                # descending lexical sort puts the most recent session at
-                # index 0 — which is what clients that pick the first
-                # session (e.g. the IDE plugin) want when several live
-                # sessions share the same cwd.
-                rows.sort(key=lambda r: r["sid"], reverse=True)
+                rows = list_rows(registry, cwd, scope, now=int(time.time()))
                 self._send_json(200, rows)
                 return
             self._send_text(404, "not found")
