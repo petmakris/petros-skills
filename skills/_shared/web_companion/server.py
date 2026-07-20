@@ -83,6 +83,9 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs):
         # fall through to create (self-heal)
 
     sid = registry.make_sid()
+    # Sanitize explicit slug through slugifier; fall back to make_slug if it becomes empty
+    if explicit_slug:
+        explicit_slug = registry._slugify(explicit_slug) or ""
     slug = explicit_slug or registry.make_slug(title, cwd)
     # if an explicit slug collides with a live one, dedup it too
     if explicit_slug and registry.find_by_slug(explicit_slug):

@@ -45,3 +45,14 @@ def test_attach_self_heals_when_dir_gone(tmp_path):
         str(tmp_path), lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid))
     assert created2 is True                          # fell back to create
     assert res2["slug"].startswith("gone")
+
+
+def test_explicit_dirty_slug_is_sanitized(tmp_path):
+    import re
+    r = Registry(tmp_path)
+    res, created = create_or_attach(
+        r, "annotate", {"title": "x", "slug": "My Cool Work!"}, str(tmp_path),
+        lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid))
+    assert created is True
+    assert res["slug"] == "my-cool-work"
+    assert re.match(r"^[a-zA-Z0-9_-]+$", res["slug"])
