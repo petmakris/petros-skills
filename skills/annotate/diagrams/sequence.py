@@ -8,6 +8,8 @@ from __future__ import annotations
 from html import escape as _html_escape
 from typing import Any
 
+from .text_metrics import text_px
+
 ARROW_TYPES = ("request", "event", "self")
 
 
@@ -77,7 +79,8 @@ def validate(spec: dict[str, Any]) -> None:
 # are deliberately compact so the diagram doesn't dwarf surrounding prose.
 # PAD_X must be ≥ ACTOR_PILL_W // 2 so the outermost actor pills (centered
 # at x=PAD_X) stay fully within the viewBox at both edges.
-ACTOR_PILL_W = 140
+ACTOR_PILL_W = 140       # minimum; a longer label widens its own pill
+ACTOR_PILL_PAD = 14      # horizontal padding, label to pill edge
 PAD_X = ACTOR_PILL_W // 2 + 8  # = 78
 PAD_TOP = 12
 ACTOR_PILL_H = 28
@@ -87,17 +90,35 @@ PHASE_LABEL_H = 18  # extra space above the first row of a phase for its label
 LIFELINE_TOP = PAD_TOP + ACTOR_PILL_H + 8
 LEGEND_H = 28
 
-# fixed total width; per-actor column x is computed
+# minimum total width; grows if wide actor labels need more room
 TOTAL_W = 1040
 
 
-def _actor_xs(n: int) -> list[int]:
-    """Evenly space n actor columns within TOTAL_W."""
+def actor_pill_w(actor: dict[str, Any]) -> int:
+    """Pill width for one actor: wide enough for its measured label."""
+    return max(ACTOR_PILL_W,
+               int(text_px(actor.get("label", ""), "actor-label")) + 2 * ACTOR_PILL_PAD)
+
+
+def _actor_xs(actors: list[dict[str, Any]]) -> tuple[list[int], int]:
+    """Actor column centres and the canvas width that holds them.
+
+    Columns are evenly spaced, but the step is never smaller than what the two
+    widest neighbouring pills need — an actor whose label is longer than the
+    140px default widens the diagram instead of overflowing its pill.
+    """
+    widths = [actor_pill_w(a) for a in actors]
+    n = len(actors)
     if n <= 1:
-        return [TOTAL_W // 2]
-    inner_w = TOTAL_W - 2 * PAD_X
-    step = inner_w // (n - 1)
-    return [PAD_X + i * step for i in range(n)]
+        total_w = max(TOTAL_W, (widths[0] if widths else 0) + 2 * PAD_X)
+        return [total_w // 2], total_w
+    step = max(
+        (TOTAL_W - 2 * PAD_X) // (n - 1),
+        max((widths[i] + widths[i + 1]) // 2 + ACTOR_GAP_MIN for i in range(n - 1)),
+    )
+    edge = max(PAD_X, widths[0] // 2 + 8, widths[-1] // 2 + 8)
+    total_w = max(TOTAL_W, 2 * edge + step * (n - 1))
+    return [edge + i * step for i in range(n)], total_w
 
 
 def _row_y(row_index: int, phase_offsets: dict[int, int]) -> int:
@@ -117,7 +138,7 @@ def render(spec: dict[str, Any], block_id: str) -> str:
     steps = spec["steps"]
     phases = spec.get("phases") or []
 
-    xs = _actor_xs(len(actors))
+    xs, total_w = _actor_xs(actors)
 
     # phase_offsets[row_index] = extra px added before that row for phase label
     phase_offsets: dict[int, int] = {}
@@ -135,17 +156,17 @@ def render(spec: dict[str, Any], block_id: str) -> str:
     # whenever any descendant is hovered (background works on the <svg>
     # replaced element, even though it's a no-op on inner <g>/<rect>).
     parts.append(
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {TOTAL_W} {total_h}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total_w} {total_h}" '
         f'class="annotate-seq">'
     )
     parts.append(_defs())
 
     # actor pills + labels
     for actor, x in zip(actors, xs):
-        px = x - ACTOR_PILL_W // 2
+        pw = actor_pill_w(actor)
         parts.append(
-            f'<rect class="actor-pill" x="{px}" y="{PAD_TOP}" '
-            f'width="{ACTOR_PILL_W}" height="{ACTOR_PILL_H}" rx="{ACTOR_PILL_H // 2}"/>'
+            f'<rect class="actor-pill" x="{x - pw // 2}" y="{PAD_TOP}" '
+            f'width="{pw}" height="{ACTOR_PILL_H}" rx="{ACTOR_PILL_H // 2}"/>'
         )
         parts.append(
             f'<text class="actor-label" x="{x}" y="{PAD_TOP + ACTOR_PILL_H // 2 + 4}" '
@@ -154,7 +175,7 @@ def render(spec: dict[str, Any], block_id: str) -> str:
 
     # phase bands first — they're the background; lifelines + arrows paint on top.
     if phases:
-        parts.append(_render_phases(phases, steps, step_id_to_index, phase_offsets, total_h))
+        parts.append(_render_phases(phases, steps, step_id_to_index, phase_offsets, total_h, total_w))
 
     # lifelines (must come after phase bands so they remain visible through them)
     bottom_y = total_h - LEGEND_H - 10
@@ -167,7 +188,7 @@ def render(spec: dict[str, Any], block_id: str) -> str:
     actor_x = {a["id"]: x for a, x in zip(actors, xs)}
     for i, step in enumerate(steps):
         y = _row_y(i, phase_offsets)
-        parts.append(_render_step(step, block_id, actor_x, y))
+        parts.append(_render_step(step, block_id, actor_x, y, total_w))
 
     parts.append(_render_legend(steps, total_h))
 
@@ -190,7 +211,8 @@ def _defs() -> str:
     )
 
 
-def _render_step(step: dict[str, Any], block_id: str, actor_x: dict[str, int], y: int) -> str:
+def _render_step(step: dict[str, Any], block_id: str, actor_x: dict[str, int], y: int,
+                 total_w: int) -> str:
     """Emit one step row. y is the arrow centerline; row geometry is derived
     from ROW_H so all offsets scale with the layout constants."""
     sid = step["id"]
@@ -205,7 +227,7 @@ def _render_step(step: dict[str, Any], block_id: str, actor_x: dict[str, int], y
 
     parts = [
         f'<g class="step-row" data-block-id="{_html_escape(block_id, quote=True)}" data-step-id="{_html_escape(sid, quote=True)}">',
-        f'<rect class="row-bg" x="0" y="{y - row_half}" width="{TOTAL_W}" height="{ROW_H}"/>',
+        f'<rect class="row-bg" x="0" y="{y - row_half}" width="{total_w}" height="{ROW_H}"/>',
     ]
 
     if arrow == "self":
@@ -262,6 +284,7 @@ def _render_phases(
     step_id_to_index: dict[str, int],
     phase_offsets: dict[int, int],
     total_h: int,
+    total_w: int,
 ) -> str:
     """Render phase bands as background rects + uppercase labels in the left margin."""
     parts: list[str] = []
@@ -275,7 +298,7 @@ def _render_phases(
         y_top = _row_y(start_idx, phase_offsets) - PHASE_LABEL_H - 8
         y_bot = _row_y(end_idx, phase_offsets) + ROW_H // 2
         parts.append(
-            f'<rect class="phase-band" x="0" y="{y_top}" width="{TOTAL_W}" height="{y_bot - y_top}"/>'
+            f'<rect class="phase-band" x="0" y="{y_top}" width="{total_w}" height="{y_bot - y_top}"/>'
         )
         parts.append(
             f'<text class="phase-label" x="{10}" y="{y_top + 13}">{_html_escape(phase["label"])}</text>'

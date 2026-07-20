@@ -109,6 +109,16 @@ Keep a flowchart to **≤ ~15 nodes**. Past that it stops being legible as an
 inline block — split into two flowcharts (e.g. one per entry point) or fold
 the excess detail into the framing prose instead of adding more boxes.
 
+Sizing is automatic and you do not have to defend against it: node boxes are
+measured from their text using the real fonts, long `label`/`sub` prose wraps,
+`ref`/`method` never break mid-token (the box widens instead), rows are packed
+so nodes cannot overlap, and the canvas grows when a row needs the room. What
+still costs you is **width**: a row of five wide nodes produces a wide diagram
+that the card scales down, so text ends up small. Prefer **≤ 4 nodes per
+layer**, and keep a `decision` node's text short — a diamond needs roughly
+twice the width of the text it holds, so `{"role":"decision","label":"toggle
+ON?"}` reads far better than a decision node carrying a long `ref` line.
+
 ## Canonical example
 
     {"id": "section-N", "kind": "flowchart", "spec": {
