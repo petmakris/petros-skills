@@ -103,8 +103,10 @@ class ServerStartupTests(unittest.TestCase):
 
     def test_session_includes_localhost_url(self):
         self.assertIn("localhost_url", self.sess)
+        self.assertIn("slug", self.sess)
         self.assertTrue(self.sess["localhost_url"].startswith("http://localhost:"))
-        self.assertTrue(self.sess["localhost_url"].endswith(f"/s/{self.sess['sid']}/"))
+        # Session URLs point at the human slug, not the raw sid.
+        self.assertTrue(self.sess["localhost_url"].endswith(f"/s/{self.sess['slug']}/"))
         # Same port as the announced public URL, different host.
         self.assertEqual(self.sess["localhost_url"].rsplit(":", 1)[1],
                          self.sess["url"].rsplit(":", 1)[1])
