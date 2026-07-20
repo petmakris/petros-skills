@@ -35,7 +35,29 @@ Long responses (multi-step plans, analyses, lists of findings) get pushed to a b
 - `blocks.py` — Block document model and update logic.
 - `static/` — HTML/JS/CSS for the browser page.
 - `ensure_server.sh` — Idempotent startup script (delegates to shared library).
+- `diagrams/` — Server-side SVG renderers for the `flowchart` and `sequence` block kinds (`mermaid.py` is the one renderer that shells out, to `mmdc`).
 - `tests/` — Unit and integration tests.
+
+## Diagram sizing
+
+`diagrams/text_metrics.py` measures text with the **real advance widths of the
+bundled fonts**, so nodes, pills and canvases are sized from their content
+rather than from fixed constants. The widths live in the generated
+`diagrams/font_metrics.py`; regenerate them after changing a bundled font:
+
+    pip install fonttools brotli   # build-time only, never a runtime dependency
+    python tools/gen_font_metrics.py \
+      skills/_shared/web_companion/static/fonts \
+      skills/annotate/diagrams/font_metrics.py
+
+If a font size changes in `static/diagram.css`, mirror it in `STYLES` in
+`text_metrics.py` — that table is the only place layout learns about type.
+
+`tests/test_flowchart_geometry.py` and `tests/test_sequence_geometry.py` assert
+geometry invariants on the rendered SVG (no overlapping nodes, no text escaping
+its shape, no edge label on top of a node, nothing outside the viewBox) across
+a fixed corpus plus 40 generated DAGs, so layout regressions fail a test
+instead of only showing up in a screenshot.
 
 ## Trigger modes
 
