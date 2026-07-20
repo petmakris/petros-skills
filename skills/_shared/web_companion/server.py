@@ -201,10 +201,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             tail = self.path[len(prefix):]
             if "/" not in tail:
                 return None
-            sid, rest = tail.split("/", 1)
-            if not SID_RE.match(sid):
+            key, rest = tail.split("/", 1)
+            if not SID_RE.match(key):
                 return None
-            if registry.lookup(sid) is None:
+            sid = registry.resolve(key)          # slug OR sid -> canonical sid
+            if sid is None:
                 return None
             return sid, "/" + rest
 
