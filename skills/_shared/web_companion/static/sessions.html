@@ -203,8 +203,8 @@ function rowHtml(row) {
         '<span class="stag" style="color:' + statusColor(st) + '">' + statusLabel(st) + '</span></div>' +
       '<div class="c-name"><span class="slug">' + slug + '</span>' +
         '<div class="title">' + title + '</div></div>' +
-      '<div class="c-proj"><span class="proj">' + project + '</span></div>' +
-      '<div class="c-meta"><span class="cm">💬 ' + commentCount + '</span><span class="last">' + last + '</span></div>' +
+      (row.project ? '<div class="c-proj"><span class="proj">' + project + '</span></div>' : '') +
+      '<div class="c-meta"><span class="cm">💬 ' + commentCount + '</span>' + (last ? '<span class="last">' + last + '</span>' : '') + '</div>' +
       '<div class="c-go">Open →</div>' +
     '</div>'
   );
