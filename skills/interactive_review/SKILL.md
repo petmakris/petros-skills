@@ -58,7 +58,9 @@ The server's `create_session_extra` runs `gh pr diff` and `gh pr view`, then wri
 ```json
 {
   "sid": "...",
-  "url": "http://localhost:PORT/s/SID/",
+  "slug": "...",       // human alias for the session (see note below)
+  "created": true,     // false if this attached to an existing workspace
+  "url": "http://localhost:PORT/s/SLUG/",
   "response_dir": "...",
   "annotations_dir": "...",
   "state_dir": "...",
@@ -69,6 +71,13 @@ The server's `create_session_extra` runs `gh pr diff` and `gh pr view`, then wri
   "warning": "..."   // present only for large diffs; see below
 }
 ```
+
+**On `slug` / `url`:** the shared server now returns a human `slug` and builds
+`url`/`localhost_url` from it (`/s/<slug>/`). This skill and the IDE plugin key
+everything off the `sid` field and call `/s/<sid>/…` — the raw sid still routes,
+so the slug is not used here. Because this POST sends no `title`, the slug is
+derived from the repo basename (and de-duplicated across concurrent reviews of
+the same repo); it is cosmetic for interactive-review.
 
 Save `url`, `sid`, `state_dir`, `events_dir`, `consumed_dir`, and `title` for the rest of this turn.
 
