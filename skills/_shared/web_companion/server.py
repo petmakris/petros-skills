@@ -55,6 +55,49 @@ def _watcher_age(dirs: dict) -> int | None:
     return int(time.time()) - hb
 
 
+def create_or_attach(registry, skill_name, payload, cwd, mkdirs):
+    """Return ({sid, slug, dirs, created}, created_bool).
+
+    mkdirs(sid) -> dirs dict (response_dir/annotations_dir/state_dir/events_dir/
+    consumed_dir), all created. Pure of HTTP; URL assembly is the caller's job.
+    """
+    title = (payload.get("title") or "").strip()
+    project = (payload.get("project") or Path(cwd).name).strip()
+    explicit_slug = (payload.get("slug") or "").strip()
+    want_attach = bool(payload.get("attach"))
+
+    if want_attach:
+        target_sid = None
+        if explicit_slug:
+            target_sid = registry.find_by_slug(explicit_slug)
+        else:
+            live = registry.find_by_cwd(cwd)
+            live.sort(key=lambda kv: kv[0], reverse=True)
+            target_sid = live[0][0] if live else None
+        if target_sid is not None:
+            dirs = registry.lookup(target_sid)
+            if dirs and Path(dirs["state_dir"]).is_dir():
+                meta = registry.get_meta(target_sid)
+                return ({"sid": target_sid, "slug": meta.get("slug", target_sid),
+                         "dirs": dirs, "created": False}, False)
+        # fall through to create (self-heal)
+
+    sid = registry.make_sid()
+    slug = explicit_slug or registry.make_slug(title, cwd)
+    # if an explicit slug collides with a live one, dedup it too
+    if explicit_slug and registry.find_by_slug(explicit_slug):
+        slug = registry.make_slug(explicit_slug, cwd)
+    dirs = mkdirs(sid)
+    dirs["_cwd"] = str(cwd)
+    registry.register(sid, dirs)
+    registry.register_meta(sid, {
+        "slug": slug, "title": title, "project": project,
+        "created_at": int(time.time()),
+    })
+    registry.persist()
+    return ({"sid": sid, "slug": slug, "dirs": dirs, "created": True}, True)
+
+
 def _resolve_public_host() -> str:
     if env := os.environ.get("WEBCOMPANION_PUBLIC_HOST"):
         return env
@@ -357,44 +400,43 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             if not cwd.is_absolute() or not cwd.is_dir():
                 self._send_text(400, "cwd must be an absolute existing directory")
                 return
-            sid = registry.make_sid()
-            base = cwd / ".claude" / skill_name / sid
-            response_dir = base / "response"
-            annotations_dir = base / "annotations"
-            state_dir = base / "state"
-            events_dir = state_dir / "events"
-            consumed_dir = state_dir / "consumed"
-            for d in (response_dir, annotations_dir, state_dir, events_dir, consumed_dir):
-                d.mkdir(parents=True, exist_ok=True)
-            dirs = {
-                "response_dir": response_dir,
-                "annotations_dir": annotations_dir,
-                "state_dir": state_dir,
-                "events_dir": events_dir,
-                "consumed_dir": consumed_dir,
-                # metadata: cwd is captured so the IDE plugin can find this session by project root
-                "_cwd": str(cwd),
-            }
+            def _mkdirs(sid):
+                base = cwd / ".claude" / skill_name / sid
+                response_dir = base / "response"
+                annotations_dir = base / "annotations"
+                state_dir = base / "state"
+                events_dir = state_dir / "events"
+                consumed_dir = state_dir / "consumed"
+                for d in (response_dir, annotations_dir, state_dir, events_dir, consumed_dir):
+                    d.mkdir(parents=True, exist_ok=True)
+                return {
+                    "response_dir": response_dir, "annotations_dir": annotations_dir,
+                    "state_dir": state_dir, "events_dir": events_dir,
+                    "consumed_dir": consumed_dir,
+                }
+
+            result, _created = create_or_attach(registry, skill_name, payload, cwd, _mkdirs)
+            sid = result["sid"]; slug = result["slug"]; dirs = result["dirs"]
             try:
                 extra = handlers.create_session_extra(payload, dirs) or {}
             except Exception as e:
                 self._send_text(500, f"session-init failed: {e}")
                 return
-            registry.register(sid, dirs)
-            registry.persist()
             port = server_holder['server'].server_address[1]
             self._send_json(200, {
                 "sid": sid,
-                "url": f"http://{public_host}:{port}/s/{sid}/",
+                "slug": slug,
+                "created": _created,
+                "url": f"http://{public_host}:{port}/s/{slug}/",
                 # Always-secure-context loopback URL. Browser features that need
                 # a secure context (e.g. voice dictation) work here but not over
                 # the public_host URL when it's plain-HTTP.
-                "localhost_url": f"http://localhost:{port}/s/{sid}/",
-                "response_dir": str(response_dir),
-                "annotations_dir": str(annotations_dir),
-                "state_dir": str(state_dir),
-                "events_dir": str(events_dir),
-                "consumed_dir": str(consumed_dir),
+                "localhost_url": f"http://localhost:{port}/s/{slug}/",
+                "response_dir": str(dirs["response_dir"]),
+                "annotations_dir": str(dirs["annotations_dir"]),
+                "state_dir": str(dirs["state_dir"]),
+                "events_dir": str(dirs["events_dir"]),
+                "consumed_dir": str(dirs["consumed_dir"]),
                 **extra,
             })
 
