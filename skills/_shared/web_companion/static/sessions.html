@@ -139,7 +139,7 @@ select.proj-select {
 <body>
 <div class="wrap">
   <div class="hd">
-    <h1>Annotate sessions</h1>
+    <h1 id="page-title">Annotate sessions</h1>
   </div>
   <div class="sub">Named workspaces persist across Claude sessions. Reopen any to continue where you left off.</div>
   <div class="tools">
@@ -281,6 +281,23 @@ Array.prototype.forEach.call(document.querySelectorAll("#seg button"), function 
     render();
   });
 });
+
+// Skill-aware page title: this browser is served by any web_companion skill
+// (annotate, interactive-review, …). Derive the label from the server banner
+// ("<skill>-server vN") so a non-annotate skill isn't mislabeled. Falls back
+// to the hardcoded "Annotate sessions" if /health is unreachable.
+fetch("/health")
+  .then(function (r) { return r.text(); })
+  .then(function (banner) {
+    var skill = (banner || "").trim().replace(/-server\b.*$/, "");
+    if (!skill) return;
+    var words = skill.replace(/-/g, " ");
+    var label = words.charAt(0).toUpperCase() + words.slice(1) + " sessions";
+    document.title = label;
+    var h = document.getElementById("page-title");
+    if (h) h.textContent = label;
+  })
+  .catch(function () { /* keep the default title */ });
 
 fetch("/api/sessions?scope=all")
   .then(function (r) { return r.json(); })
