@@ -484,16 +484,22 @@ git commit -m "feat(web_companion): create-or-attach sessions with slug URLs"
 
 **Files:**
 - Modify: `skills/_shared/web_companion/server.py` (the `/api/sessions` GET branch, ~line 260-299)
-- Test: `skills/_shared/web_companion/tests/test_sessions_list.py` (create) — extract the row-building into a testable helper `session_row(sid, dirs, meta, now) -> dict` and a `list_rows(registry, cwd_or_none, now) -> list[dict]`; unit-test both, including the legacy shape.
+- Test: `skills/_shared/web_companion/tests/test_sessions_list.py` (create) — extract the row-building into a testable helper `session_row(sid, dirs, meta, now, legacy=False) -> dict` and a `list_rows(registry, cwd, scope, now) -> list[dict]`; unit-test both shapes.
+
+**BACKWARD-COMPAT DECISION (revised):** The existing `test_get_sessions_route.py`
+asserts `400 "missing cwd"` for missing/empty cwd. We KEEP that contract intact.
+The browser's "all sessions" is a NEW explicit signal `?scope=all` — NOT an
+overload of no-cwd. So: `?cwd=<path>` → legacy 200; `?scope=all` → extended 200;
+neither → **400 unchanged**. Do NOT modify `test_get_sessions_route.py`.
 
 **Interfaces:**
 - Consumes: `Registry.list_all`, `find_by_cwd`, `get_meta`; existing `_watcher_age`, `_is_terminal`, `REAP_AFTER`.
 - Produces:
-  - `list_rows(registry, cwd, now)`: `cwd` truthy → legacy filtered rows (exact `{sid, pr_ref, title, state_dir}` shape, newest-first) for interactive_review; `cwd` falsy → ALL live rows in the **extended** shape.
+  - `list_rows(registry, cwd, scope, now)`: `cwd` truthy → legacy filtered rows (exact `{sid, pr_ref, title, state_dir}` shape, newest-first) for interactive_review; else `scope == "all"` → ALL live rows in the **extended** shape; else → `[]` (the handler turns "neither cwd nor scope" into the existing 400 before calling, so this branch is just a safe default).
   - Extended row: `{sid, slug, title, project, last_active, comment_count, status, state_dir, pr_ref}`.
   - `status`: `"done"` if terminal (`finished`); `"live"` if `_watcher_age(dirs)` is fresh (< `LIVE_WINDOW=10`); else `"idle"`.
   - `comment_count`: number of thread files in `annotations_dir` (count `*.json` there; 0 if dir missing).
-  - GET without `cwd` no longer 400s — returns all live rows extended.
+  - GET behavior: `?cwd=` unchanged (incl. its 400 on missing/empty cwd); `?scope=all` returns extended rows.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -518,14 +524,14 @@ def _session(reg, tmp_path, sid, slug, title, project, threads=0):
 def test_legacy_shape_with_cwd(tmp_path):
     r = Registry(tmp_path)
     _session(r, tmp_path, "260720-2-b", "s2", "Two", "p")
-    rows = list_rows(r, str(tmp_path), now=1000)
+    rows = list_rows(r, str(tmp_path), "", now=1000)
     assert rows and set(rows[0]) == {"sid", "pr_ref", "title", "state_dir"}  # exact legacy keys
 
 
-def test_all_sessions_extended_when_no_cwd(tmp_path):
+def test_all_sessions_extended_scope_all(tmp_path):
     r = Registry(tmp_path)
     _session(r, tmp_path, "260720-1-a", "s1", "One", "projA", threads=3)
-    rows = list_rows(r, "", now=1000)
+    rows = list_rows(r, "", "all", now=1000)
     row = rows[0]
     assert row["slug"] == "s1" and row["project"] == "projA"
     assert row["comment_count"] == 3
@@ -536,8 +542,15 @@ def test_status_live_when_heartbeat_fresh(tmp_path):
     r = Registry(tmp_path)
     st = _session(r, tmp_path, "260720-1-a", "s1", "One", "p")
     (st / "watcher_heartbeat").write_text("999")   # fresh vs now=1000 (age 1s)
-    rows = list_rows(r, "", now=1000)
+    rows = list_rows(r, "", "all", now=1000)
     assert rows[0]["status"] == "live"
+
+
+def test_neither_cwd_nor_scope_returns_empty(tmp_path):
+    # handler turns this into the legacy 400; list_rows itself just yields []
+    r = Registry(tmp_path)
+    _session(r, tmp_path, "260720-1-a", "s1", "One", "p")
+    assert list_rows(r, "", "", now=1000) == []
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -592,7 +605,7 @@ def session_row(sid, dirs, meta, now, legacy=False):
     }
 
 
-def list_rows(registry, cwd, now):
+def list_rows(registry, cwd, scope, now):
     if cwd:
         pairs = registry.find_by_cwd(cwd)
         out = []
@@ -603,7 +616,9 @@ def list_rows(registry, cwd, now):
             out.append(session_row(sid, dirs, _session_meta(registry, dirs, sid), now, legacy=True))
         out.sort(key=lambda r: r["sid"], reverse=True)
         return out
-    # no cwd -> all live sessions, extended
+    if scope != "all":
+        return []          # handler renders the legacy 400 for this case
+    # scope=all -> all live sessions, extended
     out = []
     for sid, dirs in registry.list_all():
         age = _watcher_age(dirs)
@@ -628,19 +643,26 @@ def _session_meta(registry, dirs, sid):
     return meta
 ```
 
-Replace the GET `/api/sessions` branch body (`server.py:260-299`) with:
+Replace the GET `/api/sessions` branch body (`server.py:260-299`) with — note
+the 400-on-missing-cwd is **preserved**; only an explicit `?scope=all` yields the
+all-sessions list:
 
 ```python
             if self.path.startswith("/api/sessions"):
                 from urllib.parse import urlparse, parse_qs
                 qs = parse_qs(urlparse(self.path).query)
                 cwd = (qs.get("cwd") or [""])[0]
-                rows = list_rows(registry, cwd, now=int(time.time()))
+                scope = (qs.get("scope") or [""])[0]
+                if not cwd and scope != "all":
+                    self._send_text(400, "missing cwd")   # legacy contract intact
+                    return
+                rows = list_rows(registry, cwd, scope, now=int(time.time()))
                 self._send_json(200, rows)
                 return
 ```
 
-(The 400-on-missing-cwd is intentionally removed; no-cwd now means "all".)
+This keeps `test_get_sessions_route.py` (missing/empty cwd → 400) green while the
+browser fetches `/api/sessions?scope=all`. Do NOT modify that test.
 
 - [ ] **Step 4: Run tests + regression**
 
@@ -673,7 +695,7 @@ git commit -m "feat(web_companion): GET /api/sessions returns all sessions with 
 Create `skills/_shared/web_companion/static/sessions.html` — a self-contained page (styles inline; fonts from `/static/fonts/…`, which the server already serves). Structure mirrors the approved mockup: header, search input, `All | Live` segment, a `<select>` project filter, and a `#list` container. A `<script>` fetches `/api/sessions`, stores rows, and re-renders on filter/search input. Each row: status dot + tag, `slug` (mono, accent, links to `/s/<slug>/`), `title` (dim), `project` tag, `comment_count` + relative `last_active`, `Open →`. Include an empty-state ("No workspaces yet"). Relative-time formatting from `last_active` (unix secs). Keep it dependency-free vanilla JS.
 
 Key behaviors the JS must implement:
-- `fetch('/api/sessions').then(r=>r.json())` → `ALL = rows`.
+- `fetch('/api/sessions?scope=all').then(r=>r.json())` → `ALL = rows`. (The `?scope=all` signal is required — a bare `/api/sessions` with no cwd returns 400 by design.)
 - Populate the project `<select>` from distinct `row.project`.
 - `render()` filters `ALL` by: segment (`Live` → `status==='live'`), selected project (or all), and search text (matches slug/title/project, case-insensitive); sorts by `last_active` desc; injects row HTML.
 - Row click / `Open →` → `location.href = '/s/' + encodeURIComponent(row.slug) + '/'`.
