@@ -57,6 +57,45 @@ class Registry:
         with self._lock:
             self._meta[sid] = dict(meta)
 
+    def register_with_slug(
+        self, sid: str, dirs: dict[str, Path], meta_base: dict, cwd: str,
+        explicit_slug: str = "",
+    ) -> str:
+        """Atomically pick a free slug and register both dirs + meta.
+
+        Fixes a check-then-act race: make_slug() snapshots taken slugs under
+        the lock then releases it, so two concurrent creates with the same
+        title could both compute the same slug before either registered.
+        Here the pick-and-insert happens inside ONE `with self._lock` block,
+        so no other thread can grab the same slug in between.
+
+        Slug base priority: sanitized explicit_slug, else sanitized
+        meta_base["title"], else sanitized basename(cwd), else "session".
+        Dedup is against the slugs of currently-live sessions (self._meta),
+        appending -2, -3, ... as needed.
+
+        Does NOT call persist() — the caller persists after, outside the
+        lock (persist() takes the lock itself; calling it here would
+        deadlock/nest).
+        """
+        base = (
+            self._slugify(explicit_slug)
+            or self._slugify(meta_base.get("title", ""))
+            or self._slugify(Path(cwd).name)
+            or "session"
+        )
+        with self._lock:
+            taken = {m.get("slug") for m in self._meta.values() if m.get("slug")}
+            slug = base
+            if slug in taken:
+                n = 2
+                while f"{base}-{n}" in taken:
+                    n += 1
+                slug = f"{base}-{n}"
+            self._sessions[sid] = dirs
+            self._meta[sid] = {**meta_base, "slug": slug}
+        return slug
+
     def get_meta(self, sid: str) -> dict:
         with self._lock:
             return dict(self._meta.get(sid, {}))

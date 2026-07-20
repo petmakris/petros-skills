@@ -133,6 +133,36 @@ def test_serve_poll_returns_thread_versions(tmp_path):
     assert body["finished"] is False
 
 
+def test_comment_count_counts_threads(tmp_path):
+    dirs = make_dirs(tmp_path)
+    h = Handlers()
+    assert h.comment_count(dirs) == 0
+    threads_module.append_message(
+        dirs["state_dir"] / "threads", "src/x.py:R:42",
+        {"role": "user", "ts": 1, "text": "x", "source_event_id": "e1"},
+    )
+    assert h.comment_count(dirs) == 1
+    threads_module.append_message(
+        dirs["state_dir"] / "threads", "src/y.py:R:10",
+        {"role": "user", "ts": 2, "text": "y", "source_event_id": "e2"},
+    )
+    assert h.comment_count(dirs) == 2
+    # A second message on an existing thread does not add a new thread file.
+    threads_module.append_message(
+        dirs["state_dir"] / "threads", "src/x.py:R:42",
+        {"role": "claude", "ts": 3, "text": "reply", "source_event_id": "e3"},
+    )
+    assert h.comment_count(dirs) == 2
+
+
+def test_comment_count_missing_threads_dir_is_zero(tmp_path):
+    dirs = make_dirs(tmp_path)
+    import shutil
+    shutil.rmtree(dirs["state_dir"] / "threads")
+    h = Handlers()
+    assert h.comment_count(dirs) == 0
+
+
 def _poll_body(tmp_path, dirs):
     h = Handlers()
     handler = make_handler()

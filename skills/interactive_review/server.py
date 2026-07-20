@@ -296,6 +296,13 @@ class Handlers:
             )
         return result
 
+    def comment_count(self, dirs: dict) -> int:
+        """Number of per-anchor threads for this review session."""
+        threads_dir = Path(dirs["state_dir"]) / "threads"
+        if not threads_dir.is_dir():
+            return 0
+        return sum(1 for p in threads_dir.iterdir() if p.suffix == ".json")
+
 
 def _send_text(h, status, body):
     data = body.encode("utf-8")

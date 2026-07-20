@@ -474,6 +474,25 @@ class Handlers:
     def create_session_extra(self, payload: dict, dirs: dict) -> dict | None:
         return None
 
+    def comment_count(self, dirs: dict) -> int:
+        """Distinct comment ids across still-queued events and processed acks.
+
+        Each submitted comment is an event written to events_dir/*.json;
+        once the watcher/Claude processes it, an ack lands in
+        consumed_dir/*.ack with the same stem. Dedup by stem so an event
+        that is both queued and acked (a brief race window) isn't
+        double-counted. annotations_dir is dead (nothing writes there —
+        see references/pushing.md) and must not be used here.
+        """
+        ids: set[str] = set()
+        events_dir = dirs.get("events_dir")
+        if events_dir and Path(events_dir).is_dir():
+            ids |= {p.stem for p in Path(events_dir).glob("*.json")}
+        consumed_dir = dirs.get("consumed_dir")
+        if consumed_dir and Path(consumed_dir).is_dir():
+            ids |= {p.stem for p in Path(consumed_dir).glob("*.ack")}
+        return len(ids)
+
 
 def _send_text(h, status, body):
     data = body.encode("utf-8")

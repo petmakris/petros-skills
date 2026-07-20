@@ -68,14 +68,6 @@ def _read_hb(state_dir):
         return None
 
 
-def _comment_count(dirs):
-    ann = dirs.get("annotations_dir")
-    if not ann:
-        return 0
-    ann = Path(ann)
-    return sum(1 for _ in ann.glob("*.json")) if ann.is_dir() else 0
-
-
 def _session_meta(registry, dirs, sid):
     """Legacy meta source: state_dir/meta.json (NOT registry meta), preserved
     byte-for-byte from the pre-scope=all behavior so interactive_review is
@@ -90,7 +82,7 @@ def _session_meta(registry, dirs, sid):
     return meta
 
 
-def session_row(sid, dirs, meta, now, legacy=False):
+def session_row(sid, dirs, meta, now, legacy=False, count_fn=None):
     if legacy:
         return {"sid": sid, "pr_ref": meta.get("pr_ref", ""),
                 "title": meta.get("title", ""), "state_dir": str(dirs["state_dir"])}
@@ -106,12 +98,12 @@ def session_row(sid, dirs, meta, now, legacy=False):
         "title": meta.get("title", ""), "project": meta.get("project", ""),
         "pr_ref": meta.get("pr_ref", ""),
         "last_active": hb or meta.get("created_at", 0),
-        "comment_count": _comment_count(dirs),
+        "comment_count": count_fn(dirs) if count_fn else 0,
         "status": status, "state_dir": str(dirs["state_dir"]),
     }
 
 
-def list_rows(registry, cwd, scope, now):
+def list_rows(registry, cwd, scope, now, count_fn=None):
     if cwd:
         pairs = registry.find_by_cwd(cwd)
         out = []
@@ -141,7 +133,7 @@ def list_rows(registry, cwd, scope, now):
         last_active = hb or meta.get("created_at", 0)
         if now - last_active > retention_seconds:
             continue
-        out.append(session_row(sid, dirs, meta, now))
+        out.append(session_row(sid, dirs, meta, now, count_fn=count_fn))
     out.sort(key=lambda r: r["last_active"], reverse=True)
     return out
 
@@ -184,22 +176,18 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None)
         # fall through to create (self-heal)
 
     sid = registry.make_sid()
-    # Sanitize explicit slug through slugifier; fall back to make_slug if it becomes empty
-    if explicit_slug:
-        explicit_slug = registry._slugify(explicit_slug) or ""
-    slug = explicit_slug or registry.make_slug(title, cwd)
-    # if an explicit slug collides with a live one, dedup it too
-    if explicit_slug and registry.find_by_slug(explicit_slug):
-        slug = registry.make_slug(explicit_slug, cwd)
     dirs = mkdirs(sid)
     dirs["_cwd"] = str(cwd)
     if on_create is not None:
         on_create(dirs)
-    registry.register(sid, dirs)
-    registry.register_meta(sid, {
-        "slug": slug, "title": title, "project": project,
-        "created_at": int(time.time()),
-    })
+    # Slug allocation + registration happen atomically under one lock inside
+    # register_with_slug — see its docstring for why the old two-step
+    # (make_slug snapshot, then register) was a check-then-act race.
+    slug = registry.register_with_slug(
+        sid, dirs,
+        {"title": title, "project": project, "created_at": int(time.time())},
+        cwd, explicit_slug,
+    )
     registry.persist()
     return ({"sid": sid, "slug": slug, "dirs": dirs, "created": True}, True)
 
@@ -415,7 +403,9 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                 if not cwd and scope != "all":
                     self._send_text(400, "missing cwd")   # legacy contract intact
                     return
-                rows = list_rows(registry, cwd, scope, now=int(time.time()))
+                rows = list_rows(
+                    registry, cwd, scope, now=int(time.time()),
+                    count_fn=handlers.comment_count)
                 self._send_json(200, rows)
                 return
             self._send_text(404, "not found")
