@@ -22,6 +22,7 @@ class Registry:
     def __init__(self, state_root: Path):
         self._state_root = Path(state_root)
         self._sessions: dict[str, dict[str, Path]] = {}
+        self._meta: dict[str, dict] = {}          # sid -> {slug,title,project,created_at}
         self._lock = threading.Lock()
         self._waiters: dict[str, threading.Event] = {}
 
@@ -32,6 +33,51 @@ class Registry:
     def make_sid(self) -> str:
         return f"{time.strftime('%y%m%d-%H%M%S')}-{secrets.token_hex(8)}"
 
+    @property
+    def sessions_meta_file(self) -> Path:
+        return self._state_root / "sessions_meta.json"
+
+    @staticmethod
+    def _slugify(text: str) -> str:
+        s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+        return s[:40].strip("-")
+
+    def make_slug(self, title: str, cwd: str) -> str:
+        base = self._slugify(title) or self._slugify(Path(cwd).name) or "session"
+        with self._lock:
+            taken = {m.get("slug") for m in self._meta.values() if m.get("slug")}
+        if base not in taken:
+            return base
+        n = 2
+        while f"{base}-{n}" in taken:
+            n += 1
+        return f"{base}-{n}"
+
+    def register_meta(self, sid: str, meta: dict) -> None:
+        with self._lock:
+            self._meta[sid] = dict(meta)
+
+    def get_meta(self, sid: str) -> dict:
+        with self._lock:
+            return dict(self._meta.get(sid, {}))
+
+    def resolve(self, key: str) -> str | None:
+        with self._lock:
+            if key in self._sessions:
+                return key
+            for sid, m in self._meta.items():
+                if m.get("slug") == key and sid in self._sessions:
+                    return sid
+        return None
+
+    def find_by_slug(self, slug: str) -> str | None:
+        return self.resolve(slug) if slug else None
+
+    def list_all(self) -> list[tuple[str, dict]]:
+        items = self.items()
+        items.sort(key=lambda kv: kv[0], reverse=True)
+        return items
+
     def register(self, sid: str, dirs: dict[str, Path]) -> None:
         with self._lock:
             self._sessions[sid] = dirs
@@ -39,6 +85,19 @@ class Registry:
     def lookup(self, sid: str) -> dict[str, Path] | None:
         with self._lock:
             return self._sessions.get(sid)
+
+    def unregister(self, sid: str) -> None:
+        """Drop a dead session's registration (and meta) in-memory.
+
+        Does NOT persist — persist() takes the lock itself, so calling it
+        here would deadlock/nest; the caller's next persist() call snapshots
+        the removal. Used by self-heal (a resolved sid whose state_dir is
+        gone) to free its slug for reuse instead of leaving a ghost entry
+        that forces the create path to dedup to a bumped slug.
+        """
+        with self._lock:
+            self._sessions.pop(sid, None)
+            self._meta.pop(sid, None)
 
     def items(self) -> list[tuple[str, dict[str, Path]]]:
         with self._lock:
@@ -60,6 +119,9 @@ class Registry:
                 for sid, dirs in self._sessions.items()
             }
         write_text_atomic(self.sessions_file, json.dumps(snapshot, indent=2))
+        with self._lock:
+            meta_snapshot = {sid: dict(m) for sid, m in self._meta.items()}
+        write_text_atomic(self.sessions_meta_file, json.dumps(meta_snapshot, indent=2))
 
     def rehydrate(self) -> None:
         path = self.sessions_file
@@ -84,6 +146,20 @@ class Registry:
             restored[sid] = paths
         with self._lock:
             self._sessions.update(restored)
+
+        meta_path = self.sessions_meta_file
+        if meta_path.exists():
+            try:
+                msnap = json.loads(meta_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                msnap = {}
+            if isinstance(msnap, dict):
+                with self._lock:
+                    live = set(self._sessions)
+                    self._meta.update({
+                        sid: m for sid, m in msnap.items()
+                        if sid in live and isinstance(m, dict)
+                    })
 
     def waiter(self, sid: str) -> threading.Event:
         """Return (creating if needed) the threading.Event for SSE consumers of this session."""

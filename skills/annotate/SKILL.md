@@ -23,10 +23,11 @@ Decide which situation you're in and **`Read` the named file before doing the wo
 |-----------|-----------|---------------|
 | You're composing a response that meets a routing trigger below (or forward mode is armed) | **Push** | `references/pushing.md` |
 | The user typed `/annotate` / said "annotate", "annotate that" | **Push** (postmortem/armed) | `references/pushing.md` |
+| The user typed `/annotate resume` / `/annotate resume <slug>` | **Resume** a past workspace | `references/resuming.md` |
 | A task-notification's first stdout line is `WEBCOMPANION_EVENT` / `WEBCOMPANION_FINISHED` / `WEBCOMPANION_CANCELLED` | **Handle event** | `references/handling-events.md` |
 | The user says "scrap it" / "stop annotating" / "respond in terminal" while a watcher is armed | **Cancel** | `references/handling-events.md` (§ Terminal cancellation) |
 
-The two lifecycles are independent invocations: pushing creates the page and arms a watcher; handling-events fires later, once per comment. Do not load the other reference for a given situation.
+These lifecycles are independent invocations: pushing creates the page and arms a watcher; handling-events fires later, once per comment; resuming points an existing workspace at this conversation instead of creating one. Do not load a reference you don't need for the situation you're in.
 
 ## Routing decision (Mode A — Forward)
 
@@ -61,6 +62,27 @@ Every block defaults to `kind: "markdown"` (plain markdown; may contain inline H
 | `mockup` | A high-fidelity, interactive UI mock is clearer than prose or a static diagram — real `<style>`/`<script>`/Tailwind, hover, interaction. Renders in a sandboxed iframe. | `references/block-kinds/mockup.md` |
 
 One diagram per concept; frame it with a short prose block — a diagram must add clarity, not decorate. Each reference also states when **not** to use that kind.
+
+## Session lifecycle
+
+The web companion server is a **single `nohup` process shared across every
+Claude Code session** on this machine, not one per conversation. `ensure_server.sh`
+starts it the first time anyone needs it; every later call from any session just
+confirms it's already up. It survives this conversation ending, and self-shuts
+after **24h with no activity** (any request resets the clock).
+
+Workspaces (one per `sid`/`slug`) persist on disk for **7 days** at
+`<cwd>/.claude/annotate/<sid>/` (addressed by `slug` in URLs and `/annotate
+resume`, stored under `sid`) independent of whether any Claude session is
+currently attached to them. A conversation ending doesn't delete its
+workspace — the page stays live, and it's still there to come back to later.
+
+Because of this, don't mint a fresh workspace on every push within one
+conversation — `references/pushing.md` § "Create-or-attach a workspace for
+this conversation" creates once and attaches on every push after that. To
+reopen a workspace from a past conversation, the user can open the browser at
+`<server_url>/` (lists every live workspace, filterable by project), or you
+can run `/annotate resume <slug>` — see `references/resuming.md`.
 
 ## Maintainer notes
 

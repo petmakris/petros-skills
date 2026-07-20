@@ -89,6 +89,35 @@ def _is_terminal(state_dir: Path) -> bool:
     return (state_dir / "finished").exists() or (state_dir / "cancelled").exists()
 
 
+try:
+    from skills._shared.web_companion.server import LIVE_WINDOW as ATTACHED_WINDOW
+except ImportError:
+    ATTACHED_WINDOW = 10
+
+
+def attached_count(state_dir, now) -> int:
+    """Number of distinct live Claude sessions watching this state_dir.
+
+    Counts state/watchers/*.hb files (one per attached Claude session,
+    written by watcher.sh) whose mtime is within ATTACHED_WINDOW seconds
+    of `now`. A missing watchers/ dir just means nobody has written a
+    per-session heartbeat yet (e.g. older watcher.sh) — 0, not an error.
+    """
+    import os
+    from pathlib import Path as _Path
+    wdir = _Path(state_dir) / "watchers"
+    if not wdir.is_dir():
+        return 0
+    n = 0
+    for f in wdir.glob("*.hb"):
+        try:
+            if now - int(os.path.getmtime(f)) < ATTACHED_WINDOW:
+                n += 1
+        except OSError:
+            continue
+    return n
+
+
 def _round_pct(value) -> int | None:
     try:
         return round(float(value))
@@ -439,6 +468,7 @@ class Handlers:
             "consumed_events": consumed,
             "progress": progress,
             "busy": busy,
+            "attached": attached_count(state_dir, int(time.time())),
         })
 
     def create_session_extra(self, payload: dict, dirs: dict) -> dict | None:

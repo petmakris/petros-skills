@@ -55,6 +55,155 @@ def _watcher_age(dirs: dict) -> int | None:
     return int(time.time()) - hb
 
 
+LIVE_WINDOW = 10  # seconds; heartbeat fresher than this => "live"
+
+
+def _read_hb(state_dir):
+    p = Path(state_dir) / "watcher_heartbeat"
+    if not p.exists():
+        return None
+    try:
+        return int(p.read_text().strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _comment_count(dirs):
+    ann = dirs.get("annotations_dir")
+    if not ann:
+        return 0
+    ann = Path(ann)
+    return sum(1 for _ in ann.glob("*.json")) if ann.is_dir() else 0
+
+
+def _session_meta(registry, dirs, sid):
+    """Legacy meta source: state_dir/meta.json (NOT registry meta), preserved
+    byte-for-byte from the pre-scope=all behavior so interactive_review is
+    unaffected."""
+    meta = {}
+    mp = Path(dirs["state_dir"]) / "meta.json"
+    if mp.exists():
+        try:
+            meta = json.loads(mp.read_text())
+        except json.JSONDecodeError:
+            meta = {}
+    return meta
+
+
+def session_row(sid, dirs, meta, now, legacy=False):
+    if legacy:
+        return {"sid": sid, "pr_ref": meta.get("pr_ref", ""),
+                "title": meta.get("title", ""), "state_dir": str(dirs["state_dir"])}
+    hb = _read_hb(dirs["state_dir"])
+    if _is_terminal(dirs):
+        status = "done"
+    elif hb is not None and (now - hb) < LIVE_WINDOW:
+        status = "live"
+    else:
+        status = "idle"
+    return {
+        "sid": sid, "slug": meta.get("slug", sid),
+        "title": meta.get("title", ""), "project": meta.get("project", ""),
+        "pr_ref": meta.get("pr_ref", ""),
+        "last_active": hb or meta.get("created_at", 0),
+        "comment_count": _comment_count(dirs),
+        "status": status, "state_dir": str(dirs["state_dir"]),
+    }
+
+
+def list_rows(registry, cwd, scope, now):
+    if cwd:
+        pairs = registry.find_by_cwd(cwd)
+        out = []
+        for sid, dirs in pairs:
+            age = _watcher_age(dirs)
+            if _is_terminal(dirs) or (age is not None and age > REAP_AFTER):
+                continue
+            out.append(session_row(sid, dirs, _session_meta(registry, dirs, sid), now, legacy=True))
+        out.sort(key=lambda r: r["sid"], reverse=True)
+        return out
+    if scope != "all":
+        return []          # handler renders the legacy 400 for this case
+    # scope=all -> every registered session (live, idle, or done) within the
+    # retention window. Unlike the legacy ?cwd= branch above, this must NOT
+    # reap by watcher age: a watcher stops heartbeating the instant its
+    # Claude session ends, leaving a STALE (but present) heartbeat file on
+    # disk, so age-based reaping here would hide every idle-but-legitimate
+    # workspace 180s after the session that created it exits — exactly the
+    # set /annotate resume and the browser need to see. registry.list_all()
+    # is already pruned to live on-disk dirs by rehydrate(), so the only
+    # remaining gate is retention (same env/default the startup GC uses).
+    retention_seconds = int(os.environ.get("WEBCOMPANION_RETENTION_DAYS", "7")) * 86400
+    out = []
+    for sid, dirs in registry.list_all():
+        meta = registry.get_meta(sid)
+        hb = _read_hb(dirs["state_dir"])
+        last_active = hb or meta.get("created_at", 0)
+        if now - last_active > retention_seconds:
+            continue
+        out.append(session_row(sid, dirs, meta, now))
+    out.sort(key=lambda r: r["last_active"], reverse=True)
+    return out
+
+
+def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None):
+    """Return ({sid, slug, dirs, created}, created_bool).
+
+    mkdirs(sid) -> dirs dict (response_dir/annotations_dir/state_dir/events_dir/
+    consumed_dir), all created. Pure of HTTP; URL assembly is the caller's job.
+
+    on_create(dirs), if given, runs on the CREATE path only — after dirs are
+    made and `_cwd` is set, but BEFORE the session is registered/persisted.
+    If it raises, the exception propagates and nothing is registered (no
+    zombie session). Never called on the attach path (attach must not re-run
+    a skill's per-session init, e.g. re-fetching a PR diff).
+    """
+    title = (payload.get("title") or "").strip()
+    project = (payload.get("project") or Path(cwd).name).strip()
+    explicit_slug = (payload.get("slug") or "").strip()
+    want_attach = bool(payload.get("attach"))
+
+    if want_attach:
+        target_sid = None
+        if explicit_slug:
+            target_sid = registry.find_by_slug(explicit_slug)
+        else:
+            live = registry.find_by_cwd(cwd)
+            live.sort(key=lambda kv: kv[0], reverse=True)
+            target_sid = live[0][0] if live else None
+        if target_sid is not None:
+            dirs = registry.lookup(target_sid)
+            if dirs and Path(dirs["state_dir"]).is_dir():
+                meta = registry.get_meta(target_sid)
+                return ({"sid": target_sid, "slug": meta.get("slug", target_sid),
+                         "dirs": dirs, "created": False}, False)
+            # dead sid (state_dir missing): free its slug before falling
+            # through to create, so the intended slug is reused (no -2
+            # bump) and no ghost registry entry lingers.
+            registry.unregister(target_sid)
+        # fall through to create (self-heal)
+
+    sid = registry.make_sid()
+    # Sanitize explicit slug through slugifier; fall back to make_slug if it becomes empty
+    if explicit_slug:
+        explicit_slug = registry._slugify(explicit_slug) or ""
+    slug = explicit_slug or registry.make_slug(title, cwd)
+    # if an explicit slug collides with a live one, dedup it too
+    if explicit_slug and registry.find_by_slug(explicit_slug):
+        slug = registry.make_slug(explicit_slug, cwd)
+    dirs = mkdirs(sid)
+    dirs["_cwd"] = str(cwd)
+    if on_create is not None:
+        on_create(dirs)
+    registry.register(sid, dirs)
+    registry.register_meta(sid, {
+        "slug": slug, "title": title, "project": project,
+        "created_at": int(time.time()),
+    })
+    registry.persist()
+    return ({"sid": sid, "slug": slug, "dirs": dirs, "created": True}, True)
+
+
 def _resolve_public_host() -> str:
     if env := os.environ.get("WEBCOMPANION_PUBLIC_HOST"):
         return env
@@ -201,10 +350,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             tail = self.path[len(prefix):]
             if "/" not in tail:
                 return None
-            sid, rest = tail.split("/", 1)
-            if not SID_RE.match(sid):
+            key, rest = tail.split("/", 1)
+            if not SID_RE.match(key):
                 return None
-            if registry.lookup(sid) is None:
+            sid = registry.resolve(key)          # slug OR sid -> canonical sid
+            if sid is None:
                 return None
             return sid, "/" + rest
 
@@ -238,7 +388,7 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                 self._send_text(200, banner)
                 return
             if self.path == "/":
-                self._send_text(200, banner + " - see /s/<sid>/")
+                static_serve.serve(self, "sessions.html", static_dirs)
                 return
             if self.path.startswith("/static/"):
                 static_serve.serve(self, self.path[len("/static/"):], static_dirs)
@@ -261,40 +411,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                 from urllib.parse import urlparse, parse_qs
                 qs = parse_qs(urlparse(self.path).query)
                 cwd = (qs.get("cwd") or [""])[0]
-                if not cwd:
-                    self._send_text(400, "missing cwd")
+                scope = (qs.get("scope") or [""])[0]
+                if not cwd and scope != "all":
+                    self._send_text(400, "missing cwd")   # legacy contract intact
                     return
-                rows = []
-                for sid, dirs in registry.find_by_cwd(cwd):
-                    # Skip terminated sessions and watcher-dead "zombies". A
-                    # session that is cancelled/finished, OR whose watcher has
-                    # been silent past REAP_AFTER, can't answer anything — so
-                    # surfacing it makes the IDE attach to a dead review and
-                    # accept input nobody reads. (rehydrate() after a server
-                    # restart re-registers such sessions from disk; reaping them
-                    # here is intentional — nothing re-arms their watcher.)
-                    age = _watcher_age(dirs)
-                    if _is_terminal(dirs) or (age is not None and age > REAP_AFTER):
-                        continue
-                    meta_path = Path(dirs["state_dir"]) / "meta.json"
-                    meta = {}
-                    if meta_path.exists():
-                        try:
-                            meta = json.loads(meta_path.read_text())
-                        except json.JSONDecodeError:
-                            meta = {}
-                    rows.append({
-                        "sid": sid,
-                        "pr_ref": meta.get("pr_ref", ""),
-                        "title": meta.get("title", ""),
-                        "state_dir": str(dirs["state_dir"]),
-                    })
-                # Newest first. sids start with `YYMMDD-HHMMSS-...`, so a
-                # descending lexical sort puts the most recent session at
-                # index 0 — which is what clients that pick the first
-                # session (e.g. the IDE plugin) want when several live
-                # sessions share the same cwd.
-                rows.sort(key=lambda r: r["sid"], reverse=True)
+                rows = list_rows(registry, cwd, scope, now=int(time.time()))
                 self._send_json(200, rows)
                 return
             self._send_text(404, "not found")
@@ -356,44 +477,49 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             if not cwd.is_absolute() or not cwd.is_dir():
                 self._send_text(400, "cwd must be an absolute existing directory")
                 return
-            sid = registry.make_sid()
-            base = cwd / ".claude" / skill_name / sid
-            response_dir = base / "response"
-            annotations_dir = base / "annotations"
-            state_dir = base / "state"
-            events_dir = state_dir / "events"
-            consumed_dir = state_dir / "consumed"
-            for d in (response_dir, annotations_dir, state_dir, events_dir, consumed_dir):
-                d.mkdir(parents=True, exist_ok=True)
-            dirs = {
-                "response_dir": response_dir,
-                "annotations_dir": annotations_dir,
-                "state_dir": state_dir,
-                "events_dir": events_dir,
-                "consumed_dir": consumed_dir,
-                # metadata: cwd is captured so the IDE plugin can find this session by project root
-                "_cwd": str(cwd),
-            }
+            def _mkdirs(sid):
+                base = cwd / ".claude" / skill_name / sid
+                response_dir = base / "response"
+                annotations_dir = base / "annotations"
+                state_dir = base / "state"
+                events_dir = state_dir / "events"
+                consumed_dir = state_dir / "consumed"
+                for d in (response_dir, annotations_dir, state_dir, events_dir, consumed_dir):
+                    d.mkdir(parents=True, exist_ok=True)
+                return {
+                    "response_dir": response_dir, "annotations_dir": annotations_dir,
+                    "state_dir": state_dir, "events_dir": events_dir,
+                    "consumed_dir": consumed_dir,
+                }
+
+            extra_holder = {}
+
+            def _on_create(dirs):
+                extra_holder['extra'] = handlers.create_session_extra(payload, dirs) or {}
+
             try:
-                extra = handlers.create_session_extra(payload, dirs) or {}
+                result, _created = create_or_attach(
+                    registry, skill_name, payload, cwd, _mkdirs, on_create=_on_create)
             except Exception as e:
                 self._send_text(500, f"session-init failed: {e}")
                 return
-            registry.register(sid, dirs)
-            registry.persist()
+            sid = result["sid"]; slug = result["slug"]; dirs = result["dirs"]
+            extra = extra_holder.get('extra', {})
             port = server_holder['server'].server_address[1]
             self._send_json(200, {
                 "sid": sid,
-                "url": f"http://{public_host}:{port}/s/{sid}/",
+                "slug": slug,
+                "created": _created,
+                "url": f"http://{public_host}:{port}/s/{slug}/",
                 # Always-secure-context loopback URL. Browser features that need
                 # a secure context (e.g. voice dictation) work here but not over
                 # the public_host URL when it's plain-HTTP.
-                "localhost_url": f"http://localhost:{port}/s/{sid}/",
-                "response_dir": str(response_dir),
-                "annotations_dir": str(annotations_dir),
-                "state_dir": str(state_dir),
-                "events_dir": str(events_dir),
-                "consumed_dir": str(consumed_dir),
+                "localhost_url": f"http://localhost:{port}/s/{slug}/",
+                "response_dir": str(dirs["response_dir"]),
+                "annotations_dir": str(dirs["annotations_dir"]),
+                "state_dir": str(dirs["state_dir"]),
+                "events_dir": str(dirs["events_dir"]),
+                "consumed_dir": str(dirs["consumed_dir"]),
                 **extra,
             })
 

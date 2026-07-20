@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate sessions</title>
+<style>
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url(/static/fonts/BricolageGrotesque-Variable.woff2) format("woff2");
+  font-weight: 200 800;
+}
+@font-face {
+  font-family: "Monaspace Radon";
+  src: url(/static/fonts/MonaspaceRadon-Regular.woff2) format("woff2");
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 32px 20px 60px;
+  background: #f5f6f8;
+  font-family: "Bricolage Grotesque", system-ui, sans-serif;
+  color: #1d1d1f;
+}
+.wrap { max-width: 940px; margin: 0 auto; }
+.hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hd h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.sub { color: #83868f; font-size: 13px; margin-bottom: 18px; }
+.tools { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.search {
+  flex: 1;
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid #d4d8e0;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 14px;
+  color: #3a3d44;
+  font-family: inherit;
+  outline: none;
+}
+.search:focus { border-color: #0071e3; }
+.seg {
+  display: flex;
+  border: 1px solid #d4d8e0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.seg button {
+  border: 0;
+  background: transparent;
+  padding: 9px 14px;
+  font-size: 13px;
+  color: #83868f;
+  font-family: inherit;
+  cursor: pointer;
+}
+.seg button.on { background: #0071e3; color: #fff; }
+select.proj-select {
+  background: #fff;
+  border: 1px solid #d4d8e0;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: #3a3d44;
+  font-family: inherit;
+}
+.list {
+  background: #fff;
+  border: 1px solid #d4d8e0;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.row {
+  display: grid;
+  grid-template-columns: 96px 1fr 130px 150px 74px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #eef0f4;
+  cursor: pointer;
+  transition: background .1s;
+}
+.row:last-child { border-bottom: 0; }
+.row:hover { background: #f8f9fb; }
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+.stag { font-size: 9.5px; font-weight: 700; letter-spacing: .8px; }
+.slug {
+  font-family: "Monaspace Radon", monospace;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0071e3;
+}
+.title { font-size: 12.5px; color: #83868f; margin-top: 3px; }
+.proj {
+  font-size: 12px;
+  color: #3a3d44;
+  background: #eef0f4;
+  border: 1px solid #d4d8e0;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-family: "Monaspace Radon", monospace;
+}
+.c-meta {
+  font-size: 11.5px;
+  color: #83868f;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+.c-meta .cm { font-size: 11px; }
+.c-go { text-align: right; color: #0071e3; font-size: 13px; font-weight: 600; opacity: .5; }
+.row:hover .c-go { opacity: 1; }
+.foot { color: #83868f; font-size: 11.5px; margin-top: 12px; text-align: center; }
+.empty {
+  padding: 48px 18px;
+  text-align: center;
+  color: #83868f;
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hd">
+    <h1>Annotate sessions</h1>
+  </div>
+  <div class="sub">Named workspaces persist across Claude sessions. Reopen any to continue where you left off.</div>
+  <div class="tools">
+    <input id="search" class="search" placeholder="Search name, title, project…">
+    <div class="seg" id="seg">
+      <button class="on" data-seg="all">All</button>
+      <button data-seg="live">Live</button>
+    </div>
+    <select id="proj-select" class="proj-select">
+      <option value="">All projects</option>
+    </select>
+  </div>
+  <div class="list" id="list"></div>
+  <div class="foot" id="foot"></div>
+</div>
+<script>
+var ALL = [];
+var segment = "all";
+
+function statusColor(s) {
+  if (s === "live") return "#047857";
+  if (s === "done") return "#83868f";
+  return "#9aa3b0";
+}
+function statusLabel(s) {
+  if (s === "live") return "LIVE";
+  if (s === "done") return "DONE";
+  return "IDLE";
+}
+function relativeTime(unixSecs) {
+  if (!unixSecs) return "";
+  var deltaMs = Date.now() - (unixSecs * 1000);
+  var deltaS = Math.max(0, Math.floor(deltaMs / 1000));
+  if (deltaS < 60) return "just now";
+  var mins = Math.floor(deltaS / 60);
+  if (mins < 60) return mins + "m ago";
+  var hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + "h ago";
+  var days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  return days + "d ago";
+}
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
+function rowHtml(row) {
+  var st = row.status || "idle";
+  var dotStyle = "background:" + statusColor(st) + ";" +
+    (st === "live" ? "box-shadow:0 0 0 3px rgba(4,120,87,0.2);" : "");
+  var slug = escapeHtml(row.slug || row.sid || "");
+  var title = escapeHtml(row.title || "");
+  var project = escapeHtml(row.project || "");
+  var commentCount = row.comment_count || 0;
+  var last = relativeTime(row.last_active);
+  return (
+    '<div class="row" data-slug="' + slug + '">' +
+      '<div class="c-status"><span class="dot" style="' + dotStyle + '"></span>' +
+        '<span class="stag" style="color:' + statusColor(st) + '">' + statusLabel(st) + '</span></div>' +
+      '<div class="c-name"><span class="slug">' + slug + '</span>' +
+        '<div class="title">' + title + '</div></div>' +
+      (row.project ? '<div class="c-proj"><span class="proj">' + project + '</span></div>' : '') +
+      '<div class="c-meta"><span class="cm">💬 ' + commentCount + '</span>' + (last ? '<span class="last">' + last + '</span>' : '') + '</div>' +
+      '<div class="c-go">Open →</div>' +
+    '</div>'
+  );
+}
+
+function openRow(slug) {
+  location.href = "/s/" + encodeURIComponent(slug) + "/";
+}
+
+function populateProjects() {
+  var select = document.getElementById("proj-select");
+  var seen = {};
+  var projects = [];
+  ALL.forEach(function (row) {
+    var p = row.project || "";
+    if (p && !seen[p]) {
+      seen[p] = true;
+      projects.push(p);
+    }
+  });
+  projects.sort();
+  select.innerHTML = '<option value="">All projects</option>' +
+    projects.map(function (p) {
+      return '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + '</option>';
+    }).join("");
+}
+
+function render() {
+  var searchText = (document.getElementById("search").value || "").toLowerCase();
+  var selectedProject = document.getElementById("proj-select").value;
+  var listEl = document.getElementById("list");
+  var footEl = document.getElementById("foot");
+
+  var rows = ALL.filter(function (row) {
+    if (segment === "live" && row.status !== "live") return false;
+    if (selectedProject && row.project !== selectedProject) return false;
+    if (searchText) {
+      var haystack = (
+        (row.slug || "") + " " + (row.title || "") + " " + (row.project || "")
+      ).toLowerCase();
+      if (haystack.indexOf(searchText) === -1) return false;
+    }
+    return true;
+  });
+
+  rows.sort(function (a, b) {
+    return (b.last_active || 0) - (a.last_active || 0);
+  });
+
+  if (rows.length === 0) {
+    listEl.innerHTML = '<div class="empty">No workspaces yet</div>';
+    footEl.textContent = "";
+    return;
+  }
+
+  listEl.innerHTML = rows.map(rowHtml).join("");
+  footEl.textContent = rows.length + (rows.length === 1 ? " workspace" : " workspaces") + " · sorted by last activity";
+
+  Array.prototype.forEach.call(listEl.querySelectorAll(".row"), function (el) {
+    el.addEventListener("click", function () {
+      openRow(el.getAttribute("data-slug"));
+    });
+  });
+}
+
+document.getElementById("search").addEventListener("input", render);
+document.getElementById("proj-select").addEventListener("change", render);
+Array.prototype.forEach.call(document.querySelectorAll("#seg button"), function (btn) {
+  btn.addEventListener("click", function () {
+    segment = btn.getAttribute("data-seg");
+    Array.prototype.forEach.call(document.querySelectorAll("#seg button"), function (b) {
+      b.classList.toggle("on", b === btn);
+    });
+    render();
+  });
+});
+
+fetch("/api/sessions?scope=all")
+  .then(function (r) { return r.json(); })
+  .then(function (rows) {
+    ALL = rows || [];
+    populateProjects();
+    render();
+  })
+  .catch(function () {
+    ALL = [];
+    render();
+  });
+</script>
+</body>
+</html>
