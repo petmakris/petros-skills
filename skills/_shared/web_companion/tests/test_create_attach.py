@@ -56,3 +56,48 @@ def test_explicit_dirty_slug_is_sanitized(tmp_path):
     assert created is True
     assert res["slug"] == "my-cool-work"
     assert re.match(r"^[a-zA-Z0-9_-]+$", res["slug"])
+
+
+def test_on_create_failure_registers_nothing(tmp_path):
+    """If on_create raises (e.g. a skill's create_session_extra fails on a
+    bad PR ref / gh error), nothing must be registered — no zombie session
+    left behind for a failed init."""
+    r = Registry(tmp_path)
+
+    def _boom(dirs):
+        raise ValueError("gh pr fetch failed")
+
+    try:
+        create_or_attach(
+            r, "annotate", {"title": "Bad PR"}, str(tmp_path),
+            lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid),
+            on_create=_boom)
+        assert False, "expected ValueError to propagate"
+    except ValueError:
+        pass
+
+    assert r.items() == []
+    assert r.resolve("bad-pr") is None
+
+
+def test_attach_selfheal_reuses_same_slug(tmp_path):
+    """When a resolved attach target's state_dir is gone, the self-heal
+    create must reuse the ORIGINAL slug (not bump to -2), and the old dead
+    sid must no longer resolve."""
+    r = Registry(tmp_path)
+    res1, _ = create_or_attach(r, "annotate", {"title": "Same Slug"}, str(tmp_path),
+        lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid))
+    slug = res1["slug"]
+    old_sid = res1["sid"]
+
+    import shutil
+    shutil.rmtree(r.lookup(old_sid)["state_dir"].parent)
+
+    res2, created2 = create_or_attach(
+        r, "annotate", {"title": "Same Slug", "slug": slug, "attach": True},
+        str(tmp_path), lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid))
+
+    assert created2 is True
+    assert res2["slug"] == slug                 # exact reuse, no "-2" bump
+    assert r.resolve(slug) == res2["sid"]        # slug now points at the NEW sid
+    assert r.resolve(old_sid) is None            # old sid is gone from the registry

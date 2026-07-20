@@ -45,3 +45,36 @@ def test_neither_cwd_nor_scope_returns_empty(tmp_path):
     r = Registry(tmp_path)
     _session(r, tmp_path, "260720-1-a", "s1", "One", "p")
     assert list_rows(r, "", "", now=1000) == []
+
+
+def test_scope_all_keeps_idle_with_stale_heartbeat(tmp_path):
+    """Regression: a watcher stops beating the instant its Claude session
+    ends, leaving a STALE (not absent) heartbeat file on disk. scope=all
+    must still surface the workspace (as idle), unlike the legacy ?cwd=
+    branch which correctly reaps by watcher age."""
+    r = Registry(tmp_path)
+    st = _session(r, tmp_path, "260720-1-a", "s1", "One", "p")
+    now = 1_000_000
+    stale_hb = now - 10_000   # far beyond REAP_AFTER (180s)
+    hb_path = st / "watcher_heartbeat"
+    hb_path.write_text(str(stale_hb))
+    old_mtime = now - 10_000
+    import os as _os
+    _os.utime(hb_path, (old_mtime, old_mtime))
+
+    rows = list_rows(r, "", "all", now=now)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "idle"
+
+
+def test_scope_all_excludes_beyond_retention(tmp_path, monkeypatch):
+    """A row whose last activity is older than the retention window (env
+    WEBCOMPANION_RETENTION_DAYS, default 7d) must not appear in scope=all."""
+    monkeypatch.setenv("WEBCOMPANION_RETENTION_DAYS", "1")  # 86400s window
+    r = Registry(tmp_path)
+    st = _session(r, tmp_path, "260720-1-a", "s1", "One", "p")
+    now = 1_000_000
+    # No heartbeat file -> last_active falls back to meta.created_at (1),
+    # which is far beyond the 1-day retention window relative to `now`.
+    rows = list_rows(r, "", "all", now=now)
+    assert rows == []

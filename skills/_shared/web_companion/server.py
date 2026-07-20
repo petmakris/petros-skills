@@ -124,27 +124,39 @@ def list_rows(registry, cwd, scope, now):
         return out
     if scope != "all":
         return []          # handler renders the legacy 400 for this case
-    # scope=all -> all live sessions, extended
+    # scope=all -> every registered session (live, idle, or done) within the
+    # retention window. Unlike the legacy ?cwd= branch above, this must NOT
+    # reap by watcher age: a watcher stops heartbeating the instant its
+    # Claude session ends, leaving a STALE (but present) heartbeat file on
+    # disk, so age-based reaping here would hide every idle-but-legitimate
+    # workspace 180s after the session that created it exits — exactly the
+    # set /annotate resume and the browser need to see. registry.list_all()
+    # is already pruned to live on-disk dirs by rehydrate(), so the only
+    # remaining gate is retention (same env/default the startup GC uses).
+    retention_seconds = int(os.environ.get("WEBCOMPANION_RETENTION_DAYS", "7")) * 86400
     out = []
     for sid, dirs in registry.list_all():
-        # Reap age measured against the injected `now` (not wall-clock
-        # time.time() like the legacy _watcher_age helper) so it stays
-        # consistent with session_row's own live/idle computation below,
-        # and so callers can pass a fixed `now` deterministically in tests.
+        meta = registry.get_meta(sid)
         hb = _read_hb(dirs["state_dir"])
-        age = None if hb is None else now - hb
-        if age is not None and age > REAP_AFTER and not _is_terminal(dirs):
+        last_active = hb or meta.get("created_at", 0)
+        if now - last_active > retention_seconds:
             continue
-        out.append(session_row(sid, dirs, registry.get_meta(sid), now))
+        out.append(session_row(sid, dirs, meta, now))
     out.sort(key=lambda r: r["last_active"], reverse=True)
     return out
 
 
-def create_or_attach(registry, skill_name, payload, cwd, mkdirs):
+def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None):
     """Return ({sid, slug, dirs, created}, created_bool).
 
     mkdirs(sid) -> dirs dict (response_dir/annotations_dir/state_dir/events_dir/
     consumed_dir), all created. Pure of HTTP; URL assembly is the caller's job.
+
+    on_create(dirs), if given, runs on the CREATE path only — after dirs are
+    made and `_cwd` is set, but BEFORE the session is registered/persisted.
+    If it raises, the exception propagates and nothing is registered (no
+    zombie session). Never called on the attach path (attach must not re-run
+    a skill's per-session init, e.g. re-fetching a PR diff).
     """
     title = (payload.get("title") or "").strip()
     project = (payload.get("project") or Path(cwd).name).strip()
@@ -165,6 +177,10 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs):
                 meta = registry.get_meta(target_sid)
                 return ({"sid": target_sid, "slug": meta.get("slug", target_sid),
                          "dirs": dirs, "created": False}, False)
+            # dead sid (state_dir missing): free its slug before falling
+            # through to create, so the intended slug is reused (no -2
+            # bump) and no ghost registry entry lingers.
+            registry.unregister(target_sid)
         # fall through to create (self-heal)
 
     sid = registry.make_sid()
@@ -177,6 +193,8 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs):
         slug = registry.make_slug(explicit_slug, cwd)
     dirs = mkdirs(sid)
     dirs["_cwd"] = str(cwd)
+    if on_create is not None:
+        on_create(dirs)
     registry.register(sid, dirs)
     registry.register_meta(sid, {
         "slug": slug, "title": title, "project": project,
@@ -474,13 +492,19 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                     "consumed_dir": consumed_dir,
                 }
 
-            result, _created = create_or_attach(registry, skill_name, payload, cwd, _mkdirs)
-            sid = result["sid"]; slug = result["slug"]; dirs = result["dirs"]
+            extra_holder = {}
+
+            def _on_create(dirs):
+                extra_holder['extra'] = handlers.create_session_extra(payload, dirs) or {}
+
             try:
-                extra = handlers.create_session_extra(payload, dirs) or {}
+                result, _created = create_or_attach(
+                    registry, skill_name, payload, cwd, _mkdirs, on_create=_on_create)
             except Exception as e:
                 self._send_text(500, f"session-init failed: {e}")
                 return
+            sid = result["sid"]; slug = result["slug"]; dirs = result["dirs"]
+            extra = extra_holder.get('extra', {})
             port = server_holder['server'].server_address[1]
             self._send_json(200, {
                 "sid": sid,

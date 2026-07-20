@@ -86,6 +86,19 @@ class Registry:
         with self._lock:
             return self._sessions.get(sid)
 
+    def unregister(self, sid: str) -> None:
+        """Drop a dead session's registration (and meta) in-memory.
+
+        Does NOT persist — persist() takes the lock itself, so calling it
+        here would deadlock/nest; the caller's next persist() call snapshots
+        the removal. Used by self-heal (a resolved sid whose state_dir is
+        gone) to free its slug for reuse instead of leaving a ghost entry
+        that forces the create path to dedup to a bumped slug.
+        """
+        with self._lock:
+            self._sessions.pop(sid, None)
+            self._meta.pop(sid, None)
+
     def items(self) -> list[tuple[str, dict[str, Path]]]:
         with self._lock:
             return list(self._sessions.items())
