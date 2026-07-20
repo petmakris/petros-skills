@@ -51,27 +51,102 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(python3 -c 'import json,os;print(json.load(
 
 `$CLAUDE_PLUGIN_ROOT` is **not** exported into the Bash tool's shell, so it is resolved here from the plugin marketplace registry as a fallback. It's idempotent and fast (<100 ms when the server is already up). Internally it delegates to `skills/_shared/web_companion/ensure_server.sh` — no need to call that directly. Do **not** use `run_in_background: true` — wait for it to return. If it exits non-zero, surface the stderr to the user and stop.
 
-## Create a session for this turn
+## Create-or-attach a workspace for this conversation
 
-After `ensure_server.sh` succeeds, read `$HOME/.claude/annotate/server.json` to get the server URL, then request a fresh session for the user's project directory:
+Workspaces outlive a single push — they persist on disk for 7 days and survive
+Claude exiting (see SKILL.md § Session lifecycle). So don't mint a fresh one on
+every push: **create once per conversation, then attach on every push after
+that**, so all of a conversation's pushes land in the same `blocks.json` at the
+same URL.
+
+After `ensure_server.sh` succeeds, read `$HOME/.claude/annotate/server.json` to get the server URL:
 
 ```bash
 SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/annotate/server.json")))["url"])')
-curl -sf -X POST "$SERVER_URL/api/sessions" \
-  -H 'Content-Type: application/json' \
-  -d "$(printf '{"cwd": "%s"}' "$PWD")"
 ```
 
-The response is JSON of the form:
+The workspace this conversation is using (if any) is tracked in the per-conversation
+pending registry, `~/.claude/annotate/pending-${CLAUDE_CODE_SESSION_ID}.json` — the
+same file "Arming the watcher" (below) appends a round entry to on every push. Each
+entry carries a `workspace` key once one exists:
+
+```bash
+REG="$HOME/.claude/annotate/pending-${CLAUDE_CODE_SESSION_ID}.json"
+WORKSPACE=$(python3 -c '
+import json, sys
+try:
+    rounds = json.load(open(sys.argv[1]))
+except (FileNotFoundError, json.JSONDecodeError):
+    rounds = []
+for r in reversed(rounds):
+    w = r.get("workspace")
+    if w:
+        print(json.dumps(w))
+        break
+' "$REG")
+```
+
+### First push of this conversation (`$WORKSPACE` empty)
+
+No prior push, and `/annotate resume` wasn't invoked (see `references/resuming.md`).
+Create fresh — no `attach`:
+
+```bash
+curl -sf -X POST "$SERVER_URL/api/sessions" \
+  -H 'Content-Type: application/json' \
+  -d "$(printf '{"cwd": "%s", "title": "%s", "project": "%s"}' "$PWD" "$TITLE" "$(basename "$PWD")")"
+```
+
+`title` is this work's short title — the server slugifies it (deduping against
+any live collision) into `slug`. Pass an explicit `"slug": "..."` too if you want
+a specific short name instead of the auto-slugified title.
+
+**Before creating**, check whether this project already has a live workspace and
+offer to resume it instead of silently forking a second one — see
+`references/resuming.md` § Auto-offer.
+
+### Subsequent pushes in this conversation (`$WORKSPACE` non-empty)
+
+Attach to the same workspace instead of creating a new one:
+
+```bash
+SLUG=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["slug"])' "$WORKSPACE")
+curl -sf -X POST "$SERVER_URL/api/sessions" \
+  -H 'Content-Type: application/json' \
+  -d "$(printf '{"cwd": "%s", "title": "%s", "slug": "%s", "attach": true}' "$PWD" "$TITLE" "$SLUG")"
+```
+
+### Response shape (both calls)
 
 ```json
-{"sid":"...","url":"http://HOST:PORT/s/SID/",
- "localhost_url":"http://localhost:PORT/s/SID/",
+{"sid":"...","slug":"...","created":true,
+ "url":"http://HOST:PORT/s/SLUG/",
+ "localhost_url":"http://localhost:PORT/s/SLUG/",
  "response_dir":"...","annotations_dir":"...","state_dir":"...",
  "events_dir":"...","consumed_dir":"..."}
 ```
 
-Save `url`, `localhost_url`, `response_dir`, `state_dir`, `events_dir`, `consumed_dir` for the rest of this turn. Announce **both** URLs to the user (see "How to push a response"). `url` uses the public/Tailscale host (shareable across the LAN); `localhost_url` is the always-secure-context loopback URL — browser features that require a secure context (voice dictation) only work there. When the two are identical (no Tailscale host configured, `url` already on a loopback host), announce just one. (`annotations_dir` is no longer used by the annotate skill but is still returned by the server.)
+The **create** call returns `created: true` with a fresh `sid`/`slug`/directories.
+The **attach** call returns `created: false` with the **same** `sid` and
+directories as the workspace's first push — `blocks.json` under that
+`response_dir` is the same file every push in this conversation updates in
+place, not a new one each time.
+
+Save `sid`, `slug`, `url`, `localhost_url`, `response_dir`, `state_dir`,
+`events_dir`, `consumed_dir` for the rest of this turn. Announce **the slug
+URL** — `url`/`localhost_url` are now built from `slug`, not `sid`
+(`/s/<slug>/`), so that's what the user should bookmark or type into
+`/annotate resume`. `url` uses the public/Tailscale host (shareable across the
+LAN); `localhost_url` is the always-secure-context loopback URL — browser
+features that require a secure context (voice dictation) only work there. When
+the two are identical (no Tailscale host configured, `url` already on a
+loopback host), announce just one. (`annotations_dir` is no longer used by the
+annotate skill but is still returned by the server.)
+
+To resume a previously-closed conversation's workspace (`/annotate resume
+<slug>`, or no arg to list candidates), see `references/resuming.md` — it sets
+this same `workspace` marker so the push flow above attaches to it
+automatically.
 
 ## How to push a response
 
@@ -207,25 +282,34 @@ The watcher emits these stdout banners:
 
 Each stdout line wakes you once.  The watcher stays alive across many events until the session terminates. When an event fires, follow `references/handling-events.md`.
 
-After arming, also append a record to the pending registry so terminal-cancellation can find this session:
+After arming, also append a record to the pending registry so terminal-cancellation can find this session. This is also where the **workspace marker** used by "Create-or-attach a workspace" above gets written — pass the workspace's `sid` and `slug` (from the session-create/attach response) as `$SID`/`$SLUG`:
 
 ```bash
 mkdir -p ~/.claude/annotate
 REG="$HOME/.claude/annotate/pending-${CLAUDE_CODE_SESSION_ID}.json"
-python3 - "$REG" "$SID" "$RID" "$TITLE" "$STATE_DIR" "$EVENTS_DIR" "$CONSUMED_DIR" <<'PY'
+python3 - "$REG" "$SID" "$RID" "$TITLE" "$STATE_DIR" "$EVENTS_DIR" "$CONSUMED_DIR" "$SLUG" <<'PY'
 import json, os, sys
-path, sid, rid, title, state_dir, events_dir, consumed_dir = sys.argv[1:]
+path, sid, rid, title, state_dir, events_dir, consumed_dir, slug = sys.argv[1:]
 try:
     data = json.load(open(path))
 except FileNotFoundError:
     data = []
 data.append({"sid": sid, "rid": rid, "title": title,
              "state_dir": state_dir, "events_dir": events_dir,
-             "consumed_dir": consumed_dir})
+             "consumed_dir": consumed_dir,
+             "workspace": {"sid": sid, "slug": slug}})
 tmp = path + ".tmp"
 json.dump(data, open(tmp, "w"), indent=2)
 os.replace(tmp, path)
 PY
 ```
+
+`workspace` is a new key added to each round entry alongside the existing
+`sid`/`rid`/`title`/`state_dir`/`events_dir`/`consumed_dir` fields — it doesn't
+collide with them. `hooks/progress_publish.py` and `references/handling-events.md`
+§ Terminal cancellation only ever read `state_dir`/`events_dir`/`consumed_dir`
+off each entry, so the extra key is inert to both; "Create-or-attach a
+workspace" above is the only reader of `workspace`, and it always looks at the
+**last** entry with one set.
 
 The registry persists across watchers within a single Claude Code session. It is *not* shared across sessions (keyed by `CLAUDE_CODE_SESSION_ID`).
