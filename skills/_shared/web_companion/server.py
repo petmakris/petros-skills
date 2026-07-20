@@ -370,7 +370,7 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                 self._send_text(200, banner)
                 return
             if self.path == "/":
-                self._send_text(200, banner + " - see /s/<sid>/")
+                static_serve.serve(self, "sessions.html", static_dirs)
                 return
             if self.path.startswith("/static/"):
                 static_serve.serve(self, self.path[len("/static/"):], static_dirs)
