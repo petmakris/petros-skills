@@ -44,3 +44,13 @@ class HandlersProtocol(Protocol):
         or None for no extras. May raise to fail session creation.
         """
         ...
+
+    def comment_count(self, dirs: dict) -> int:
+        """Return the number of comments/threads for this session.
+
+        Used by the scope=all session browser to render a comment count per
+        row. Each skill knows where its own comment artifacts live (events,
+        threads, ...); the shared server has no business globbing a
+        skill-specific directory. Default: 0.
+        """
+        return 0

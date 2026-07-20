@@ -6,13 +6,24 @@ from skills._shared.web_companion.server import list_rows, session_row
 
 def _session(reg, tmp_path, sid, slug, title, project, threads=0):
     base = tmp_path / sid
-    ann = base / "annotations"; st = base / "state"
-    ann.mkdir(parents=True); st.mkdir(parents=True)
+    events = base / "events"; consumed = base / "consumed"; st = base / "state"
+    events.mkdir(parents=True); consumed.mkdir(parents=True); st.mkdir(parents=True)
     for i in range(threads):
-        (ann / f"t{i}.json").write_text("{}")
-    reg.register(sid, {"state_dir": st, "annotations_dir": ann, "_cwd": str(tmp_path)})
+        (events / f"t{i}.json").write_text("{}")
+    reg.register(sid, {
+        "state_dir": st, "events_dir": events, "consumed_dir": consumed,
+        "_cwd": str(tmp_path),
+    })
     reg.register_meta(sid, {"slug": slug, "title": title, "project": project, "created_at": 1})
     return st
+
+
+def _annotate_style_count_fn(dirs):
+    """Mirrors annotate's Handlers.comment_count: distinct ids across queued
+    events and processed acks, deduped by stem."""
+    ids = {p.stem for p in Path(dirs["events_dir"]).glob("*.json")}
+    ids |= {p.stem for p in Path(dirs["consumed_dir"]).glob("*.ack")}
+    return len(ids)
 
 
 def test_legacy_shape_with_cwd(tmp_path):
@@ -25,11 +36,27 @@ def test_legacy_shape_with_cwd(tmp_path):
 def test_all_sessions_extended_scope_all(tmp_path):
     r = Registry(tmp_path)
     _session(r, tmp_path, "260720-1-a", "s1", "One", "projA", threads=3)
-    rows = list_rows(r, "", "all", now=1000)
+    rows = list_rows(r, "", "all", now=1000, count_fn=_annotate_style_count_fn)
     row = rows[0]
     assert row["slug"] == "s1" and row["project"] == "projA"
     assert row["comment_count"] == 3
     assert row["status"] in ("live", "idle", "done")
+
+
+def test_all_sessions_scope_all_no_count_fn_defaults_zero(tmp_path):
+    """When the caller doesn't pass count_fn (e.g. a skill with no comment
+    concept), comment_count must default to 0, not blow up."""
+    r = Registry(tmp_path)
+    _session(r, tmp_path, "260720-1-a", "s1", "One", "projA", threads=3)
+    rows = list_rows(r, "", "all", now=1000)
+    assert rows[0]["comment_count"] == 0
+
+
+def test_all_sessions_scope_all_count_fn_zero_when_no_artifacts(tmp_path):
+    r = Registry(tmp_path)
+    _session(r, tmp_path, "260720-1-a", "s1", "One", "projA", threads=0)
+    rows = list_rows(r, "", "all", now=1000, count_fn=_annotate_style_count_fn)
+    assert rows[0]["comment_count"] == 0
 
 
 def test_status_live_when_heartbeat_fresh(tmp_path):
