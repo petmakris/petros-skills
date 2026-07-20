@@ -191,10 +191,11 @@ SID="<sid>" \
 STATE_DIR="<state_dir>" \
 EVENTS_DIR="<events_dir>" \
 CONSUMED_DIR="<consumed_dir>" \
+CLAUDE_SID="$CLAUDE_CODE_SESSION_ID" \
 "$PLUGIN_ROOT/skills/_shared/web_companion/watcher.sh"
 ```
 
-Substitute `<sid>`, `<state_dir>`, `<events_dir>`, `<consumed_dir>` from the session-create response (returned by `POST /api/sessions`).
+Substitute `<sid>`, `<state_dir>`, `<events_dir>`, `<consumed_dir>` from the session-create response (returned by `POST /api/sessions`). `CLAUDE_SID` is this Claude Code session's own id — read from the `CLAUDE_CODE_SESSION_ID` env var (exposed to all Bash tool calls, same one used for `meta.json`'s `claude_session_id` and the pending registry below). The watcher writes a per-session heartbeat file keyed by it (`state/watchers/<CLAUDE_SID>.hb`), which is how the server counts distinct live Claude sessions attached to one shared workspace. It's optional — an unset `CLAUDE_SID` doesn't break the watcher, it just isn't counted.
 
 Pass this command as the `Monitor` tool's `command` with `persistent: true` and a short `description` like `"annotate-wait sid=<sid>"`.
 

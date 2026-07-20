@@ -4,6 +4,13 @@
 #
 # Required env:
 #   SKILL, SID, STATE_DIR, EVENTS_DIR, CONSUMED_DIR
+#
+# Optional env:
+#   CLAUDE_SID - the arming Claude Code session's id. When set, each
+#     heartbeat also writes $STATE_DIR/watchers/$CLAUDE_SID.hb, so
+#     the server can count distinct live Claude sessions attached to
+#     one shared workspace (see attached_count in annotate/server.py).
+#     Unset is fine — the watcher still works, it just won't be counted.
 
 set -u
 
@@ -13,6 +20,10 @@ mkdir -p "$EVENTS_DIR" "$CONSUMED_DIR"
 
 while [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; do
   date +%s > "$STATE_DIR/watcher_heartbeat"
+  if [ -n "${CLAUDE_SID:-}" ]; then
+    mkdir -p "$STATE_DIR/watchers"
+    date +%s > "$STATE_DIR/watchers/$CLAUDE_SID.hb"
+  fi
   # Fixed-width event-id filenames sort chronologically (see events.append).
   evt=$(ls "$EVENTS_DIR"/*.json 2>/dev/null | sort | head -n1)
   if [ -n "$evt" ]; then
@@ -33,6 +44,10 @@ while [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; do
         # /poll's watcher_seen_at goes stale for up to 30 min and the page
         # would wrongly look like the watcher died.
         date +%s > "$STATE_DIR/watcher_heartbeat"
+        if [ -n "${CLAUDE_SID:-}" ]; then
+          mkdir -p "$STATE_DIR/watchers"
+          date +%s > "$STATE_DIR/watchers/$CLAUDE_SID.hb"
+        fi
         sleep 1
       done
       if [ -f "$CONSUMED_DIR/$id.ack" ]; then
