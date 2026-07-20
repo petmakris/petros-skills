@@ -784,6 +784,19 @@ main.prose mark.search-hit {
   font-size: 14px;
 }
 
+/* Advisory pill: more than one live Claude session is attached to this
+   workspace at once. Purely informational — unlike busy/watcher-dead above,
+   it doesn't gate anything. Sits in the header title, hidden by default. */
+.attached-pill {
+  display: none;
+  font-size: 11px; font-weight: 600;
+  color: #b45309;
+  background: color-mix(in srgb, #b45309 12%, white);
+  border: 1px solid color-mix(in srgb, #b45309 35%, white);
+  border-radius: 999px; padding: 2px 10px; margin-left: 10px;
+}
+.attached-pill.show { display: inline-block; }
+
 body.is-busy .hover-actions,
 body.is-busy .choice-submit-btn,
 body.is-busy .card-submit-btn,

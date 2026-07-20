@@ -1343,6 +1343,27 @@
     }
   }
 
+  // Advisory-only: more than one live Claude session (watcher) is heartbeating
+  // on this workspace at once — e.g. two terminals reopened the same slug.
+  // Purely informational, doesn't gate anything the way setBusy/setWatcherDead
+  // do. The pill lives in the header title and is created once, then just
+  // toggled — unlike the busy/watcher-dead banners it isn't inserted/removed
+  // per poll.
+  function setAttachedPill(count) {
+    let pill = document.getElementById("attached-pill");
+    if (!pill) {
+      const title = document.querySelector(".header-title");
+      if (!title) return; // header not rendered (yet); try again next poll
+      pill = document.createElement("span");
+      pill.id = "attached-pill";
+      pill.className = "attached-pill";
+      title.appendChild(pill);
+    }
+    const show = typeof count === "number" && count > 1;
+    pill.textContent = show ? `${count} sessions attached` : "";
+    pill.classList.toggle("show", show);
+  }
+
   function onPollDelta(data) {
     const watcherDead = typeof data.watcher_age_s === "number"
       && data.watcher_age_s > WATCHER_DEAD_AFTER_S;
@@ -1350,6 +1371,7 @@
     // A dead watcher means no ack is ever coming — don't keep the page
     // locked on its behalf.
     setBusy(data.busy && !watcherDead);
+    setAttachedPill(data.attached);
     refreshStatusline();
     // 1. Clear spinners for comments Claude finished processing.
     handleConsumedEvents(data.consumed_events);
