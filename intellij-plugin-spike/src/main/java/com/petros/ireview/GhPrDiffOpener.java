@@ -56,12 +56,12 @@ final class GhPrDiffOpener {
         final long prNumber = number;
         // gh shells out — keep it off the EDT, then hop back on for the GH VM.
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            String nodeId = resolveNodeId(repoRoot, prNumber);
-            if (nodeId.isEmpty()) {
-                notifyWarn(project, "Couldn't resolve PR #" + prNumber,
-                    "`gh pr view " + prNumber + " --json id` returned nothing — is gh authenticated for this repo?");
+            NodeIdResult result = resolveNodeId(repoRoot, prNumber);
+            if (result.nodeId().isEmpty()) {
+                notifyWarn(project, "Couldn't resolve PR #" + prNumber, result.failure());
                 return;
             }
+            String nodeId = result.nodeId();
             GHPRProjectViewModel vm = project.getService(GHPRProjectViewModel.class);
             if (vm == null) {
                 notifyWarn(project, "GitHub plugin unavailable", "No GHPRProjectViewModel for this project.");
@@ -77,17 +77,40 @@ final class GhPrDiffOpener {
         });
     }
 
-    /** {@code gh pr view <n> --json id --jq .id} → the PR's GraphQL node id, or "". */
-    private static @NotNull String resolveNodeId(@NotNull String repoRoot, long number) {
+    /** @param failure why it failed, shown to the user; empty when nodeId is set. */
+    private record NodeIdResult(@NotNull String nodeId, @NotNull String failure) {
+        static NodeIdResult ok(String id) { return new NodeIdResult(id, ""); }
+        static NodeIdResult failed(String why) { return new NodeIdResult("", why); }
+    }
+
+    /** {@code gh pr view <n> --json id --jq .id} → the PR's GraphQL node id. */
+    private static @NotNull NodeIdResult resolveNodeId(@NotNull String repoRoot, long number) {
+        // The IDE's own PATH is minimal when launched from the Dock; the shell
+        // environment is what the user's terminal would see.
+        String path = com.intellij.util.EnvironmentUtil.getValue("PATH");
+        if (path == null) path = System.getenv("PATH");
+        String gh = GhExecutable.resolve(path, p -> new java.io.File(p).canExecute());
+        if (gh == null) {
+            return NodeIdResult.failed("Couldn't find the `gh` command. Install the GitHub CLI, "
+                + "or launch the IDE from a terminal so it inherits your PATH.");
+        }
         try {
             GeneralCommandLine cl = new GeneralCommandLine(
-                "gh", "pr", "view", String.valueOf(number), "--json", "id", "--jq", ".id")
-                .withWorkDirectory(repoRoot);
+                gh, "pr", "view", String.valueOf(number), "--json", "id", "--jq", ".id")
+                .withWorkDirectory(repoRoot)
+                .withEnvironment(com.intellij.util.EnvironmentUtil.getEnvironmentMap());
             ProcessOutput out = ExecUtil.execAndGetOutput(cl);
-            return out.getExitCode() == 0 ? out.getStdout().trim() : "";
+            if (out.getExitCode() == 0 && !out.getStdout().isBlank()) {
+                return NodeIdResult.ok(out.getStdout().trim());
+            }
+            String stderr = out.getStderr().trim();
+            LOG.warn("gh pr view exited " + out.getExitCode() + ": " + stderr);
+            return NodeIdResult.failed(stderr.isEmpty()
+                ? "`gh pr view " + number + "` returned nothing (exit " + out.getExitCode() + ")."
+                : stderr);
         } catch (Exception e) {
             LOG.warn("gh pr view failed", e);
-            return "";
+            return NodeIdResult.failed("Couldn't run `" + gh + "`: " + e.getMessage());
         }
     }
 

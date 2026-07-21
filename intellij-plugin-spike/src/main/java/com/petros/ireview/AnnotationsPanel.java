@@ -486,14 +486,15 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
     private boolean isStale(String anchor) {
         String[] p = anchor.split(":", 3);
         if (p.length < 3) return false;
-        var editor = SpikeDiffExtension.editorFor(p[0] + ":" + p[1]);
-        if (editor == null) return false;
+        // The side's own document, not the editor's: unified renders both sides in
+        // one merged document, where a side-relative line number means nothing.
+        var doc = SpikeDiffExtension.sideDocumentFor(p[0] + ":" + p[1]);
+        if (doc == null) return false;
         var ts = client.threadFor(anchor).orElse(null);
         if (ts == null) return false;
         int recorded;
         try { recorded = Integer.parseInt(p[2]); } catch (NumberFormatException e) { return false; }
         var lines = new ArrayList<String>();
-        var doc = editor.getDocument();
         for (int i = 0; i < doc.getLineCount(); i++) {
             lines.add(doc.getText(new com.intellij.openapi.util.TextRange(
                 doc.getLineStartOffset(i), doc.getLineEndOffset(i))));
@@ -525,7 +526,10 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         com.intellij.openapi.editor.ex.EditorEx diffEditor =
             SpikeDiffExtension.editorFor(path + ":" + side);
         if (diffEditor != null) {
-            focusAndShowPopup(diffEditor, entry.anchor(), line0);
+            // The anchor's line is side-relative; the unified viewer shows both
+            // sides in one document, so translate before scrolling.
+            focusAndShowPopup(diffEditor, entry.anchor(),
+                SpikeDiffExtension.displayLineFor(path + ":" + side, line0));
             return;
         }
 
@@ -564,7 +568,8 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
             var ed = SpikeDiffExtension.editorFor(path + ":" + side);
             if (ed != null && ed.getComponent().isShowing()) {
                 poll.stop();
-                focusAndShowPopup(ed, anchor, line0);
+                focusAndShowPopup(ed, anchor,
+                    SpikeDiffExtension.displayLineFor(path + ":" + side, line0));
             } else if (tries[0] >= 16) {
                 poll.stop();  // GH diff didn't register a viewer for this file — give up quietly
             }
