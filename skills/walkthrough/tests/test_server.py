@@ -172,3 +172,40 @@ def test_comment_count_counts_threads(tmp_path):
     threads_module.append_message(dirs["state_dir"] / "threads", "step:1", {
         "role": "user", "ts": 1, "text": "q", "source_event_id": "user-1"})
     assert h.comment_count(dirs) == 1
+
+
+def test_submit_rejects_non_step_anchor(tmp_path):
+    h, handler = Handlers(), make_handler()
+    h.handle_submit(handler, make_dirs(tmp_path), {"anchor": "src/x.java:R:1", "text": "hi"})
+    handler.send_response.assert_called_with(400)
+
+
+def test_submit_rejects_bad_type(tmp_path):
+    h, handler = Handlers(), make_handler()
+    h.handle_submit(handler, make_dirs(tmp_path), {"anchor": "step:1", "type": "shout", "text": "hi"})
+    handler.send_response.assert_called_with(400)
+
+
+def test_submit_rejects_when_session_closed(tmp_path):
+    dirs = make_dirs(tmp_path)
+    (dirs["state_dir"] / "cancelled").write_text("{}")
+    h, handler = Handlers(), make_handler()
+    h.handle_submit(handler, dirs, {"anchor": "step:1", "text": "hi"})
+    handler.send_response.assert_called_with(409)
+
+
+def test_submit_queues_event_and_appends_user_message(tmp_path):
+    dirs = make_dirs(tmp_path)
+    h, handler = Handlers(), make_handler()
+    h.handle_submit(handler, dirs, {"anchor": "step:2", "text": "is ordering guaranteed?"})
+    handler.send_response.assert_called_with(202)
+    body = json.loads(handler.wfile.getvalue())
+    assert body["status"] == "queued"
+    events = list((dirs["events_dir"]).iterdir())
+    assert len(events) == 1
+    evt = json.loads(events[0].read_text())
+    assert evt["anchor"] == "step:2"
+    assert evt["text"] == "is ordering guaranteed?"
+    thread = threads_module.load(dirs["state_dir"] / "threads", "step:2")
+    assert thread["messages"][0]["role"] == "user"
+    assert thread["messages"][0]["source_event_id"] == f"user-{body['event_id']}"

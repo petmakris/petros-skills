@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 from skills._shared.web_companion import server as wc_server
+from skills._shared.web_companion import events as events_module
 from skills.interactive_review import threads as threads_module
 from skills.walkthrough import steps as steps_module
 
@@ -115,10 +116,103 @@ class Handlers:
         _send_text(h, 404, "not found")
 
     def _serve_stream(self, h: BaseHTTPRequestHandler, dirs: dict) -> None:
-        raise NotImplementedError  # Task 3
+        """SSE: thread-changed / thread-deleted / steps-changed / heartbeat.
+
+        Self-correcting: every wake (and every 30s timeout) re-reads state from
+        disk rather than trusting the wake signal, so a missed notify cannot
+        strand the IDE on stale content.
+        """
+        sid = dirs.get("_sid")
+        state_dir = Path(dirs["state_dir"])
+        h.send_response(200)
+        h.send_header("Content-Type", "text/event-stream")
+        h.send_header("Cache-Control", "no-cache")
+        h.send_header("Connection", "keep-alive")
+        h.send_header("X-Accel-Buffering", "no")
+        h.end_headers()
+
+        def emit(name: str, obj: dict) -> bool:
+            try:
+                h.wfile.write(f"event: {name}\ndata: {json.dumps(obj)}\n\n".encode())
+                h.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError):
+                return False
+
+        if not emit("connected", {}):
+            return
+        if not self._registry or not sid:
+            return
+
+        last_steps_ts = steps_module.generated_ts(state_dir)
+        if last_steps_ts:
+            doc = steps_module.load_steps(state_dir) or EMPTY_DOC
+            if not emit("steps-changed", {"generated_ts": last_steps_ts,
+                                          "count": len(doc.get("steps", []))}):
+                return
+        last_threads = self.threads_bulk(dirs)
+        for anchor, info in last_threads.items():
+            if not emit("thread-changed", {"anchor": anchor, **info}):
+                return
+
+        waiter = self._registry.waiter(sid)
+        while True:
+            woke = waiter.wait(timeout=30)
+            steps_ts = steps_module.generated_ts(state_dir)
+            if steps_ts != last_steps_ts:
+                last_steps_ts = steps_ts
+                doc = steps_module.load_steps(state_dir) or EMPTY_DOC
+                if not emit("steps-changed", {"generated_ts": steps_ts,
+                                              "count": len(doc.get("steps", []))}):
+                    return
+            new_threads = self.threads_bulk(dirs)
+            for anchor in list(last_threads):
+                if anchor not in new_threads and not emit("thread-deleted", {"anchor": anchor}):
+                    return
+            for anchor, info in new_threads.items():
+                old = last_threads.get(anchor)
+                if (old is None or old.get("version") != info.get("version")) \
+                        and not emit("thread-changed", {"anchor": anchor, **info}):
+                    return
+            last_threads = new_threads
+            if not woke and not emit("heartbeat", {}):
+                return
 
     def handle_submit(self, h: BaseHTTPRequestHandler, dirs: dict, payload: dict) -> None:
-        raise NotImplementedError  # Task 3
+        state_dir = Path(dirs["state_dir"])
+        if _is_terminal(state_dir):
+            _send_text(h, 409, "session closed")
+            return
+        anchor = payload.get("anchor")
+        ask_type = payload.get("type", "comment")
+        text = payload.get("text", "")
+        selected_text = payload.get("selected_text")
+        images = payload.get("images", [])
+        if not steps_module.valid_anchor(anchor):
+            _send_text(h, 400, "bad anchor")
+            return
+        if ask_type not in ("comment", "reject"):
+            _send_text(h, 400, "bad type")
+            return
+        if not isinstance(text, str) or not text.strip():
+            _send_text(h, 400, "bad text")
+            return
+        eid = events_module.append(Path(dirs["events_dir"]), {
+            "anchor": anchor,
+            "type": ask_type,
+            "text": text,
+            "selected_text": selected_text,
+            "images": images,
+        })
+        threads_module.append_message(state_dir / "threads", anchor, {
+            "role": "user",
+            "ts": int(time.time()),
+            "text": text,
+            "selected_text": selected_text,
+            "images": images,
+            "source_event_id": f"user-{eid}",
+        })
+        _send_json(h, 202, {"event_id": eid, "status": "queued"})
 
     def serve_poll(self, h: BaseHTTPRequestHandler, dirs: dict) -> None:
         state_dir = Path(dirs["state_dir"])
