@@ -27,6 +27,11 @@
                     anchor="right"
                     icon="/icons/annotation_yellow.svg"
                     factoryClass="com.petros.ireview.AnnotationsToolWindowFactory"/>
+        <projectService serviceImplementation="com.petros.ireview.WalkthroughService"/>
+        <toolWindow id="Walkthrough"
+                    anchor="right"
+                    icon="/icons/comment.svg"
+                    factoryClass="com.petros.ireview.WalkthroughToolWindowFactory"/>
     </extensions>
 
     <actions>
