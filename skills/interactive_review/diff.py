@@ -165,14 +165,15 @@ def _local_git_diff(meta: dict, cwd: str | None = None) -> str:
     args = ["git", "-c", "color.ui=false", "diff", "--no-color",
             f"{base_ref}...{head}", "--", "."]
     args += [f":(exclude){g}" for g in excludes]
-    return subprocess.check_output(args, text=True, cwd=cwd)
+    # errors="replace": diffs may contain non-UTF-8 bytes (e.g. latin-1 .properties files)
+    return subprocess.check_output(args, text=True, errors="replace", cwd=cwd)
 
 
 def fetch_pr_diff(pr_ref: str, cwd: str | None = None) -> tuple[str, dict]:
     meta = _pr_meta(pr_ref, cwd)
     try:
         diff = subprocess.check_output(
-            ["gh", "pr", "diff", pr_ref, "--patch"], text=True,
+            ["gh", "pr", "diff", pr_ref, "--patch"], text=True, errors="replace",
             stderr=subprocess.DEVNULL, cwd=cwd,
         )
     except subprocess.CalledProcessError:

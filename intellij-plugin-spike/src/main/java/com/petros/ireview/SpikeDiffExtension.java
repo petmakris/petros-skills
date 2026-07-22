@@ -213,11 +213,48 @@ public final class SpikeDiffExtension extends DiffExtension {
             int end = doc.getLineEndOffset(line);
             var h = editor.getMarkupModel().addRangeHighlighter(
                     start, end, HighlighterLayer.LAST, null, HighlighterTargetArea.LINES_IN_RANGE);
-            h.setGutterIconRenderer(new AskGutterRenderer(editor, doc, side, label, line, line, project));
+            h.setGutterIconRenderer(new AskGutterRenderer(editor, doc, side, label, line, line, project, false));
         }
         installHoverTracker(editor);
         LOG.debug("SpikeDiffExtension: attached " + lineCount + " hover-aware gutter slots; "
                  + "side=" + side + " label=" + label);
+    }
+
+    /**
+     * A regular file editor, outside any diff. Anchors use the same
+     * {@code <path>:R:<line>} space as the diff's right side, so a thread asked
+     * here shows up on the PR diff of the same file and vice versa.
+     */
+    static void attachWorkingCopy(@NotNull EditorEx editor,
+                                  @NotNull String label,
+                                  @NotNull Project project) {
+        DIFF_EDITORS.put(label + ":R",
+                new DiffTarget(new java.lang.ref.WeakReference<>(editor),
+                               new java.lang.ref.WeakReference<>(editor.getDocument()),
+                               java.util.function.IntUnaryOperator.identity()));
+        attachWorkingCopyLines(editor, label, project);
+    }
+
+    /** Re-runnable: edits shift and add lines, so the markers are rebuilt after typing pauses. */
+    static void attachWorkingCopyLines(@NotNull EditorEx editor,
+                                       @NotNull String label,
+                                       @NotNull Project project) {
+        if (editor.isDisposed()) return;
+        var previous = OWNED.remove(editor);
+        if (previous != null) previous.forEach(h -> { if (h.isValid()) h.dispose(); });
+
+        Document doc = editor.getDocument();
+        int lineCount = doc.getLineCount();
+        var added = new java.util.ArrayList<com.intellij.openapi.editor.markup.RangeHighlighter>(lineCount);
+        for (int line = 0; line < lineCount; line++) {
+            var h = editor.getMarkupModel().addRangeHighlighter(
+                    doc.getLineStartOffset(line), doc.getLineEndOffset(line),
+                    HighlighterLayer.LAST, null, HighlighterTargetArea.LINES_IN_RANGE);
+            h.setGutterIconRenderer(new AskGutterRenderer(editor, doc, "R", label, line, line, project, true));
+            added.add(h);
+        }
+        OWNED.put(editor, added);
+        installHoverTracker(editor);
     }
 
     /**
@@ -309,7 +346,7 @@ public final class SpikeDiffExtension extends DiffExtension {
                     HighlighterLayer.LAST, null, HighlighterTargetArea.LINES_IN_RANGE);
             h.setGutterIconRenderer(new AskGutterRenderer(
                     editor, sideDoc, placement.side(), placement.label(),
-                    placement.sideLine0(), line, project));
+                    placement.sideLine0(), line, project, false));
             added.add(h);
         }
         OWNED.put(editor, added);
@@ -431,9 +468,12 @@ public final class SpikeDiffExtension extends DiffExtension {
         /** Line within the editor on screen — where the icon is drawn. */
         private final int displayLine0;
         private final Project project;
+        /** In a regular editor the gutter appears only while a review session is live —
+         *  otherwise every editor in the IDE grows an icon that leads nowhere. */
+        private final boolean onlyDuringSession;
 
         AskGutterRenderer(EditorEx editor, Document sideDoc, String side, String label,
-                          int sideLine0, int displayLine0, Project project) {
+                          int sideLine0, int displayLine0, Project project, boolean onlyDuringSession) {
             this.editor = editor;
             this.sideDoc = sideDoc;
             this.side = side;
@@ -441,11 +481,18 @@ public final class SpikeDiffExtension extends DiffExtension {
             this.sideLine0 = sideLine0;
             this.displayLine0 = displayLine0;
             this.project = project;
+            this.onlyDuringSession = onlyDuringSession;
         }
 
         private String anchor() { return label + ":" + side + ":" + (sideLine0 + 1); }
 
+        private boolean inactive() {
+            return onlyDuringSession
+                && ReviewSessionService.get(project).client().currentSession().isEmpty();
+        }
+
         @Override public @NotNull Icon getIcon() {
+            if (inactive()) return HIDDEN_ICON;
             if (ReviewSessionService.get(project).client().isPending(anchor())) return PENDING_ICON;
             var la = lineAnchorFor(sideDoc, label, side, sideLine0, project);
             if (la != null) return la.stale() ? STALE_ICON : ANNOTATED_ICON;
@@ -454,6 +501,7 @@ public final class SpikeDiffExtension extends DiffExtension {
         }
 
         @Override public @NotNull String getTooltipText() {
+            if (inactive()) return "";
             if (ReviewSessionService.get(project).client().isPending(anchor())) {
                 return "Claude is answering…";
             }
@@ -469,6 +517,7 @@ public final class SpikeDiffExtension extends DiffExtension {
 
         @Override
         public @Nullable AnAction getClickAction() {
+            if (inactive()) return null;
             return new AnAction() {
                 @Override
                 public void actionPerformed(@NotNull AnActionEvent e) {
