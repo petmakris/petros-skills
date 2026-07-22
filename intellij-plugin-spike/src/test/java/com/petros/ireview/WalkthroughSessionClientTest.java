@@ -151,6 +151,47 @@ class WalkthroughSessionClientTest {
                 await(() -> client.state() == WalkthroughSessionClient.State.DORMANT);
                 assertTrue(client.currentSession().isEmpty());
                 assertTrue(client.doc().isEmpty());
+                // No session was ever attached, so onDetached (which only fires
+                // out of handleNoSession's `current != null` branch) never fires.
+                assertTrue(events.isEmpty());
+            } finally {
+                client.stop();
+            }
+        }
+    }
+
+    @Test void detachesWhenSessionDisappearsFromDiscovery() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson = sessionsRow("wt5");
+            server.stepsJson = STEPS;
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            List<String> events = new CopyOnWriteArrayList<>();
+            WalkthroughSessionClient client = new WalkthroughSessionClient(
+                server.baseUrl(), "/proj", Duration.ofMillis(100));
+            client.addListener(new WalkthroughSessionClient.Listener() {
+                @Override public void onDetached() { events.add("detached"); }
+            });
+            client.start();
+            try {
+                await(() -> client.currentSession().isPresent() && client.doc().steps().size() == 2);
+
+                server.pushSseEvent("thread-changed",
+                    "{\"anchor\":\"step:1\",\"latest_synthesis\":\"yes\","
+                    + "\"version\":1,\"title\":\"T\",\"question\":\"q?\"}");
+                await(() -> client.threadFor("step:1").isPresent());
+
+                // The server never reports the session as ended (server.ended
+                // stays false throughout), so pollDiscover's found==null branch
+                // falls through pollLiveness without latching ENDED and calls
+                // handleNoSession() — this drives the plain detach path, not
+                // the ENDED latch in pollLiveness.
+                server.sessionsJson = "[]";
+
+                await(() -> events.contains("detached"));
+                assertTrue(client.currentSession().isEmpty());
+                assertTrue(client.doc().isEmpty());
+                assertTrue(client.threadFor("step:1").isEmpty());
+                assertNotEquals(WalkthroughSessionClient.State.ENDED, client.state());
             } finally {
                 client.stop();
             }

@@ -289,38 +289,68 @@ public final class WalkthroughSessionClient {
         openSse(s.sid());
     }
 
-    /** GET steps.json and publish it if it actually changed. */
-    private void loadSteps(String sid) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/steps.json"))
-                .timeout(REQUEST_TIMEOUT).GET().build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return;
-            WalkthroughDoc next = WalkthroughDoc.parse(resp.body());
-            WalkthroughDoc prev = doc.get();
-            if (prev.generatedTs() == next.generatedTs()
-                    && prev.steps().size() == next.steps().size()) {
+    /**
+     * GET steps.json and publish it if it actually changed. Retries transient
+     * failures up to 3x with a 500ms backoff — same as {@link ReviewSessionClient
+     * #seedCache} — so a blip on the initial seed doesn't leave the tour empty
+     * until the next SSE event. Aborts early if the client is closed or {@code
+     * gen} has been superseded by a newer attach/reconnect.
+     */
+    private void loadSteps(String sid, long gen) {
+        for (int attempt = 0; attempt < 3 && !closed && gen == sseGen.get(); attempt++) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/steps.json"))
+                    .timeout(REQUEST_TIMEOUT).GET().build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200) {
+                    WalkthroughDoc next = WalkthroughDoc.parse(resp.body());
+                    WalkthroughDoc prev = doc.get();
+                    if (prev.generatedTs() == next.generatedTs()
+                            && prev.steps().size() == next.steps().size()) {
+                        return;
+                    }
+                    doc.set(next);
+                    for (Listener l : listeners) l.onStepsChanged(next);
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
                 return;
             }
-            doc.set(next);
-            for (Listener l : listeners) l.onStepsChanged(next);
-        } catch (Exception ignored) {
-            // transient — the next steps-changed event or reconnect retries
         }
     }
 
-    private void seedThreads(String sid) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/threads.json"))
-                .timeout(REQUEST_TIMEOUT).GET().build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return;
-            JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
-            for (var e : root.entrySet()) {
-                JsonObject t = e.getValue().getAsJsonObject();
-                applyThread(e.getKey(), toThreadState(t));
+    /**
+     * GET threads.json and seed the thread cache. Same bounded retry as
+     * {@link #loadSteps} for the same reason — a transient blip on attach
+     * shouldn't leave every step's thread pane empty.
+     */
+    private void seedThreads(String sid, long gen) {
+        for (int attempt = 0; attempt < 3 && !closed && gen == sseGen.get(); attempt++) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/threads.json"))
+                    .timeout(REQUEST_TIMEOUT).GET().build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200) {
+                    JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
+                    for (var e : root.entrySet()) {
+                        JsonObject t = e.getValue().getAsJsonObject();
+                        applyThread(e.getKey(), toThreadState(t));
+                    }
+                    return;
+                }
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
@@ -337,13 +367,13 @@ public final class WalkthroughSessionClient {
     }
 
     private void runSse(String sid, URI uri, long gen) {
-        loadSteps(sid);
-        seedThreads(sid);
+        loadSteps(sid, gen);
+        seedThreads(sid, gen);
         if (gen != sseGen.get() || closed) return;
         if (!endedLatched) setState(State.ACTIVE);
         try {
             SseClient.connect(http, uri,
-                ev -> { if (gen == sseGen.get()) handleSseEvent(sid, ev); },
+                ev -> { if (gen == sseGen.get()) handleSseEvent(sid, ev, gen); },
                 t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
                            setState(State.DISCONNECTED); }
             ).join();
@@ -364,10 +394,10 @@ public final class WalkthroughSessionClient {
         }
     }
 
-    private void handleSseEvent(String sid, SseClient.Event e) {
+    private void handleSseEvent(String sid, SseClient.Event e, long gen) {
         String name = e.name();
         if ("steps-changed".equals(name)) {
-            loadSteps(sid);
+            loadSteps(sid, gen);
             return;
         }
         JsonObject data;
