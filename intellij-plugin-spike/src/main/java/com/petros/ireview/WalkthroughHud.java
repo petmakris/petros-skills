@@ -27,8 +27,7 @@ public final class WalkthroughHud {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0));
         panel.setOpaque(false);
         panel.add(new JBLabel((index + 1) + " / " + total + " · " + step.title()));
-        // TODO(Task 11): replace "" with WalkthroughActions.hintText() once that class exists.
-        panel.add(new JBLabel(""));
+        panel.add(new JBLabel(WalkthroughActions.hintText()));
         balloon = JBPopupFactory.getInstance()
             .createBalloonBuilder(panel)
             .setFadeoutTime(0)

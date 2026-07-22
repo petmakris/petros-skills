@@ -33,6 +33,8 @@
                     anchor="right"
                     icon="/icons/comment.svg"
                     factoryClass="com.petros.ireview.WalkthroughToolWindowFactory"/>
+        <statusBarWidgetFactory id="com.petros.ireview.walkthrough.mode"
+                                implementation="com.petros.ireview.WalkthroughModeWidgetFactory"/>
     </extensions>
 
     <actions>
@@ -58,6 +60,34 @@
                  ⌃⌥⇧/ is free and parallels this plugin's ⌃⌥⇧L (Prettify). -->
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift SLASH"/>
             <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift SLASH"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughNext"
+                class="com.petros.ireview.WalkthroughActions$Next"
+                text="Walkthrough: Next Step"
+                description="Move to the next step of the active walkthrough.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift RIGHT"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift RIGHT"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughPrev"
+                class="com.petros.ireview.WalkthroughActions$Prev"
+                text="Walkthrough: Previous Step"
+                description="Move to the previous step of the active walkthrough.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift LEFT"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift LEFT"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughAsk"
+                class="com.petros.ireview.WalkthroughActions$Ask"
+                text="Walkthrough: Ask About This Step"
+                description="Ask Claude a question about the active walkthrough step.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift A"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift A"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughToggleMode"
+                class="com.petros.ireview.WalkthroughActions$ToggleMode"
+                text="Walkthrough: Toggle Rail / Inline"
+                description="Switch the walkthrough between the tool window and inline editor cards.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift W"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift W"/>
         </action>
     </actions>
 </idea-plugin>
