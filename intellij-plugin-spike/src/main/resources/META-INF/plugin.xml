@@ -19,6 +19,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <diff.DiffExtension implementation="com.petros.ireview.SpikeDiffExtension"/>
         <editorFactoryListener implementation="com.petros.ireview.WorkingCopyAskGutter"/>
+        <editorFactoryListener implementation="com.petros.ireview.WalkthroughGutter"/>
 <projectService serviceImplementation="com.petros.ireview.ReviewSessionService"/>
         <applicationService serviceImplementation="com.petros.ireview.ShortcutPrefs"/>
         <statusBarWidgetFactory id="com.petros.ireview.statusbar"
