@@ -26,6 +26,7 @@ public final class WalkthroughService implements Disposable {
 
     private final WalkthroughSessionClient client;
     private final WalkthroughController controller;
+    private final WalkthroughInlay inline;
 
     public WalkthroughService(Project project) {
         String baseUrl = resolveServerUrl();
@@ -35,12 +36,14 @@ public final class WalkthroughService implements Disposable {
             cwd != null ? cwd : System.getProperty("user.home"),
             Duration.ofSeconds(5));
         this.controller = new WalkthroughController(new WalkthroughNavigator.Ide(project));
+        this.inline = new WalkthroughInlay(project);
         this.controller.setMode(WalkthroughController.Mode.from(
             com.intellij.ide.util.PropertiesComponent.getInstance(project).getValue(MODE_KEY)));
         this.controller.addListener(new WalkthroughController.Listener() {
             @Override public void onModeChanged(WalkthroughController.Mode mode) {
                 com.intellij.ide.util.PropertiesComponent.getInstance(project)
                     .setValue(MODE_KEY, mode.key());
+                applyMode(mode);
             }
         });
         this.client.addListener(new WalkthroughSessionClient.Listener() {
@@ -50,6 +53,7 @@ public final class WalkthroughService implements Disposable {
             }
         });
         this.client.start();
+        applyMode(controller.mode());
     }
 
     public static WalkthroughService get(Project project) {
@@ -60,6 +64,8 @@ public final class WalkthroughService implements Disposable {
 
     public WalkthroughController controller() { return controller; }
 
+    public WalkthroughInlay inline() { return inline; }
+
     /** Post a question on the currently active step. */
     public CompletableFuture<Void> askCurrentStep(String text) {
         return controller.current()
@@ -68,7 +74,21 @@ public final class WalkthroughService implements Disposable {
                 new IllegalStateException("no active step")));
     }
 
-    @Override public void dispose() { client.stop(); }
+    /** Exactly one renderer is live: INLINE owns the inlay, RAIL owns the panel. */
+    private void applyMode(WalkthroughController.Mode mode) {
+        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+            if (mode == WalkthroughController.Mode.INLINE) {
+                inline.attach();
+            } else {
+                inline.detach();
+            }
+        });
+    }
+
+    @Override public void dispose() {
+        inline.detach();
+        client.stop();
+    }
 
     /** Read the walkthrough server URL from ~/.claude/walkthrough/server.json. */
     private static String resolveServerUrl() {
