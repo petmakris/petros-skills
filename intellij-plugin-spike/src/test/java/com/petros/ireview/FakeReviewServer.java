@@ -22,6 +22,8 @@ public final class FakeReviewServer implements AutoCloseable {
     public final ConcurrentLinkedQueue<String> sseQueue = new ConcurrentLinkedQueue<>();
     public volatile String sessionsJson = "[]";
     public volatile String threadsJson = "{}";
+    /** Body returned by GET /s/<sid>/steps.json. */
+    public volatile String stepsJson = "{\"steps\":[]}";
     /** Epoch seconds of the last watcher heartbeat returned by /poll; null → none yet (0). */
     public volatile Long watcherSeenAt = null;
     /** When true, /poll reports ended=true (terminal or watcher-dead past reap). */
@@ -59,6 +61,13 @@ public final class FakeReviewServer implements AutoCloseable {
     private void handleSession(HttpExchange ex) throws IOException {
         requests.add(ex);
         String path = ex.getRequestURI().getPath();
+        if (path.endsWith("/steps.json")) {
+            byte[] body = stepsJson.getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream os = ex.getResponseBody()) { os.write(body); }
+            return;
+        }
         if (path.endsWith("/threads.json")) {
             byte[] body = threadsJson.getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
