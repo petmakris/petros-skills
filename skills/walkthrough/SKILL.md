@@ -7,6 +7,7 @@ allowed-tools:
   - Write
   - Grep
   - Glob
+  - Monitor
 ---
 
 # /walkthrough — guided code tours in IntelliJ
@@ -55,9 +56,17 @@ session. Do this **before** exploring — the session directory is where the ste
 will be written, and creating it early means a slow exploration doesn't leave the
 user staring at nothing.
 
+Write the user's question to `~/.claude/walkthrough/.question.txt` using the `Write` tool
+so it never passes through the shell (the directory already exists because
+`ensure_server.sh` ran first and wrote `server.json` there). Then run:
+
 ```bash
 SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/walkthrough/server.json")))["url"])')
-BODY=$(CWD="$PWD" QUESTION="$QUESTION" KIND="$KIND" python3 -c 'import json,os; print(json.dumps({"cwd": os.environ["CWD"], "question": os.environ["QUESTION"], "kind": os.environ.get("KIND") or "explain"}))')
+BODY=$(CWD="$PWD" KIND="${KIND:-explain}" python3 -c '
+import json, os
+q = open(os.path.expanduser("~/.claude/walkthrough/.question.txt")).read().strip()
+print(json.dumps({"cwd": os.environ["CWD"], "question": q, "kind": os.environ["KIND"]}))
+')
 curl -sf -X POST "$SERVER_URL/api/sessions" \
   -H 'Content-Type: application/json' \
   -d "$BODY"
@@ -284,9 +293,11 @@ If the user says "scrap it" / "stop the walkthrough" while a watcher is armed:
   plainly and offer to regenerate.
 - **Malformed event payload** — no-op, but still write the `.ack` so the event
   isn't re-emitted forever.
-- **Question with special characters** — questions containing quotes or backslashes
-  are safely handled by the JSON construction method in "Create a session", which
-  uses `json.dumps` instead of shell interpolation. Do not simplify to `printf`.
+- **Question with special characters** — the question is written to a file with the
+  `Write` tool and never interpolated into a shell command or Python source, so
+  quotes, backslashes, backticks, and `$(...)` are all safe. Do not "simplify" this
+  into a shell-interpolated `printf`, `echo`, or assignment to `$QUESTION` — the
+  file routing is what keeps the question safe.
 
 ## Token budget
 
