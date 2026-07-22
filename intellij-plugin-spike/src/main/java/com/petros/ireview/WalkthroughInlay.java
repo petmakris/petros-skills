@@ -1,5 +1,6 @@
 package com.petros.ireview;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.Inlay;
 import com.intellij.openapi.editor.InlayProperties;
@@ -27,10 +28,16 @@ public final class WalkthroughInlay {
     private Inlay<?> currentInlay;
     private boolean attached;
 
+    // Controller callbacks may arrive off the EDT; refresh() touches the editor's
+    // inlay model, so bridge here the same way WalkthroughService/WalkthroughPanel do.
     private final WalkthroughController.Listener listener = new WalkthroughController.Listener() {
-        @Override public void onStepActivated(WalkthroughStep step, int index, int total) { refresh(); }
-        @Override public void onDocChanged(WalkthroughDoc doc) { refresh(); }
+        @Override public void onStepActivated(WalkthroughStep step, int index, int total) { invokeRefresh(); }
+        @Override public void onDocChanged(WalkthroughDoc doc) { invokeRefresh(); }
     };
+
+    private void invokeRefresh() {
+        ApplicationManager.getApplication().invokeLater(this::refresh);
+    }
 
     public WalkthroughInlay(Project project) {
         this.project = project;
