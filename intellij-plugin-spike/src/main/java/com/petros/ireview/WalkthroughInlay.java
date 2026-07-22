@@ -73,7 +73,7 @@ public final class WalkthroughInlay {
             .getSelectedTextEditor();
         if (editor == null) { hud.show(step, c.index(), c.size()); return; }
         VirtualFile vf = FileDocumentManager.getInstance().getFile(editor.getDocument());
-        if (vf == null || !vf.getPath().endsWith(step.file())) {
+        if (!WalkthroughNavigator.isStepFile(project, vf, step)) {
             // The editor is showing a different file — the controller's navigate
             // will land here again once the right file is open.
             hud.show(step, c.index(), c.size());
