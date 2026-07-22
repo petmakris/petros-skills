@@ -32,7 +32,7 @@ def test_required_sections_present():
 def test_generation_contract_states_the_hard_rules():
     text = SKILL.read_text()
     for rule in ["5–12 steps", "snippet", "execution order", "edit-site", "cross-block"]:
-        assert rule in text, f"generation contract missing rule: {rule}"
+        assert rule.lower() in text.lower(), f"generation contract missing rule: {rule}"
 
 
 def test_documents_step_anchor_form():

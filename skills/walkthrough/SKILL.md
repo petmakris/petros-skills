@@ -57,9 +57,10 @@ user staring at nothing.
 
 ```bash
 SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/walkthrough/server.json")))["url"])')
+BODY=$(CWD="$PWD" QUESTION="$QUESTION" KIND="$KIND" python3 -c 'import json,os; print(json.dumps({"cwd": os.environ["CWD"], "question": os.environ["QUESTION"], "kind": os.environ.get("KIND") or "explain"}))')
 curl -sf -X POST "$SERVER_URL/api/sessions" \
   -H 'Content-Type: application/json' \
-  -d "$(printf '{"cwd": "%s", "question": "%s", "kind": "%s"}' "$PWD" "$QUESTION" "$KIND")"
+  -d "$BODY"
 ```
 
 `kind` is `explain` or `diff`. The response contains `sid`, `slug`, `url`,
@@ -133,7 +134,7 @@ Hard rules. A tour that breaks one of these is a defect, not a style choice.
   best 12-step spine and say what you left out.
 - **Every step is a real anchor.** `file` + `line` + verbatim `snippet`. Never
   anchor to a file you did not `Read` in this turn. Never guess a line number.
-- **execution order, not file order.** Follow how control and data actually flow:
+- **Execution order, not file order.** Follow how control and data actually flow:
   entry point → gate → dispatch → implementation → data model → seam. Grouping
   steps by package is a failure mode.
 - **Each step earns its place.** The markdown says *what happens here* and *why it
@@ -145,7 +146,7 @@ Hard rules. A tour that breaks one of these is a defect, not a style choice.
 - **Link references inline.** `[evaluate](src/main/java/.../PreconditionRegistry.java:30)`
   for code, absolute URLs for tickets. The IDE renders these clickable.
 - **Titles ≤ 6 words**, plain-text noun phrases — they are rail rows and HUD text.
-- **cross-block re-pass.** After drafting all steps, re-read them together and fix
+- **Cross-block re-pass.** After drafting all steps, re-read them together and fix
   what only shows up in aggregate: a step repeating its neighbour, a jump with a
   missing bridge, a title that no longer matches its body, an ordering that only
   made sense while you were writing it. Do this **before** writing `steps.json` —
@@ -283,6 +284,9 @@ If the user says "scrap it" / "stop the walkthrough" while a watcher is armed:
   plainly and offer to regenerate.
 - **Malformed event payload** — no-op, but still write the `.ack` so the event
   isn't re-emitted forever.
+- **Question with special characters** — questions containing quotes or backslashes
+  are safely handled by the JSON construction method in "Create a session", which
+  uses `json.dumps` instead of shell interpolation. Do not simplify to `printf`.
 
 ## Token budget
 
