@@ -55,6 +55,21 @@ public final class WalkthroughPanel implements Disposable {
     private static final Font EXPLANATION_FONT = LABEL_FONT.asPlain();
     /** Path: monospaced, ~2pt smaller — recedes behind title and prose. */
     private static final Font PATH_FONT = JBUI.Fonts.create(Font.MONOSPACED, LABEL_FONT.getSize()).lessOn(2f);
+    /**
+     * The symbol chip's own type — one step up from {@link #PATH_FONT} (only
+     * 1pt below the base label instead of 2) so the pill text the owner
+     * flagged as "very very small" reads comfortably, while staying
+     * proportional to the platform's label font rather than a fixed size.
+     * Kept distinct from {@link #PATH_FONT}, which other, smaller elements
+     * (the status line, the stale marker) still use.
+     */
+    private static final Font SYMBOL_CHIP_FONT = JBUI.Fonts.create(Font.MONOSPACED, LABEL_FONT.getSize()).lessOn(1f);
+    /**
+     * The role tag badge's type — same nominal size as {@link #SYMBOL_CHIP_FONT}
+     * (never smaller, per spec) but sans-serif and bold so it still reads as
+     * a small label, not code.
+     */
+    private static final Font ROLE_TAG_FONT = JBUI.Fonts.label().lessOn(1f).asBold();
     /** Header strip (question + progress counter): small and quiet. */
     private static final Font HEADER_FONT = LABEL_FONT.lessOn(1f);
 
@@ -232,6 +247,7 @@ public final class WalkthroughPanel implements Disposable {
 
         JBLabel disc = new JBLabel(new RoleDisc(accent, index + 1, roleFilled(step.role()), visited));
         disc.setVerticalAlignment(SwingConstants.TOP);
+        disc.setToolTipText(roleTooltip(step.role()));
         p.add(disc, BorderLayout.WEST);
 
         JPanel textColumn = new JPanel();
@@ -244,10 +260,28 @@ public final class WalkthroughPanel implements Disposable {
         // never touches the title, only brightness does.
         title.setForeground(active ? UIUtil.getLabelForeground() : UIUtil.getContextHelpForeground());
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        textColumn.add(title);
+
+        // SEAM/EDIT_SITE get an explicit tag next to the title so the disc's
+        // colour coding is self-explanatory instead of a silent convention;
+        // CONTEXT is the default and stays untagged so it doesn't add noise
+        // to most rows. A horizontal Box (not a BorderLayout panel) so its own
+        // maximumLayoutSize stays bounded to its children instead of stretching
+        // to fill the row — see the row panel's own getMaximumSize override above.
+        Box titleRow = Box.createHorizontalBox();
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        titleRow.add(title);
+        String tagText = roleTagText(step.role());
+        if (tagText != null) {
+            titleRow.add(Box.createHorizontalStrut(JBUI.scale(6)));
+            RoleTag tag = new RoleTag(tagText, accent);
+            tag.setAlignmentX(Component.LEFT_ALIGNMENT);
+            titleRow.add(tag);
+        }
+        titleRow.add(Box.createHorizontalGlue());
+        textColumn.add(titleRow);
         textColumn.add(Box.createVerticalStrut(JBUI.scale(2)));
 
-        SymbolChip symbol = new SymbolChip(PATH_FONT);
+        SymbolChip symbol = new SymbolChip(SYMBOL_CHIP_FONT);
         symbol.setSymbol(WalkthroughSymbols.describe(project, step), step.file() + ":" + step.line());
         symbol.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -299,12 +333,62 @@ public final class WalkthroughPanel implements Disposable {
 
         p.add(textColumn, BorderLayout.CENTER);
 
-        p.addMouseListener(new java.awt.event.MouseAdapter() {
+        // Hand cursor over the whole row reads as clickable; children that
+        // don't set their own cursor (every leaf here except the active row's
+        // JEditorPane, which installs its own text cursor) inherit it from the
+        // row automatically, so this alone covers disc/title/chip/padding —
+        // no per-descendant cursor juggling needed.
+        if (!active) {
+            p.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+        wireRowActivation(p, p, index, active);
+        return p;
+    }
+
+    /**
+     * Wires {@code index}'s row so a click anywhere in it — disc, title, chip,
+     * padding, empty space to the right — activates the step, with a subtle
+     * hover highlight on inactive rows. AWT only ever delivers a mouse event
+     * to the single deepest component under the pointer; it never bubbles to
+     * ancestors on its own. So the listener has to be attached recursively to
+     * every descendant as the row is built, not just to {@code row} itself —
+     * otherwise only the gaps between children (not the children) would
+     * activate the step, which is exactly today's bug.
+     *
+     * <p>The one deliberate exception is the active row's explanation
+     * {@link JEditorPane}: it already routes its own link clicks through
+     * {@link SynthesisLinkRouter} via its own hyperlink listener, and it
+     * needs to keep handling its own text-selection drag undisturbed.
+     * {@link WalkthroughController#jumpTo} unconditionally rebuilds the whole
+     * step list — even when the target is already the active index — so
+     * wiring the pane too would tear it (and any in-progress selection or
+     * link click) down mid-gesture. Skipping it entirely means a click on its
+     * prose that isn't a link simply does nothing, which is the correct
+     * behaviour for a step that's already active.
+     */
+    private void wireRowActivation(Component c, JPanel row, int index, boolean active) {
+        if (c instanceof JEditorPane) return;
+        c.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override public void mouseClicked(java.awt.event.MouseEvent e) {
-                service.controller().jumpTo(index);
+                if (!active) service.controller().jumpTo(index);
+            }
+            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (active) return;
+                row.setOpaque(true);
+                row.setBackground(JBUI.CurrentTheme.List.Hover.background(false));
+                row.repaint();
+            }
+            @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                if (active) return;
+                row.setOpaque(false);
+                row.repaint();
             }
         });
-        return p;
+        if (c instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                wireRowActivation(child, row, index, active);
+            }
+        }
     }
 
     /**
@@ -429,6 +513,39 @@ public final class WalkthroughPanel implements Disposable {
         return role != WalkthroughStep.Role.CONTEXT;
     }
 
+    /**
+     * Uppercase badge text for the title row — only for the two roles the
+     * colour coding actually distinguishes. CONTEXT is the default state and
+     * stays untagged: tagging every row would be noise, not signal.
+     */
+    private static String roleTagText(WalkthroughStep.Role role) {
+        return switch (role) {
+            case SEAM -> "SEAM";
+            case EDIT_SITE -> "EDIT SITE";
+            case CONTEXT -> null;
+        };
+    }
+
+    /** One-sentence tooltip for the disc, spelling out what its colour means. */
+    private static String roleTooltip(WalkthroughStep.Role role) {
+        return switch (role) {
+            case SEAM -> "Seam — where behaviour is extended";
+            case EDIT_SITE -> "Edit site — where new code goes";
+            case CONTEXT -> "Context — explains existing behaviour";
+        };
+    }
+
+    /**
+     * {@code color} at a low, fixed opacity — derives the role tag's badge
+     * background from the same theme-aware role colour used everywhere else
+     * (see {@link #roleColor}) rather than a fresh literal, the same way
+     * {@link #mix} derives blended colours from platform colours elsewhere
+     * in this file.
+     */
+    private static Color withAlpha(Color color, int alpha) {
+        return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
+    }
+
     private void finish(boolean enableControls) {
         boolean live = enableControls
             && service.client().state() != WalkthroughSessionClient.State.ENDED
@@ -525,6 +642,58 @@ public final class WalkthroughPanel implements Disposable {
     }
 
     /**
+     * Small pill-shaped badge next to a step's title, naming its
+     * {@link WalkthroughStep.Role} in words so the disc's colour coding isn't
+     * the only cue — text in the role colour on a low-opacity tint of that
+     * same colour, never a solid fill, so it stays a badge rather than
+     * competing with the title for attention.
+     */
+    private static final class RoleTag extends JComponent {
+        private static final int PAD_H = JBUI.scale(6);
+        private static final int PAD_V = JBUI.scale(1);
+        private static final int ARC = JBUI.scale(4);
+        // A visible but low-opacity tint — enough to read as "coloured", not
+        // enough to compete with the disc or the active row's accent bar.
+        private static final int BACKGROUND_ALPHA = 38;
+
+        private final String text;
+        private final Color foreground;
+        private final Color background;
+
+        RoleTag(String text, Color roleColor) {
+            this.text = text;
+            this.foreground = roleColor;
+            this.background = withAlpha(roleColor, BACKGROUND_ALPHA);
+            setFont(ROLE_TAG_FONT);
+        }
+
+        @Override public Dimension getPreferredSize() {
+            FontMetrics fm = getFontMetrics(getFont());
+            return new Dimension(fm.stringWidth(text) + PAD_H * 2, fm.getHeight() + PAD_V * 2);
+        }
+
+        @Override public Dimension getMaximumSize() { return getPreferredSize(); }
+
+        @Override protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(background);
+                g.fillRoundRect(0, 0, getWidth(), getHeight(), ARC, ARC);
+
+                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                g.setFont(getFont());
+                g.setColor(foreground);
+                FontMetrics fm = g.getFontMetrics();
+                int ty = (getHeight() + fm.getAscent() - fm.getDescent()) / 2;
+                g.drawString(text, PAD_H, ty);
+            } finally {
+                g.dispose();
+            }
+        }
+    }
+
+    /**
      * Longest left-truncated ("…" + suffix) form of {@code s} that fits
      * {@code width} — {@code "…lTask()"} instead of {@code "completeTa…"} —
      * because the tail is what identifies a symbol or a path (the method
@@ -570,9 +739,11 @@ public final class WalkthroughPanel implements Disposable {
             Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*$");
 
         private static final int MAX_WIDTH = JBUI.scale(200);
-        private static final int PAD_H = JBUI.scale(6);
-        private static final int PAD_V = JBUI.scale(2);
-        private static final int ARC = JBUI.scale(6);
+        // Padding bumped alongside SYMBOL_CHIP_FONT (Fix: chip font was "very
+        // very small") so the larger text doesn't look cramped in its pill.
+        private static final int PAD_H = JBUI.scale(8);
+        private static final int PAD_V = JBUI.scale(4);
+        private static final int ARC = JBUI.scale(7);
 
         // Class name sits between the title and the disabled/path colour —
         // brighter than the method, dimmer than the title.
