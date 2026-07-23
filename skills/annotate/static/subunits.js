@@ -7,17 +7,27 @@
 // Claude applies the whole round in a single pass and acks once.
 //
 // Unit identity on the wire is the existing span format: the unit's
-// plain text as selected_text, plus prefix/suffix disambiguation when
-// that text occurs more than once in the block.
+// plain text as selected_text, plus prefix/suffix disambiguation (picked
+// via each unit's local occurrence ordinal) when that text occurs more
+// than once in the block. The ordinal itself never goes on the wire —
+// prefix/suffix is the wire-level disambiguator; ordinal is purely an
+// internal bookkeeping detail for telling same-text units apart in the
+// local marks store.
 (function () {
   const RID = document.body.dataset.responseId || "";
   const KEY = `annotate.round.${RID}`;
 
-  // marks: { [markKey]: {block_id, kind, selected_text, prefix?, suffix?, text?} }
-  // markKey = `${block_id}::${text}` (content, not offsets) —
-  // so a re-render (reconcile/version bump) re-applies surviving marks.
+  // marks: { [markKey]: {block_id, kind, selected_text, ordinal, prefix?, suffix?, text?} }
+  // markKey = `${block_id}::${text}::${ordinal}` — ordinal is the unit's
+  // 0-based position among same-text sub-units in its block, so two
+  // identical-text units (e.g. two "Done" list items) get distinct keys
+  // and a re-render (reconcile/version bump) re-applies surviving marks
+  // to the matching occurrence instead of colliding on one shared key.
   let marks = loadMarks();
-  // event_id of the in-flight submitted round, if any.
+  // event_id of the in-flight submitted round, if any. Also doubles as a
+  // synchronous in-flight guard: set to the "inflight" sentinel the moment
+  // submit is dispatched (before the promise resolves) so a fast double
+  // click can't fire two rounds.
   let pendingRound = null;
 
   function loadMarks() {
@@ -28,20 +38,40 @@
     try { localStorage.setItem(KEY, JSON.stringify(marks)); } catch {}
   }
 
-  const cssEsc = (s) => (window.CSS && CSS.escape)
-    ? CSS.escape(String(s))
-    : String(s).replace(/["\\\]]/g, "\\$&");
-
   function unitText(el) {
     return (el.textContent || "").replace(/\s+/g, " ").trim();
   }
-  function markKey(blockId, text) { return `${blockId}::${text}`; }
+  function markKey(blockId, text, ordinal) {
+    return `${blockId}::${text}::${ordinal}`;
+  }
+
+  // 0-based position of `el` among its block's sub-units that share the
+  // same normalized text. Recomputed on demand from the live DOM rather
+  // than cached, so it stays correct across reorders/re-decoration.
+  function unitOrdinal(el, text) {
+    const section = el.closest("section.block");
+    if (!section) return 0;
+    const same = Array.from(section.querySelectorAll(".sub-unit"))
+      .filter((u) => unitText(stripClone(u)) === text);
+    const idx = same.indexOf(el);
+    return idx === -1 ? same.length : idx;
+  }
 
   function occurrences(haystack, needle) {
     if (!needle) return 0;
     let n = 0, i = 0;
     while ((i = haystack.indexOf(needle, i)) !== -1) { n++; i += needle.length; }
     return n;
+  }
+
+  // Index of the (0-based) nth occurrence of `needle` in `haystack`, or -1.
+  function nthIndexOf(haystack, needle, n) {
+    let idx = -1;
+    for (let i = 0; i <= n; i++) {
+      idx = haystack.indexOf(needle, idx + 1);
+      if (idx === -1) return -1;
+    }
+    return idx;
   }
 
   // The four sub-unit types (spec decision: all four, one DOM walk).
@@ -53,7 +83,8 @@
     ":scope > pre",
     ":scope > table tbody tr",
     // markdown-it wraps tables bare (no wrapper div); some blocks nest the
-    // table under a figure/div via free HTML — cover one level down too.
+    // table under a div via free HTML. The descendant combinator here
+    // matches the table at any depth under that div, not just one level.
     ":scope > div table tbody tr",
   ].join(", ");
 
@@ -72,7 +103,6 @@
       el.classList.add("sub-unit");
       const strip = document.createElement("span");
       strip.className = "unit-strip";
-      strip.setAttribute("aria-hidden", "true");
       for (const [kind, glyph, title] of [
         ["agree", "✓", "Agree (no rewrite)"],
         ["dismiss", "✕", "Remove this item"],
@@ -100,12 +130,13 @@
 
   function toggleMark(el, blockId, kind) {
     const text = unitText(stripClone(el));
-    const key = markKey(blockId, text);
+    const ordinal = unitOrdinal(el, text);
+    const key = markKey(blockId, text, ordinal);
     const existing = marks[key];
     if (existing && existing.kind === kind) {
       delete marks[key];                      // undo
     } else {
-      marks[key] = buildMark(el, blockId, kind,
+      marks[key] = buildMark(el, blockId, kind, ordinal,
         existing && existing.kind === "comment" ? existing.text : "");
     }
     saveMarks();
@@ -121,18 +152,22 @@
     return c;
   }
 
-  function buildMark(el, blockId, kind, text) {
+  function buildMark(el, blockId, kind, ordinal, text) {
     const selected = unitText(stripClone(el));
-    const mark = { block_id: blockId, kind, selected_text: selected };
+    // `ordinal` is stored for internal bookkeeping only — never copied onto
+    // the wire payload (see submitRound's explicit field list).
+    const mark = { block_id: blockId, kind, selected_text: selected, ordinal };
     if (text) mark.text = text;
     const section = el.closest("section.block");
     if (section) {
       const blockText = unitText(stripClone(section));
       if (occurrences(blockText, selected) > 1) {
-        const idx = blockText.indexOf(selected);
-        mark.prefix = blockText.slice(Math.max(0, idx - 20), idx);
-        mark.suffix = blockText.slice(idx + selected.length,
-                                      idx + selected.length + 20);
+        const idx = nthIndexOf(blockText, selected, ordinal);
+        if (idx !== -1) {
+          mark.prefix = blockText.slice(Math.max(0, idx - 20), idx);
+          mark.suffix = blockText.slice(idx + selected.length,
+                                        idx + selected.length + 20);
+        }
       }
     }
     return mark;
@@ -140,7 +175,8 @@
 
   function applyMarkState(el, blockId) {
     const text = unitText(stripClone(el));
-    const m = marks[markKey(blockId, text)];
+    const ordinal = unitOrdinal(el, text);
+    const m = marks[markKey(blockId, text, ordinal)];
     if (m) el.dataset.mark = m.kind;
     else delete el.dataset.mark;
     const chip = el.querySelector(".unit-chip");
@@ -161,7 +197,8 @@
   function openComposer(el, blockId) {
     closeComposer();
     const text = unitText(stripClone(el));
-    const existing = marks[markKey(blockId, text)];
+    const ordinal = unitOrdinal(el, text);
+    const existing = marks[markKey(blockId, text, ordinal)];
     const wrap = document.createElement("span");
     wrap.className = "unit-composer";
     const input = document.createElement("input");
@@ -173,8 +210,8 @@
     pin.textContent = "Pin";
     const commit = () => {
       const v = input.value.trim();
-      const key = markKey(blockId, text);
-      if (v) marks[key] = Object.assign(buildMark(el, blockId, "comment", v));
+      const key = markKey(blockId, text, ordinal);
+      if (v) marks[key] = buildMark(el, blockId, "comment", ordinal, v);
       else delete marks[key];
       saveMarks();
       closeComposer();
@@ -200,7 +237,10 @@
   function renderDock() {
     let dock = document.getElementById("round-dock");
     const count = Object.keys(marks).length;
-    if (!count) { if (dock) dock.remove(); return; }
+    // Keep the dock alive while a round is in flight even if the user
+    // unmarks everything after Submit but before busy/consumed_events
+    // propagate back — otherwise it flashes away and reappears.
+    if (!count && !pendingRound) { if (dock) dock.remove(); return; }
     if (!dock) {
       dock = document.createElement("div");
       dock.id = "round-dock";
@@ -219,6 +259,7 @@
   }
 
   function submitRound() {
+    if (pendingRound) return;                 // synchronous double-click guard
     const reactions = Object.values(marks).map((m) => {
       const r = { kind: m.kind, block_id: m.block_id,
                   selected_text: m.selected_text,
@@ -227,11 +268,19 @@
       if (m.suffix !== undefined) r.suffix = m.suffix;
       return r;
     });
-    if (!reactions.length || pendingRound) return;
+    if (!reactions.length) return;
+    // Set the sentinel BEFORE the async call and repaint immediately so the
+    // button disables synchronously — closes the window where a fast
+    // double-click (or a click racing the first busy poll) fires two rounds.
+    pendingRound = "inflight";
+    renderDock();
     WebCompanion.api.submit({ type: "round", reactions }).then((res) => {
       pendingRound = res && res.event_id ? String(res.event_id) : null;
       renderDock();
-    }).catch(() => { renderDock(); });
+    }).catch(() => {
+      pendingRound = null;
+      renderDock();
+    });
   }
 
   function clearRound() {

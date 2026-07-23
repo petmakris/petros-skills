@@ -31,6 +31,19 @@ def test_subunits_skips_authored_annotate_ids():
     assert "data-annotate-id" in SUBUNITS_JS.read_text()
 
 
+def test_subunits_marks_are_ordinal_aware():
+    """Same-text units in one block must not collide on a shared markKey,
+    and the wire prefix/suffix must be computed for the clicked occurrence
+    (not always the first) — see design spec § "Duplicate unit text"."""
+    src = SUBUNITS_JS.read_text()
+    for needle in ("unitOrdinal", "nthIndexOf", "::${ordinal}"):
+        assert needle in src, f"subunits.js missing ordinal guard {needle!r}"
+    # The in-flight round id / sentinel must never leak the ordinal onto
+    # the wire payload built in submitRound.
+    assert "ordinal" not in src.split("function submitRound")[1].split(
+        "function clearRound")[0]
+
+
 def test_script_js_calls_decorate_on_both_render_paths():
     src = SCRIPT_JS.read_text()
     assert src.count("AnnotateSubunits.decorate") >= 2, \
