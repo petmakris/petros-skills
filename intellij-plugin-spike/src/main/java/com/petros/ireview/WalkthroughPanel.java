@@ -1,7 +1,10 @@
 package com.petros.ireview;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextField;
@@ -9,7 +12,6 @@ import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -30,7 +32,6 @@ public final class WalkthroughPanel implements Disposable {
     private final JBLabel status = new JBLabel(" ");
     private final JButton back = new JButton("◀ Back");
     private final JButton next = new JButton("Next ▶");
-    private final List<JComponent> rows = new ArrayList<>();
 
     private final WalkthroughController.Listener controllerListener =
         new WalkthroughController.Listener() {
@@ -93,7 +94,6 @@ public final class WalkthroughPanel implements Disposable {
 
     private void rebuild() {
         steps.removeAll();
-        rows.clear();
         WalkthroughController c = service.controller();
 
         if (c.mode() != WalkthroughController.Mode.RAIL) {
@@ -126,7 +126,12 @@ public final class WalkthroughPanel implements Disposable {
         JBLabel head = new JBLabel((index + 1) + ".  " + step.title());
         head.setFont(head.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN));
         head.setForeground(roleColor(step.role()));
-        JBLabel where = new JBLabel(step.file() + ":" + step.line());
+        // Resolving every step's snippet on every rebuild would be wasted work —
+        // only the active step's navigation target matters to the user right now,
+        // so that's the only one re-resolved against the live document.
+        String whereText = step.file() + ":" + step.line();
+        if (active && isStale(step)) whereText += "  (code changed here)";
+        JBLabel where = new JBLabel(whereText);
         where.setForeground(JBUI.CurrentTheme.Label.disabledForeground());
 
         JPanel headBox = new JPanel(new GridLayout(2, 1));
@@ -159,8 +164,21 @@ public final class WalkthroughPanel implements Disposable {
                 service.controller().jumpTo(index);
             }
         });
-        rows.add(p);
         return p;
+    }
+
+    /**
+     * Whether {@code step}'s snippet no longer matches nearby in its own open
+     * document — mirrors {@link WalkthroughInlay}'s check so the rail gives the
+     * same "code changed here" signal the inline card does.
+     */
+    private boolean isStale(WalkthroughStep step) {
+        VirtualFile vf = WalkthroughNavigator.resolveStepFile(project, step);
+        if (vf == null || vf.isDirectory()) return false;
+        Document document = FileDocumentManager.getInstance().getDocument(vf);
+        if (document == null) return false;
+        List<String> lines = List.of(document.getText().split("\n", -1));
+        return WalkthroughNavigator.resolveLine(lines, step).kind() == AnchorResolver.Kind.STALE;
     }
 
     /**

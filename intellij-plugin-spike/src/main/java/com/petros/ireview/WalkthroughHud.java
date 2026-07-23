@@ -3,6 +3,7 @@ package com.petros.ireview;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
@@ -24,6 +25,12 @@ public final class WalkthroughHud {
 
     public void show(WalkthroughStep step, int index, int total) {
         hide();
+        // The IDE frame may not be allocated yet (e.g. very early in project open);
+        // there is nothing sensible to anchor the balloon to, so just skip it.
+        IdeFrame ideFrame = WindowManager.getInstance().getIdeFrame(project);
+        if (ideFrame == null) return;
+        JComponent frame = (JComponent) ideFrame.getComponent();
+
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0));
         panel.setOpaque(false);
         panel.add(new JBLabel((index + 1) + " / " + total + " · " + step.title()));
@@ -35,8 +42,6 @@ public final class WalkthroughHud {
             .setHideOnKeyOutside(false)
             .setBorderInsets(JBUI.insets(4, 10))
             .createBalloon();
-        JComponent frame = (JComponent) WindowManager.getInstance()
-            .getIdeFrame(project).getComponent();
         Point at = new Point(frame.getWidth() / 2, frame.getHeight() - JBUI.scale(60));
         balloon.show(new RelativePoint(frame, at), Balloon.Position.above);
     }

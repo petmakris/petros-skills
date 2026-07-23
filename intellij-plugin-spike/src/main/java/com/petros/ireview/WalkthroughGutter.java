@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.event.EditorFactoryEvent;
 import com.intellij.openapi.editor.event.EditorFactoryListener;
 import com.intellij.openapi.editor.ex.EditorEx;
@@ -55,7 +56,9 @@ public final class WalkthroughGutter implements EditorFactoryListener {
     @Override public void editorCreated(@NotNull EditorFactoryEvent event) {
         Editor editor = event.getEditor();
         Project project = editor.getProject();
-        if (project == null || !(editor instanceof EditorEx)) return;
+        // Diff editors are handled separately (SpikeDiffExtension paints interactive-review's
+        // ask icon there); attaching here too would double every marker on those gutters.
+        if (project == null || !(editor instanceof EditorEx) || editor.getEditorKind() != EditorKind.MAIN_EDITOR) return;
         WalkthroughService service = WalkthroughService.get(project);
         ensureProjectListener(project, service);
         repaint(editor, service);
@@ -110,8 +113,11 @@ public final class WalkthroughGutter implements EditorFactoryListener {
             WalkthroughStep step = doc.steps().get(i);
             if (!WalkthroughNavigator.isStepFile(project, vf, step)) continue;
             AnchorResolver.Resolution res = WalkthroughNavigator.resolveLine(lines, step);
-            if (res.kind() == AnchorResolver.Kind.STALE) continue;
-            int line0 = res.line() - 1;
+            // A STALE snippet still gets a badge — at the recorded line, greyed —
+            // rather than vanishing. The click still jumps the controller to the
+            // step; the navigator safely no-ops when the anchor can't be resolved.
+            boolean stale = res.kind() == AnchorResolver.Kind.STALE;
+            int line0 = (stale ? step.line() : res.line()) - 1;
             if (line0 < 0 || line0 >= editor.getDocument().getLineCount()) continue;
             RangeHighlighter h = editor.getMarkupModel().addRangeHighlighter(
                 editor.getDocument().getLineStartOffset(line0),
@@ -119,7 +125,7 @@ public final class WalkthroughGutter implements EditorFactoryListener {
                 HighlighterLayer.LAST, null, HighlighterTargetArea.LINES_IN_RANGE);
             int index = i;
             boolean active = index == service.controller().index();
-            h.setGutterIconRenderer(new BadgeRenderer(step, index, active, service));
+            h.setGutterIconRenderer(new BadgeRenderer(step, index, active, stale, service));
             painted.add(h);
         }
         PAINTED.put(editor, painted);
@@ -129,21 +135,23 @@ public final class WalkthroughGutter implements EditorFactoryListener {
         private final WalkthroughStep step;
         private final int index;
         private final boolean active;
+        private final boolean stale;
         private final WalkthroughService service;
 
-        BadgeRenderer(WalkthroughStep step, int index, boolean active, WalkthroughService service) {
+        BadgeRenderer(WalkthroughStep step, int index, boolean active, boolean stale, WalkthroughService service) {
             this.step = step;
             this.index = index;
             this.active = active;
+            this.stale = stale;
             this.service = service;
         }
 
         @Override public @NotNull Icon getIcon() {
-            return new BadgeIcon(index + 1, step.role(), active);
+            return new BadgeIcon(index + 1, step.role(), active, stale);
         }
 
         @Override public String getTooltipText() {
-            return "Step " + (index + 1) + " — " + step.title();
+            return "Step " + (index + 1) + " — " + step.title() + (stale ? "  (code changed here)" : "");
         }
 
         @Override public AnAction getClickAction() {
@@ -155,34 +163,43 @@ public final class WalkthroughGutter implements EditorFactoryListener {
         }
 
         @Override public boolean equals(Object o) {
-            return o instanceof BadgeRenderer b && b.index == index && b.active == active;
+            return o instanceof BadgeRenderer b && b.index == index && b.active == active && b.stale == stale;
         }
 
-        @Override public int hashCode() { return index * 31 + (active ? 1 : 0); }
+        @Override public int hashCode() { return index * 31 + (active ? 1 : 0) + (stale ? 2 : 0); }
     }
 
-    /** Small filled circle with the step number; colour encodes the step's role. */
+    /** Small filled circle with the step number; colour encodes the step's role.
+     *  A stale anchor (snippet no longer found nearby) is painted grey regardless
+     *  of role, signalling "code changed here" without hiding the step. */
     private static final class BadgeIcon implements Icon {
         private final int number;
         private final WalkthroughStep.Role role;
         private final boolean active;
+        private final boolean stale;
 
-        BadgeIcon(int number, WalkthroughStep.Role role, boolean active) {
+        BadgeIcon(int number, WalkthroughStep.Role role, boolean active, boolean stale) {
             this.number = number;
             this.role = role;
             this.active = active;
+            this.stale = stale;
         }
 
         @Override public void paintIcon(Component c, Graphics g, int x, int y) {
             Graphics2D g2 = (Graphics2D) g.create();
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                Color fill = switch (role) {
-                    case SEAM -> new Color(0x35, 0x74, 0xF0);
-                    case EDIT_SITE -> new Color(0x1F, 0x9C, 0x5B);
-                    case CONTEXT -> new Color(0x8A, 0x8D, 0x93);
-                };
-                if (!active) fill = new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), 150);
+                Color fill;
+                if (stale) {
+                    fill = new Color(0x8A, 0x8D, 0x93, active ? 180 : 100);
+                } else {
+                    fill = switch (role) {
+                        case SEAM -> new Color(0x35, 0x74, 0xF0);
+                        case EDIT_SITE -> new Color(0x1F, 0x9C, 0x5B);
+                        case CONTEXT -> new Color(0x8A, 0x8D, 0x93);
+                    };
+                    if (!active) fill = new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), 150);
+                }
                 g2.setColor(fill);
                 g2.fillOval(x, y, getIconWidth(), getIconHeight());
                 g2.setColor(Color.WHITE);

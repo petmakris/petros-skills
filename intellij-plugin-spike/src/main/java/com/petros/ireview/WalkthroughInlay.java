@@ -24,37 +24,54 @@ import java.util.List;
 public final class WalkthroughInlay {
 
     private final Project project;
+    private final WalkthroughController controller;
+    private final WalkthroughSessionClient client;
     private final WalkthroughHud hud;
     private Inlay<?> currentInlay;
     private boolean attached;
 
     // Controller callbacks may arrive off the EDT; refresh() touches the editor's
     // inlay model, so bridge here the same way WalkthroughService/WalkthroughPanel do.
-    private final WalkthroughController.Listener listener = new WalkthroughController.Listener() {
+    private final WalkthroughController.Listener controllerListener = new WalkthroughController.Listener() {
         @Override public void onStepActivated(WalkthroughStep step, int index, int total) { invokeRefresh(); }
         @Override public void onDocChanged(WalkthroughDoc doc) { invokeRefresh(); }
+    };
+
+    // Thread/pending updates arrive out of band from the client (e.g. an answer
+    // landing while this step's card is showing) and must refresh the card the
+    // same way a step change does — otherwise INLINE mode never shows the
+    // "waiting for Claude…" line or the eventual answer without navigating away
+    // and back.
+    private final WalkthroughSessionClient.Listener clientListener = new WalkthroughSessionClient.Listener() {
+        @Override public void onThreadChanged(String anchor, WalkthroughSessionClient.ThreadState thread) { invokeRefresh(); }
+        @Override public void onPendingChanged(String anchor, boolean pending) { invokeRefresh(); }
+        @Override public void onDetached() { invokeRefresh(); }
     };
 
     private void invokeRefresh() {
         ApplicationManager.getApplication().invokeLater(this::refresh);
     }
 
-    public WalkthroughInlay(Project project) {
+    public WalkthroughInlay(Project project, WalkthroughController controller, WalkthroughSessionClient client) {
         this.project = project;
+        this.controller = controller;
+        this.client = client;
         this.hud = new WalkthroughHud(project);
     }
 
     public void attach() {
         if (attached) return;
         attached = true;
-        WalkthroughService.get(project).controller().addListener(listener);
+        controller.addListener(controllerListener);
+        client.addListener(clientListener);
         refresh();
     }
 
     public void detach() {
         if (!attached) return;
         attached = false;
-        WalkthroughService.get(project).controller().removeListener(listener);
+        controller.removeListener(controllerListener);
+        client.removeListener(clientListener);
         disposeInlay();
         hud.hide();
     }
@@ -63,8 +80,7 @@ public final class WalkthroughInlay {
     public void refresh() {
         disposeInlay();
         if (!attached) return;
-        WalkthroughService service = WalkthroughService.get(project);
-        WalkthroughController c = service.controller();
+        WalkthroughController c = controller;
         var maybeStep = c.current();
         if (maybeStep.isEmpty()) { hud.hide(); return; }
         WalkthroughStep step = maybeStep.get();
@@ -86,10 +102,10 @@ public final class WalkthroughInlay {
             Math.min(Math.max(0, line - 1), editor.getDocument().getLineCount() - 1));
 
         String body = step.markdown();
-        var thread = service.client().threadFor(step.anchor());
+        var thread = client.threadFor(step.anchor());
         if (thread.isPresent()) {
             body = body + "\n\nYou · " + thread.get().question() + "\n" + thread.get().synthesis();
-        } else if (service.client().isPending(step.anchor())) {
+        } else if (client.isPending(step.anchor())) {
             body = body + "\n\n● waiting for Claude…";
         }
         String header = "Step " + (c.index() + 1) + " of " + c.size() + " — " + step.title()

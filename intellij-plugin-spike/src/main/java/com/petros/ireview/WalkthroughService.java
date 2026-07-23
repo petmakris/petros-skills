@@ -36,7 +36,7 @@ public final class WalkthroughService implements Disposable {
             cwd != null ? cwd : System.getProperty("user.home"),
             Duration.ofSeconds(5));
         this.controller = new WalkthroughController(new WalkthroughNavigator.Ide(project));
-        this.inline = new WalkthroughInlay(project);
+        this.inline = new WalkthroughInlay(project, controller, client);
         this.controller.setMode(WalkthroughController.Mode.from(
             com.intellij.ide.util.PropertiesComponent.getInstance(project).getValue(MODE_KEY)));
         this.controller.addListener(new WalkthroughController.Listener() {

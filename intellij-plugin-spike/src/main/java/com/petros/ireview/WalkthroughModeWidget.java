@@ -1,7 +1,6 @@
 package com.petros.ireview;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.StatusBarWidget;
 import com.intellij.util.Consumer;
@@ -17,18 +16,18 @@ public final class WalkthroughModeWidget implements StatusBarWidget, StatusBarWi
 
     public static final String WIDGET_ID = "com.petros.ireview.walkthrough.mode";
 
-    private final Project project;
+    private final WalkthroughController controller;
     private final WalkthroughController.Listener listener;
     private StatusBar statusBar;
 
-    public WalkthroughModeWidget(Project project) {
-        this.project = project;
+    public WalkthroughModeWidget(WalkthroughController controller) {
+        this.controller = controller;
         this.listener = new WalkthroughController.Listener() {
             @Override public void onModeChanged(WalkthroughController.Mode mode) { update(); }
             @Override public void onDocChanged(WalkthroughDoc doc) { update(); }
             @Override public void onStepActivated(WalkthroughStep step, int index, int total) { update(); }
         };
-        WalkthroughService.get(project).controller().addListener(listener);
+        controller.addListener(listener);
     }
 
     @Override public @NotNull String ID() { return WIDGET_ID; }
@@ -37,13 +36,12 @@ public final class WalkthroughModeWidget implements StatusBarWidget, StatusBarWi
 
     @Override public void dispose() {
         statusBar = null;
-        WalkthroughService.get(project).controller().removeListener(listener);
+        controller.removeListener(listener);
     }
 
     @Override public @NotNull String getText() {
-        WalkthroughController c = WalkthroughService.get(project).controller();
-        if (c.doc().isEmpty()) return "Walkthrough: —";
-        return "Walkthrough: " + c.mode().key() + " " + (c.index() + 1) + "/" + c.size();
+        if (controller.doc().isEmpty()) return "Walkthrough: —";
+        return "Walkthrough: " + controller.mode().key() + " " + (controller.index() + 1) + "/" + controller.size();
     }
 
     @Override public float getAlignment() { return 0.5f; }
@@ -51,12 +49,9 @@ public final class WalkthroughModeWidget implements StatusBarWidget, StatusBarWi
     @Override public @NotNull String getTooltipText() { return "Click to switch rail / inline"; }
 
     @Override public Consumer<MouseEvent> getClickConsumer() {
-        return e -> {
-            WalkthroughController c = WalkthroughService.get(project).controller();
-            c.setMode(c.mode() == WalkthroughController.Mode.RAIL
-                ? WalkthroughController.Mode.INLINE
-                : WalkthroughController.Mode.RAIL);
-        };
+        return e -> controller.setMode(controller.mode() == WalkthroughController.Mode.RAIL
+            ? WalkthroughController.Mode.INLINE
+            : WalkthroughController.Mode.RAIL);
     }
 
     @Override public StatusBarWidget.WidgetPresentation getPresentation() { return this; }
