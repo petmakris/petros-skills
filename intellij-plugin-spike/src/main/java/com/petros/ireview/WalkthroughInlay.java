@@ -41,8 +41,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Mode B renderer: one block inlay under the active step's anchor line, holding
- * the step's explanation and its latest Claude reply.
+ * Inline renderer, complementary to the rail panel: one block inlay under the
+ * active step's anchor line, holding the step's explanation and its latest
+ * Claude reply. Shown/hidden via the rail panel's toggle (or the toggle action).
  *
  * Exactly one inlay exists at a time — {@link #refresh()} disposes the previous
  * one before creating the next, so stepping never leaves cards behind.
@@ -59,12 +60,18 @@ public final class WalkthroughInlay {
 
     private static final Logger LOG = Logger.getInstance(WalkthroughInlay.class);
 
+    /** Persisted per-project offset the card's +/- buttons apply to the editor-derived font size. */
+    private static final String FONT_DELTA_KEY = "com.petros.ireview.walkthrough.inline.fontDelta";
+    private static final int FONT_DELTA_MIN = -6;
+    private static final int FONT_DELTA_MAX = 12;
+
     private final Project project;
     private final WalkthroughController controller;
     private final WalkthroughSessionClient client;
     private final WalkthroughHud hud;
     private Inlay<?> currentInlay;
     private boolean attached;
+    private int fontDelta;
     private MessageBusConnection editorConnection;
 
     // Controller callbacks may arrive off the EDT; refresh() touches the editor's
@@ -103,6 +110,18 @@ public final class WalkthroughInlay {
         this.controller = controller;
         this.client = client;
         this.hud = new WalkthroughHud(controller);
+        this.fontDelta = com.intellij.ide.util.PropertiesComponent.getInstance(project)
+            .getInt(FONT_DELTA_KEY, 0);
+    }
+
+    /** Nudge the card's font by {@code change} points; the card rebuilds at the new size. */
+    private void bumpFont(int change) {
+        int next = Math.max(FONT_DELTA_MIN, Math.min(FONT_DELTA_MAX, fontDelta + change));
+        if (next == fontDelta) return;
+        fontDelta = next;
+        com.intellij.ide.util.PropertiesComponent.getInstance(project)
+            .setValue(FONT_DELTA_KEY, fontDelta, 0);
+        refresh();
     }
 
     public void attach() {
@@ -178,7 +197,8 @@ public final class WalkthroughInlay {
             + (stale ? " · code changed here" : "");
 
         WalkthroughCard card = new WalkthroughCard(
-            project, editor, step.title(), meta, body, step.role(), anchorLineText);
+            project, editor, step.title(), meta, body, step.role(), anchorLineText,
+            fontDelta, this::bumpFont);
 
         currentInlay = EditorEmbeddedComponentManager.getInstance().addComponent(
             editorEx,
@@ -264,8 +284,12 @@ public final class WalkthroughInlay {
         private static final int RIGHT_MARGIN = JBUI.scale(16);
         // "roughly 70-80 characters of body text" — measured in the body font.
         private static final int MAX_BODY_CHARS = 78;
+        private static final int FONT_BTN_SIZE = JBUI.scale(18);
+        private static final int FONT_BTN_GAP = JBUI.scale(4);
 
         private final JEditorPane bodyPane;
+        private final FontButton fontMinus;
+        private final FontButton fontPlus;
         private final String title;
         private final String meta;
         private final Color roleColor;
@@ -285,7 +309,8 @@ public final class WalkthroughInlay {
         private final int cardHeight;
 
         WalkthroughCard(Project project, Editor editor, String title, String meta, String bodyMarkdown,
-                         WalkthroughStep.Role role, String anchorLineText) {
+                         WalkthroughStep.Role role, String anchorLineText,
+                         int fontDelta, java.util.function.IntConsumer fontBump) {
             setLayout(null);
             setOpaque(false);
             setFocusable(false);
@@ -299,18 +324,22 @@ public final class WalkthroughInlay {
             // invisible" problem (WalkthroughHud made the same fix for its pill).
             this.metaColor = UIUtil.getContextHelpForeground();
 
-            // --- Type scale: derived from the *editor's* font, not the UI's ---
+            // --- Type scale: derived from the *editor's* font, not the UI's,
+            // then shifted by the user's persisted +/- adjustment ---
             EditorColorsScheme scheme = editor.getColorsScheme();
-            int editorSize = Math.max(9, scheme.getEditorFontSize());
+            int editorSize = Math.max(9, scheme.getEditorFontSize() + fontDelta);
             JBFont bodyFont = JBUI.Fonts.create(Font.SANS_SERIF, editorSize).asPlain();
             this.titleFont = bodyFont.asBold().biggerOn(1f);
             this.metaFont = bodyFont.lessOn(2f);
 
-            // Card fill: a subtle tint of the editor's own background, not a
-            // fixed literal — stays legible (and distinct from the editor
-            // behind it) in both light and dark themes.
-            this.cardBg = mix(scheme.getDefaultBackground(), UIUtil.getLabelForeground(), 0.045f);
-            this.cardBorder = JBColor.border();
+            // Card fill: a tint of the editor's own background toward the
+            // foreground, not a fixed literal — stays legible in both themes.
+            // Strong enough (9%) that on a dark editor the card reads as its
+            // own surface rather than more black on black.
+            this.cardBg = mix(scheme.getDefaultBackground(), UIUtil.getLabelForeground(), 0.09f);
+            // Border lifted the same way — the theme's hairline alone
+            // disappeared against a dark editor.
+            this.cardBorder = mix(JBColor.border(), UIUtil.getLabelForeground(), 0.25f);
 
             // --- Geometry: indent to the anchor line's text column, cap width ---
             Component metrics = editor.getContentComponent();
@@ -339,9 +368,17 @@ public final class WalkthroughInlay {
             bodyPane.setSize(new Dimension(innerWidth, Short.MAX_VALUE));
             this.bodyHeight = Math.max(1, bodyPane.getPreferredSize().height);
 
+            // Font controls sit in the header's top-right corner, before the
+            // meta text. Real child components (like bodyPane), not painted
+            // glyphs, so they get their own hover/tooltip/click handling.
+            this.fontMinus = new FontButton("−", "Smaller card text", metaColor, () -> fontBump.accept(-1));
+            this.fontPlus = new FontButton("+", "Larger card text", metaColor, () -> fontBump.accept(1));
+            add(fontMinus);
+            add(fontPlus);
+
             FontMetrics titleFm = metrics.getFontMetrics(titleFont);
             FontMetrics metaFm = metrics.getFontMetrics(metaFont);
-            this.headerHeight = Math.max(titleFm.getHeight(), metaFm.getHeight());
+            this.headerHeight = Math.max(Math.max(titleFm.getHeight(), metaFm.getHeight()), FONT_BTN_SIZE);
 
             this.cardX = indent + SHADOW_SPAN;
             this.cardY = SHADOW_SPAN;
@@ -370,6 +407,12 @@ public final class WalkthroughInlay {
             int bodyX = cardX + EDGE_W + PAD_X;
             int bodyY = cardY + PAD_TOP + headerHeight + HEADER_GAP;
             bodyPane.setBounds(bodyX, bodyY, innerWidth, bodyHeight);
+
+            int btnY = cardY + PAD_TOP + (headerHeight - FONT_BTN_SIZE) / 2;
+            int plusX = cardX + cardWidth - PAD_X - FONT_BTN_SIZE;
+            int minusX = plusX - FONT_BTN_GAP - FONT_BTN_SIZE;
+            fontMinus.setBounds(minusX, btnY, FONT_BTN_SIZE, FONT_BTN_SIZE);
+            fontPlus.setBounds(plusX, btnY, FONT_BTN_SIZE, FONT_BTN_SIZE);
         }
 
         @Override protected void paintComponent(Graphics g0) {
@@ -408,15 +451,17 @@ public final class WalkthroughInlay {
                 int rightEdge = cardX + cardWidth - PAD_X;
                 int headerY = cardY + PAD_TOP;
 
+                // Meta text sits left of the +/- font buttons at the right edge.
+                int metaRight = rightEdge - (FONT_BTN_SIZE * 2 + FONT_BTN_GAP) - TITLE_META_GAP;
                 g.setFont(metaFont);
                 FontMetrics metaFm = g.getFontMetrics();
                 int metaWidth = metaFm.stringWidth(meta);
                 g.setColor(metaColor);
-                g.drawString(meta, rightEdge - metaWidth, headerY + metaFm.getAscent());
+                g.drawString(meta, metaRight - metaWidth, headerY + metaFm.getAscent());
 
                 g.setFont(titleFont);
                 FontMetrics titleFm = g.getFontMetrics();
-                int titleBudget = Math.max(JBUI.scale(20), rightEdge - textX - metaWidth - TITLE_META_GAP);
+                int titleBudget = Math.max(JBUI.scale(20), metaRight - metaWidth - TITLE_META_GAP - textX);
                 String fittedTitle = truncateEnd(title, titleFm, titleBudget);
                 g.setColor(titleColor);
                 g.drawString(fittedTitle, textX, headerY + titleFm.getAscent());
@@ -499,6 +544,52 @@ public final class WalkthroughInlay {
 
         private static String toHex(Color c) {
             return String.format("#%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
+        }
+
+        /**
+         * A small square +/- control in the card header. A hand-painted
+         * {@link javax.swing.JComponent} rather than a {@link javax.swing.JButton}
+         * so it stays chrome-free inside the card and never grabs focus from
+         * the editor (the whole card is non-focusable by design).
+         */
+        private static final class FontButton extends javax.swing.JComponent {
+            private final String glyph;
+            private final Color foreground;
+            private boolean hover;
+
+            FontButton(String glyph, String tooltip, Color foreground, Runnable onClick) {
+                this.glyph = glyph;
+                this.foreground = foreground;
+                setToolTipText(tooltip);
+                setFocusable(false);
+                setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+                addMouseListener(new java.awt.event.MouseAdapter() {
+                    @Override public void mouseClicked(java.awt.event.MouseEvent e) { onClick.run(); }
+                    @Override public void mouseEntered(java.awt.event.MouseEvent e) { hover = true; repaint(); }
+                    @Override public void mouseExited(java.awt.event.MouseEvent e) { hover = false; repaint(); }
+                });
+            }
+
+            @Override protected void paintComponent(Graphics g0) {
+                Graphics2D g = (Graphics2D) g0.create();
+                try {
+                    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                    if (hover) {
+                        Color base = UIUtil.getLabelForeground();
+                        g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 36));
+                        g.fillRoundRect(0, 0, getWidth(), getHeight(), JBUI.scale(4), JBUI.scale(4));
+                    }
+                    g.setFont(JBUI.Fonts.label().asBold());
+                    g.setColor(foreground);
+                    FontMetrics fm = g.getFontMetrics();
+                    int tx = (getWidth() - fm.stringWidth(glyph)) / 2;
+                    int ty = (getHeight() + fm.getAscent() - fm.getDescent()) / 2;
+                    g.drawString(glyph, tx, ty);
+                } finally {
+                    g.dispose();
+                }
+            }
         }
 
         /** Right-truncating ellipsis fit — the header title reads left to right. */

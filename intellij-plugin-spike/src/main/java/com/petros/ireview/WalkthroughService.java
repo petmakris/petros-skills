@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 @Service(Service.Level.PROJECT)
 public final class WalkthroughService implements Disposable {
 
-    private static final String MODE_KEY = "com.petros.ireview.walkthrough.mode";
+    private static final String INLINE_VISIBLE_KEY = "com.petros.ireview.walkthrough.inline.visible";
 
     private final WalkthroughSessionClient client;
     private final WalkthroughController controller;
@@ -37,13 +37,13 @@ public final class WalkthroughService implements Disposable {
             Duration.ofSeconds(5));
         this.controller = new WalkthroughController(new WalkthroughNavigator.Ide(project));
         this.inline = new WalkthroughInlay(project, controller, client);
-        this.controller.setMode(WalkthroughController.Mode.from(
-            com.intellij.ide.util.PropertiesComponent.getInstance(project).getValue(MODE_KEY)));
+        this.controller.setInlineVisible(com.intellij.ide.util.PropertiesComponent
+            .getInstance(project).getBoolean(INLINE_VISIBLE_KEY, true));
         this.controller.addListener(new WalkthroughController.Listener() {
-            @Override public void onModeChanged(WalkthroughController.Mode mode) {
+            @Override public void onInlineVisibleChanged(boolean visible) {
                 com.intellij.ide.util.PropertiesComponent.getInstance(project)
-                    .setValue(MODE_KEY, mode.key());
-                applyMode(mode);
+                    .setValue(INLINE_VISIBLE_KEY, visible, true);
+                applyInlineVisible(visible);
             }
         });
         this.client.addListener(new WalkthroughSessionClient.Listener() {
@@ -53,7 +53,7 @@ public final class WalkthroughService implements Disposable {
             }
         });
         this.client.start();
-        applyMode(controller.mode());
+        applyInlineVisible(controller.inlineVisible());
     }
 
     public static WalkthroughService get(Project project) {
@@ -74,10 +74,10 @@ public final class WalkthroughService implements Disposable {
                 new IllegalStateException("no active step")));
     }
 
-    /** Exactly one renderer is live: INLINE owns the inlay, RAIL owns the panel. */
-    private void applyMode(WalkthroughController.Mode mode) {
+    /** The rail panel is always live; the inline card layers on top when visible. */
+    private void applyInlineVisible(boolean visible) {
         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
-            if (mode == WalkthroughController.Mode.INLINE) {
+            if (visible) {
                 inline.attach();
             } else {
                 inline.detach();

@@ -24,12 +24,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Mode A renderer: the whole step list, with the active step expanded to show
+ * The rail renderer: the whole step list, with the active step expanded to show
  * its explanation, its Q&amp;A thread and an ask box.
  *
- * Subscribes to the controller only while {@link WalkthroughController#mode()}
- * is RAIL; in INLINE mode it renders a one-line hint instead so the two
- * renderers are never both drawing.
+ * Always live — the inline editor card is a complementary layer, not a rival
+ * renderer, and its visibility is toggled from this panel's footer button.
  *
  * <p>Visual hierarchy ("V2 — Airy"): a coloured numbered disc carries role
  * colour so titles stay plain text; title outranks explanation which
@@ -122,12 +121,13 @@ public final class WalkthroughPanel implements Disposable {
     private final JBLabel status = new JBLabel(" ");
     private final JButton back = new JButton("◀ Back");
     private final JButton next = new JButton("Next ▶");
+    private final JButton inlineToggle = new JButton();
 
     private final WalkthroughController.Listener controllerListener =
         new WalkthroughController.Listener() {
             @Override public void onDocChanged(WalkthroughDoc doc) { invokeRebuild(); }
             @Override public void onStepActivated(WalkthroughStep step, int i, int total) { invokeRebuild(); }
-            @Override public void onModeChanged(WalkthroughController.Mode mode) { invokeRebuild(); }
+            @Override public void onInlineVisibleChanged(boolean visible) { invokeRebuild(); }
         };
 
     private final WalkthroughSessionClient.Listener clientListener =
@@ -157,6 +157,8 @@ public final class WalkthroughPanel implements Disposable {
         ask.setFont(EXPLANATION_FONT);
         back.setFont(EXPLANATION_FONT);
         next.setFont(EXPLANATION_FONT);
+        inlineToggle.setFont(EXPLANATION_FONT);
+        inlineToggle.setToolTipText("Show or hide the step card in the editor");
         status.setFont(PATH_FONT);
         status.setForeground(UIUtil.getLabelDisabledForeground());
 
@@ -165,6 +167,7 @@ public final class WalkthroughPanel implements Disposable {
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, scaled(6), 0));
         buttons.add(back);
         buttons.add(next);
+        buttons.add(inlineToggle);
         buttons.add(status);
         south.add(ask, BorderLayout.NORTH);
         south.add(buttons, BorderLayout.SOUTH);
@@ -175,6 +178,8 @@ public final class WalkthroughPanel implements Disposable {
 
         back.addActionListener(e -> service.controller().prev());
         next.addActionListener(e -> service.controller().next());
+        inlineToggle.addActionListener(e ->
+            service.controller().setInlineVisible(!service.controller().inlineVisible()));
         ask.addActionListener(e -> submitAsk());
 
         service.controller().addListener(controllerListener);
@@ -201,14 +206,8 @@ public final class WalkthroughPanel implements Disposable {
     private void rebuild() {
         steps.removeAll();
         WalkthroughController c = service.controller();
+        inlineToggle.setText(c.inlineVisible() ? "Hide Inline Card" : "Show Inline Card");
 
-        if (c.mode() != WalkthroughController.Mode.RAIL) {
-            header.setVisible(false);
-            steps.add(new JBLabel("Walkthrough is in inline mode — steps render in the editor."));
-            steps.add(Box.createVerticalGlue());
-            finish(false);
-            return;
-        }
         WalkthroughDoc doc = c.doc();
         if (doc.isEmpty()) {
             header.setVisible(false);

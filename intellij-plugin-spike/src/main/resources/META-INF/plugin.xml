@@ -85,8 +85,8 @@
         </action>
         <action id="com.petros.ireview.WalkthroughToggleMode"
                 class="com.petros.ireview.WalkthroughActions$ToggleMode"
-                text="Walkthrough: Toggle Rail / Inline"
-                description="Switch the walkthrough between the tool window and inline editor cards.">
+                text="Walkthrough: Show/Hide Inline Card"
+                description="Show or hide the walkthrough's inline step card in the editor.">
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift W"/>
             <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift W"/>
         </action>

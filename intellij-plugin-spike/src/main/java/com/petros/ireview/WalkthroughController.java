@@ -1,32 +1,20 @@
 package com.petros.ireview;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * The single source of truth for a walk: which step is active, which renderer is
- * showing it. Both renderers subscribe here; exactly one is attached at a time,
- * and switching renderers never disturbs the current index.
+ * The single source of truth for a walk: which step is active. The rail panel
+ * is always live; the inline card is a complementary layer over the editor
+ * whose visibility is toggled here — hiding it never disturbs the current
+ * index.
  */
 public final class WalkthroughController {
 
-    public enum Mode {
-        RAIL, INLINE;
-
-        public String key() { return name().toLowerCase(Locale.ROOT); }
-
-        /** Parse a persisted key; anything unrecognised falls back to RAIL. */
-        public static Mode from(String raw) {
-            if (raw == null) return RAIL;
-            return "inline".equalsIgnoreCase(raw.trim()) ? INLINE : RAIL;
-        }
-    }
-
     public interface Listener {
         default void onStepActivated(WalkthroughStep step, int index, int total) {}
-        default void onModeChanged(Mode mode) {}
+        default void onInlineVisibleChanged(boolean visible) {}
         default void onDocChanged(WalkthroughDoc doc) {}
     }
 
@@ -35,7 +23,7 @@ public final class WalkthroughController {
 
     private volatile WalkthroughDoc doc = WalkthroughDoc.EMPTY;
     private volatile int index = 0;
-    private volatile Mode mode = Mode.RAIL;
+    private volatile boolean inlineVisible = true;
 
     public WalkthroughController(WalkthroughNavigator navigator) {
         this.navigator = navigator;
@@ -52,7 +40,7 @@ public final class WalkthroughController {
         return (index >= 0 && index < steps.size()) ? Optional.of(steps.get(index)) : Optional.empty();
     }
 
-    public Mode mode() { return mode; }
+    public boolean inlineVisible() { return inlineVisible; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -83,11 +71,11 @@ public final class WalkthroughController {
         return i >= 0 && jumpTo(i);
     }
 
-    /** Switching renderers keeps the current step; no re-navigation. */
-    public void setMode(Mode next) {
-        if (next == null || next == mode) return;
-        mode = next;
-        for (Listener l : listeners) l.onModeChanged(mode);
+    /** Showing/hiding the inline card keeps the current step; no re-navigation. */
+    public void setInlineVisible(boolean visible) {
+        if (visible == inlineVisible) return;
+        inlineVisible = visible;
+        for (Listener l : listeners) l.onInlineVisibleChanged(inlineVisible);
     }
 
     private void activate() {

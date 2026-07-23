@@ -12,7 +12,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
 
-/** The four things a user does to a walkthrough: step, step back, ask, switch view. */
+/** The four things a user does to a walkthrough: step, step back, ask, toggle the inline card. */
 public final class WalkthroughActions {
 
     private WalkthroughActions() {}
@@ -25,7 +25,7 @@ public final class WalkthroughActions {
     /** Key legend for the HUD, read from the live keymap so it can never drift. */
     public static String hintText() {
         return shortcut(PREV_ID) + " back · " + shortcut(NEXT_ID) + " next · "
-             + shortcut(ASK_ID) + " ask · " + shortcut(TOGGLE_ID) + " view";
+             + shortcut(ASK_ID) + " ask · " + shortcut(TOGGLE_ID) + " card";
     }
 
     private static String shortcut(String actionId) {
@@ -82,15 +82,13 @@ public final class WalkthroughActions {
         }
     }
 
-    /** Doesn't require an active tour to be usable: switching mode is always safe. */
+    /** Doesn't require an active tour to be usable: toggling the card is always safe. */
     public static final class ToggleMode extends AnAction {
         @Override public void actionPerformed(@NotNull AnActionEvent e) {
             Project p = e.getProject();
             if (p == null) return;
             WalkthroughController c = WalkthroughService.get(p).controller();
-            c.setMode(c.mode() == WalkthroughController.Mode.RAIL
-                ? WalkthroughController.Mode.INLINE
-                : WalkthroughController.Mode.RAIL);
+            c.setInlineVisible(!c.inlineVisible());
         }
 
         @Override public @NotNull ActionUpdateThread getActionUpdateThread() {

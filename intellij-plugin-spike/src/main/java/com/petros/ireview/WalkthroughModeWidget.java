@@ -1,16 +1,20 @@
 package com.petros.ireview;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.StatusBarWidget;
+import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.util.Consumer;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.event.MouseEvent;
 
 /**
- * Status-bar toggle: "Walkthrough: rail 3/7" / "Walkthrough: inline 3/7". Click
- * flips the renderer via the controller — no mode logic lives here.
+ * Status-bar progress indicator: "Walkthrough: 3/7". Click opens the
+ * Walkthrough tool window — the show/hide control for the inline card lives
+ * on that panel, not here.
  */
 public final class WalkthroughModeWidget implements StatusBarWidget, StatusBarWidget.TextPresentation {
 
@@ -23,7 +27,6 @@ public final class WalkthroughModeWidget implements StatusBarWidget, StatusBarWi
     public WalkthroughModeWidget(WalkthroughController controller) {
         this.controller = controller;
         this.listener = new WalkthroughController.Listener() {
-            @Override public void onModeChanged(WalkthroughController.Mode mode) { update(); }
             @Override public void onDocChanged(WalkthroughDoc doc) { update(); }
             @Override public void onStepActivated(WalkthroughStep step, int index, int total) { update(); }
         };
@@ -41,17 +44,20 @@ public final class WalkthroughModeWidget implements StatusBarWidget, StatusBarWi
 
     @Override public @NotNull String getText() {
         if (controller.doc().isEmpty()) return "Walkthrough: —";
-        return "Walkthrough: " + controller.mode().key() + " " + (controller.index() + 1) + "/" + controller.size();
+        return "Walkthrough: " + (controller.index() + 1) + "/" + controller.size();
     }
 
     @Override public float getAlignment() { return 0.5f; }
 
-    @Override public @NotNull String getTooltipText() { return "Click to switch rail / inline"; }
+    @Override public @NotNull String getTooltipText() { return "Click to open the Walkthrough panel"; }
 
     @Override public Consumer<MouseEvent> getClickConsumer() {
-        return e -> controller.setMode(controller.mode() == WalkthroughController.Mode.RAIL
-            ? WalkthroughController.Mode.INLINE
-            : WalkthroughController.Mode.RAIL);
+        return e -> {
+            Project project = statusBar != null ? statusBar.getProject() : null;
+            if (project == null) return;
+            ToolWindow tw = ToolWindowManager.getInstance(project).getToolWindow("Walkthrough");
+            if (tw != null) tw.activate(null);
+        };
     }
 
     @Override public StatusBarWidget.WidgetPresentation getPresentation() { return this; }

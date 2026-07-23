@@ -94,27 +94,27 @@ class WalkthroughControllerTest {
         assertTrue(nav.visited.isEmpty());
     }
 
-    @Test void modeSwitchPreservesIndexAndDoesNotRenavigate() {
+    @Test void hidingInlineCardPreservesIndexAndDoesNotRenavigate() {
         RecordingNavigator nav = new RecordingNavigator();
         WalkthroughController c = new WalkthroughController(nav);
         c.setDoc(doc(3));
         c.next();
         int before = nav.visited.size();
-        c.setMode(WalkthroughController.Mode.INLINE);
-        assertEquals(WalkthroughController.Mode.INLINE, c.mode());
+        c.setInlineVisible(false);
+        assertFalse(c.inlineVisible());
         assertEquals(1, c.index());
         assertEquals(before, nav.visited.size());
     }
 
-    @Test void listenersSeeActivationsAndModeChanges() {
+    @Test void listenersSeeActivationsAndInlineVisibilityChanges() {
         WalkthroughController c = new WalkthroughController(step -> {});
         List<String> events = new ArrayList<>();
         c.addListener(new WalkthroughController.Listener() {
             @Override public void onStepActivated(WalkthroughStep step, int index, int total) {
                 events.add("activate:" + step.id() + ":" + index + "/" + total);
             }
-            @Override public void onModeChanged(WalkthroughController.Mode mode) {
-                events.add("mode:" + mode);
+            @Override public void onInlineVisibleChanged(boolean visible) {
+                events.add("inline:" + visible);
             }
             @Override public void onDocChanged(WalkthroughDoc doc) {
                 events.add("doc:" + doc.steps().size());
@@ -122,25 +122,22 @@ class WalkthroughControllerTest {
         });
         c.setDoc(doc(2));
         c.next();
-        c.setMode(WalkthroughController.Mode.INLINE);
-        assertEquals(List.of("doc:2", "activate:1:0/2", "activate:2:1/2", "mode:INLINE"), events);
+        c.setInlineVisible(false);
+        assertEquals(List.of("doc:2", "activate:1:0/2", "activate:2:1/2", "inline:false"), events);
     }
 
-    @Test void modeParsesFromStoredKeyWithRailDefault() {
-        assertEquals(WalkthroughController.Mode.INLINE, WalkthroughController.Mode.from("inline"));
-        assertEquals(WalkthroughController.Mode.RAIL, WalkthroughController.Mode.from("rail"));
-        assertEquals(WalkthroughController.Mode.RAIL, WalkthroughController.Mode.from(null));
-        assertEquals(WalkthroughController.Mode.RAIL, WalkthroughController.Mode.from("nonsense"));
-        assertEquals("inline", WalkthroughController.Mode.INLINE.key());
+    @Test void inlineCardIsVisibleByDefault() {
+        WalkthroughController c = new WalkthroughController(step -> {});
+        assertTrue(c.inlineVisible());
     }
 
-    @Test void settingSameModeIsANoOp() {
+    @Test void settingSameInlineVisibilityIsANoOp() {
         WalkthroughController c = new WalkthroughController(step -> {});
         List<String> events = new ArrayList<>();
         c.addListener(new WalkthroughController.Listener() {
-            @Override public void onModeChanged(WalkthroughController.Mode mode) { events.add(mode.key()); }
+            @Override public void onInlineVisibleChanged(boolean visible) { events.add("inline:" + visible); }
         });
-        c.setMode(WalkthroughController.Mode.RAIL);
+        c.setInlineVisible(true);
         assertTrue(events.isEmpty());
     }
 }
