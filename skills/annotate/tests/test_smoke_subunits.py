@@ -86,3 +86,12 @@ def test_style_css_has_subunit_styles():
                    '[data-mark="agree"]', ".unit-chip", "#round-dock",
                    "body.is-busy .unit-strip"):
         assert needle in css, f"style.css missing {needle!r}"
+
+
+def test_style_css_unit_strip_wins_pointer_priority():
+    """The block-level .hover-actions strip and the granular .unit-strip are
+    both right-aligned and overlap on a block's first unit — the block strip
+    must yield pointer priority while a .sub-unit is actually hovered."""
+    css = STYLE_CSS.read_text()
+    assert ":has(.sub-unit:hover)" in css, \
+        "style.css missing the unit-strip-wins-over-block-strip :has() rule"

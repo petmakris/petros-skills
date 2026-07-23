@@ -825,6 +825,17 @@ body.is-busy .comment-card {
   opacity: 0; transition: opacity .12s ease;
 }
 .sub-unit:hover .unit-strip { opacity: 1; }
+/* Granular strip wins over the block-level strip when hovering a unit —
+   both are right-aligned (.hover-actions: top:4px/right:6px; .unit-strip:
+   top:2px/right:4px) and overlap on the first unit, so the block strip
+   would otherwise intercept clicks meant for the unit strip underneath it.
+   :has(.sub-unit:hover) only matches while the pointer is actually over a
+   .sub-unit, so hovering other block chrome (card head, margins, non-unit
+   content) is unaffected and the block strip still works there. */
+section.block:has(.sub-unit:hover) .hover-actions {
+  opacity: 0;
+  pointer-events: none;
+}
 .unit-strip button {
   width: 22px; height: 22px; padding: 0;
   border: 1px solid var(--border); border-radius: 5px;
