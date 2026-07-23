@@ -23,6 +23,7 @@ from skills.walkthrough import steps as steps_module
 SHARED_STATIC_DIR = Path(__file__).resolve().parent.parent / "_shared" / "web_companion" / "static"
 
 PORT_RANGE = range(54660, 54681)
+NEVER_ARMED_GRACE = 300  # s; no-heartbeat sessions older than this are dead
 BANNER = "walkthrough-server v1"
 
 IDE_PAGE = """<!DOCTYPE html>
@@ -46,6 +47,12 @@ def _is_terminal(state_dir: Path) -> bool:
 
 
 class Handlers:
+    # Lifecycle is owned server-side: each create cancels this Claude
+    # session's prior sessions, so a forgotten SKILL.md cleanup step can't
+    # leak watchers (annotate keeps this off — its workspaces are long-lived
+    # and multi-push by design).
+    supersede_by_claude_session = True
+
     def __init__(self):
         self._registry = None
 
@@ -159,6 +166,12 @@ class Handlers:
         waiter = self._registry.waiter(sid)
         while True:
             woke = waiter.wait(timeout=30)
+            if _is_terminal(state_dir):
+                # Tell the client the session is over and end the stream —
+                # otherwise this loop re-reads every thread file every 30s
+                # per connected client, forever.
+                emit("session-ended", {})
+                return
             steps_ts = steps_module.generated_ts(state_dir)
             if steps_ts != last_steps_ts:
                 last_steps_ts = steps_ts
@@ -225,7 +238,17 @@ class Handlers:
             hb = int((state_dir / "watcher_heartbeat").read_text().strip())
         except (FileNotFoundError, ValueError, OSError):
             hb = 0
-        age = (int(time.time()) - hb) if hb else None
+        # No beat ever written: fall back to creation age so a session whose
+        # Claude crashed before arming the watcher doesn't look live forever.
+        if hb:
+            age = int(time.time()) - hb
+        else:
+            try:
+                created = int(state_dir.stat().st_mtime)
+            except OSError:
+                created = int(time.time())
+            grace_age = int(time.time()) - created
+            age = grace_age if grace_age > NEVER_ARMED_GRACE else None
         cancelled = (state_dir / "cancelled").exists()
         finished = (state_dir / "finished").exists()
         dead = age is not None and age > wc_server.REAP_AFTER

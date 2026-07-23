@@ -24,6 +24,7 @@ from skills.interactive_review import threads as threads_module
 SHARED_STATIC_DIR = Path(__file__).resolve().parent.parent / "_shared" / "web_companion" / "static"
 
 PORT_RANGE = range(54620, 54641)
+NEVER_ARMED_GRACE = 300  # s; no-heartbeat sessions older than this are dead
 BANNER = "interactive-review-server v1"
 
 WARN_DIFF_BYTES = 1 * 1024 * 1024   # soft warning surfaced to the user
@@ -48,6 +49,12 @@ def _is_terminal(state_dir: Path) -> bool:
 
 
 class Handlers:
+    # Lifecycle is owned server-side: each create cancels this Claude
+    # session's prior sessions, so a forgotten SKILL.md cleanup step can't
+    # leak watchers (annotate keeps this off — its workspaces are long-lived
+    # and multi-push by design).
+    supersede_by_claude_session = True
+
     def __init__(self):
         self._registry = None
 
@@ -148,6 +155,16 @@ class Handlers:
                 return
         while True:
             woke = waiter.wait(timeout=30)
+            if _is_terminal(Path(dirs["state_dir"])):
+                # Tell the client the session is over and end the stream —
+                # otherwise this loop re-reads every thread file every 30s
+                # per connected client, forever.
+                try:
+                    h.wfile.write(b"event: session-ended\ndata: {}\n\n")
+                    h.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             # Always re-check threads — self-correcting against a missed wake
             new_threads = self.threads_bulk(dirs)
             # Deletions: anchors present last time but missing now.
@@ -240,14 +257,22 @@ class Handlers:
         hb_path = state_dir / "watcher_heartbeat"
         try:
             hb = int(hb_path.read_text().strip())
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, ValueError, OSError):
             hb = 0
         # Liveness: a session is ENDED if explicitly cancelled/finished, or if
-        # its watcher has been silent past REAP_AFTER. hb==0 means no beat yet
-        # (age unknown) -> not dead. The client latches ENDED and freezes the
-        # panel read-only; PAUSED (watcher_seen_at age 15-180s) is its own
-        # client-side styling derived from watcher_seen_at below.
-        age = (int(time.time()) - hb) if hb else None
+        # its watcher has been silent past REAP_AFTER. When no beat was ever
+        # written, fall back to the session's creation age (state_dir mtime):
+        # a session whose Claude crashed before arming the watcher must not
+        # look live forever.
+        if hb:
+            age = int(time.time()) - hb
+        else:
+            try:
+                created = int(state_dir.stat().st_mtime)
+            except OSError:
+                created = int(time.time())
+            grace_age = int(time.time()) - created
+            age = grace_age if grace_age > NEVER_ARMED_GRACE else None
         cancelled = (state_dir / "cancelled").exists()
         finished = (state_dir / "finished").exists()
         dead = age is not None and age > wc_server.REAP_AFTER

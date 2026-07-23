@@ -101,3 +101,55 @@ def test_attach_selfheal_reuses_same_slug(tmp_path):
     assert res2["slug"] == slug                 # exact reuse, no "-2" bump
     assert r.resolve(slug) == res2["sid"]        # slug now points at the NEW sid
     assert r.resolve(old_sid) is None            # old sid is gone from the registry
+
+def test_create_with_supersede_cancels_prior_sessions_of_same_claude_session(tmp_path):
+    r = Registry(tmp_path)
+    mk = lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid)
+    res1, _ = create_or_attach(
+        r, "annotate", {"title": "A", "claude_session_id": "cs-1"}, str(tmp_path),
+        mk, supersede=True)
+    res2, _ = create_or_attach(
+        r, "annotate", {"title": "B", "claude_session_id": "cs-1"}, str(tmp_path),
+        mk, supersede=True)
+    old_state = r.lookup(res1["sid"])["state_dir"]
+    new_state = r.lookup(res2["sid"])["state_dir"]
+    assert (old_state / "cancelled").exists()
+    assert not (new_state / "cancelled").exists()
+
+
+def test_supersede_leaves_other_claude_sessions_alone(tmp_path):
+    r = Registry(tmp_path)
+    mk = lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid)
+    res_other, _ = create_or_attach(
+        r, "annotate", {"title": "Other", "claude_session_id": "cs-other"},
+        str(tmp_path), mk, supersede=True)
+    create_or_attach(
+        r, "annotate", {"title": "Mine", "claude_session_id": "cs-mine"},
+        str(tmp_path), mk, supersede=True)
+    assert not (r.lookup(res_other["sid"])["state_dir"] / "cancelled").exists()
+
+
+def test_supersede_disabled_leaves_everything_alone(tmp_path):
+    r = Registry(tmp_path)
+    mk = lambda sid: _mkdirs(tmp_path / ".claude" / "annotate" / sid)
+    res1, _ = create_or_attach(
+        r, "annotate", {"title": "A", "claude_session_id": "cs-1"}, str(tmp_path), mk)
+    create_or_attach(
+        r, "annotate", {"title": "B", "claude_session_id": "cs-1"}, str(tmp_path), mk)
+    assert not (r.lookup(res1["sid"])["state_dir"] / "cancelled").exists()
+
+
+def test_failed_on_create_removes_orphan_tree(tmp_path):
+    r = Registry(tmp_path)
+    made = {}
+    def mk(sid):
+        dirs = _mkdirs(tmp_path / ".claude" / "annotate" / sid)
+        made["base"] = tmp_path / ".claude" / "annotate" / sid
+        return dirs
+    def boom(dirs):
+        raise RuntimeError("gh failed")
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError):
+        create_or_attach(r, "annotate", {"title": "X"}, str(tmp_path), mk, on_create=boom)
+    assert not made["base"].exists()
+    assert r.items() == []

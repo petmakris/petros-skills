@@ -651,3 +651,16 @@ def test_handle_submit_rejects_non_list_images(tmp_path):
         "anchor": "src/x.py:R:42", "type": "comment", "text": "x",
         "images": "nope"})
     handler.send_response.assert_called_with(400)
+
+
+def test_serve_poll_dead_when_never_armed_and_old(tmp_path, monkeypatch):
+    import os
+    h = Handlers()
+    dirs = make_dirs(tmp_path)
+    old = time.time() - 3600
+    os.utime(dirs["state_dir"], (old, old))
+    handler = make_handler()
+    h.serve_poll(handler, dirs)
+    body = json.loads(handler.wfile.getvalue().decode())
+    assert body["ended"] is True
+    assert body["ended_reason"] == "dead"
