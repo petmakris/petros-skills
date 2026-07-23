@@ -154,3 +154,67 @@ def test_entry_without_state_dir_is_preserved(tmp_path):
     out = sweep_state(state_root, RETENTION, now=1_000_000.0)
     assert out["sessions_removed"] == 0
     assert "weird" in json.loads((state_root / "sessions.json").read_text())
+
+
+def test_sweep_removes_dormant_unregistered_stray_dirs(tmp_path):
+    import json, os, time
+    from skills._shared.web_companion.cleanup import sweep_state
+    state_root = tmp_path / "root"
+    state_root.mkdir()
+    project = tmp_path / "proj" / ".claude" / "annotate"
+    reg_sid = "260101-000000-" + "a" * 16
+    stray_sid = "260101-000001-" + "b" * 16
+    now = time.time()
+    for sid in (reg_sid, stray_sid):
+        (project / sid / "state").mkdir(parents=True)
+    old = now - 30 * 86400
+    for sid in (reg_sid, stray_sid):
+        base = project / sid
+        os.utime(base / "state", (old, old))
+        os.utime(base, (old, old))
+    # registered session has fresh activity; stray has none
+    hb = project / reg_sid / "state" / "watcher_heartbeat"
+    hb.write_text(str(int(now)))
+    (state_root / "sessions.json").write_text(json.dumps({
+        reg_sid: {"state_dir": str(project / reg_sid / "state")}}))
+    summary = sweep_state(state_root, 7 * 86400, now)
+    assert (project / reg_sid).exists()
+    assert not (project / stray_sid).exists()
+    assert summary["sessions_removed"] == 1
+
+
+def test_sweep_keeps_recent_stray_and_non_sid_dirs(tmp_path):
+    import json, os, time
+    from skills._shared.web_companion.cleanup import sweep_state
+    state_root = tmp_path / "root"
+    state_root.mkdir()
+    project = tmp_path / "proj" / ".claude" / "annotate"
+    reg_sid = "260101-000000-" + "a" * 16
+    fresh_stray = "260101-000002-" + "c" * 16
+    now = time.time()
+    (project / reg_sid / "state").mkdir(parents=True)
+    (project / fresh_stray / "state").mkdir(parents=True)
+    (project / "not-a-sid").mkdir()
+    old = now - 30 * 86400
+    os.utime(project / "not-a-sid", (old, old))
+    (project / reg_sid / "state" / "watcher_heartbeat").write_text(str(int(now)))
+    (state_root / "sessions.json").write_text(json.dumps({
+        reg_sid: {"state_dir": str(project / reg_sid / "state")}}))
+    sweep_state(state_root, 7 * 86400, now)
+    assert (project / fresh_stray).exists()
+    assert (project / "not-a-sid").exists()
+
+
+def test_sweep_prunes_meta_rows_for_removed_sessions(tmp_path):
+    import json, time
+    from skills._shared.web_companion.cleanup import sweep_state
+    state_root = tmp_path / "root"
+    state_root.mkdir()
+    gone_sid = "260101-000000-" + "d" * 16
+    (state_root / "sessions.json").write_text(json.dumps({
+        gone_sid: {"state_dir": str(tmp_path / "missing" / gone_sid / "state")}}))
+    (state_root / "sessions_meta.json").write_text(json.dumps({
+        gone_sid: {"slug": "gone"}}))
+    sweep_state(state_root, 7 * 86400, time.time())
+    meta = json.loads((state_root / "sessions_meta.json").read_text())
+    assert meta == {}

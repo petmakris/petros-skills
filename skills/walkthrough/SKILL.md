@@ -65,9 +65,10 @@ SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser
 BODY=$(CWD="$PWD" KIND="${KIND:-explain}" python3 -c '
 import json, os
 q = open(os.path.expanduser("~/.claude/walkthrough/.question.txt")).read().strip()
-print(json.dumps({"cwd": os.environ["CWD"], "question": q, "kind": os.environ["KIND"]}))
+print(json.dumps({"cwd": os.environ["CWD"], "question": q, "kind": os.environ["KIND"],
+                  "claude_session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", "")}))
 ')
-curl -sf -X POST "$SERVER_URL/api/sessions" \
+curl -sf --max-time 90 -X POST "$SERVER_URL/api/sessions" \
   -H 'Content-Type: application/json' \
   -d "$BODY"
 ```
@@ -78,7 +79,10 @@ curl -sf -X POST "$SERVER_URL/api/sessions" \
 
 **One active tour per project.** If `/api/sessions?cwd=$PWD` already lists a
 walkthrough session, cancel it first (`POST /s/<old_sid>/api/cancel`) so the
-plugin switches cleanly instead of showing two tours.
+plugin switches cleanly instead of showing two tours. (Prior tours created by
+*this Claude session* — any cwd — are superseded server-side automatically:
+the create call above carries `claude_session_id`, and the server cancels
+this session's other non-terminal walkthroughs before returning.)
 
 ## Generate the steps
 
@@ -178,16 +182,15 @@ SID="<sid>" \
 STATE_DIR="<state_dir>" \
 EVENTS_DIR="<events_dir>" \
 CONSUMED_DIR="<consumed_dir>" \
+CLAUDE_SID="$CLAUDE_CODE_SESSION_ID" \
 "$PLUGIN_ROOT/skills/_shared/web_companion/watcher.sh"
 ```
 
 Banners: `WEBCOMPANION_EVENT skill=walkthrough sid=<sid> event_id=<id>`,
-`WEBCOMPANION_FINISHED`, `WEBCOMPANION_CANCELLED`. Each stdout line wakes you once;
-the watcher stays alive across many events.
-
-Then append a record to `~/.claude/walkthrough/pending-${CLAUDE_CODE_SESSION_ID}.json`
-with `{sid, question, state_dir, events_dir, consumed_dir}` so terminal
-cancellation can find it later.
+`WEBCOMPANION_FINISHED`, `WEBCOMPANION_CANCELLED`, and
+`WEBCOMPANION_DROPPED skill=walkthrough sid=<sid> event_id=<id>` (the watcher
+gave up re-emitting an event that was never acked). Each stdout line wakes you
+once; the watcher stays alive across many events.
 
 ## Mode D — handling a watcher event
 
@@ -246,13 +249,17 @@ offer to run a new `/walkthrough`.
 
 ### `WEBCOMPANION_FINISHED`
 
-1. Terminal: *"Walkthrough for `<question>` closed."*
-2. Remove the entry from the pending registry.
+Terminal: *"Walkthrough for `<question>` closed."*
 
 ### `WEBCOMPANION_CANCELLED`
 
-1. Terminal: *"Walkthrough for `<question>` cancelled."*
-2. Remove the entry from the pending registry.
+Terminal: *"Walkthrough for `<question>` cancelled."*
+
+### `WEBCOMPANION_DROPPED`
+
+An event went unanswered through every re-emit (an earlier wake-up was
+interrupted or compacted away). Tell the user plainly: *"A walkthrough
+question went unanswered and was dropped — please re-ask it on the step."*
 
 ## Response style guide
 
@@ -273,9 +280,15 @@ offer to run a new `/walkthrough`.
 
 If the user says "scrap it" / "stop the walkthrough" while a watcher is armed:
 
-1. Read `~/.claude/walkthrough/pending-${CLAUDE_CODE_SESSION_ID}.json`.
-2. For each entry: `printf '{"reason":"user-cancelled-terminal"}' > "$STATE_DIR/cancelled"`.
-3. The watcher emits `WEBCOMPANION_CANCELLED` on its next tick; handle per Mode D.
+```bash
+SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/walkthrough/server.json")))["url"])')
+curl -sf --max-time 10 -X POST "$SERVER_URL/api/cancel_for_claude_session" \
+  -H 'Content-Type: application/json' \
+  -d "{\"claude_session_id\": \"$CLAUDE_CODE_SESSION_ID\"}"
+```
+
+The server writes the cancellation markers; each armed watcher emits
+`WEBCOMPANION_CANCELLED` on its next tick — handle per Mode D.
 
 ## Edge cases
 

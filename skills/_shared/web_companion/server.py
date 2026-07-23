@@ -236,6 +236,28 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None,
     return ({"sid": sid, "slug": slug, "dirs": dirs, "created": True}, True)
 
 
+def code_fingerprint() -> str:
+    """Stable hash of the skills tree this process runs from.
+
+    Mirrors the computation in ensure_server.sh; the pair must agree so a
+    healthy-but-outdated server (old install dir, or same dir with edited
+    files) is detected and restarted instead of serving stale code forever.
+    """
+    import hashlib
+    root = Path(__file__).resolve().parents[2]      # .../skills
+    h = hashlib.sha1()
+    paths = sorted(list(root.rglob("*.py")) + list(root.rglob("*.sh")))
+    for p in paths:
+        if "__pycache__" in p.parts or "tests" in p.parts:
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        h.update(f"{p.relative_to(root)}:{st.st_mtime_ns}:{st.st_size}".encode())
+    return h.hexdigest()[:12]
+
+
 def _resolve_public_host() -> str:
     if env := os.environ.get("WEBCOMPANION_PUBLIC_HOST"):
         return env
@@ -329,6 +351,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             return time.time() - last_activity[0]
 
     banner = f"{skill_name}-server v1"
+    # /health advertises a fingerprint of the code tree this process actually
+    # runs, so ensure_server.sh can detect an old-code server surviving a
+    # plugin update (its 24h idle clock resets on every request, so it would
+    # otherwise pass the static-banner check forever) and restart it.
+    code_fp = code_fingerprint()
     server_holder = {}
 
     class _Handler(http.server.BaseHTTPRequestHandler):
@@ -432,7 +459,7 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
         def _dispatch_get(self):
             touch()
             if self.path == "/health":
-                self._send_text(200, banner)
+                self._send_text(200, f"{banner} fp={code_fp}")
                 return
             if self.path == "/":
                 static_serve.serve(self, "sessions.html", static_dirs)

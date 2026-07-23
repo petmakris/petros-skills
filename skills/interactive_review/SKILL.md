@@ -42,52 +42,15 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(python3 -c 'import json,os;print(json.load(
 
 `$CLAUDE_PLUGIN_ROOT` is **not** exported into the Bash tool's shell, so it is resolved here from the plugin marketplace registry as a fallback. Idempotent and fast (<100 ms when already up). Internally delegates to `skills/_shared/web_companion/ensure_server.sh` — do not call that directly. Do **not** use `run_in_background: true`. If it exits non-zero, surface the stderr to the user and stop.
 
-## Supersede any prior review from this session
-
-One active review per Claude session. Before creating the new session, cancel any review still pending from an earlier `/interactive-review` in this same Claude session — otherwise old watchers accumulate forever (they only exit on a `finished`/`cancelled` marker):
-
-```bash
-REG="$HOME/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json"
-python3 - "$REG" <<'PY'
-import json, os, sys, time
-from pathlib import Path
-path = Path(sys.argv[1])
-try:
-    entries = json.loads(path.read_text())
-except FileNotFoundError:
-    entries = []
-keep = []
-for e in entries:
-    sd = Path(e["state_dir"])
-    if not sd.is_dir():
-        continue                      # workspace reaped; drop entry
-    if (sd / "finished").exists() or (sd / "cancelled").exists():
-        continue                      # watcher already exited; drop entry
-    (sd / "cancelled").write_text('{"reason":"superseded"}')
-    print(f"superseded {e['sid']}")
-    try:
-        hb = int((sd / "watcher_heartbeat").read_text().strip())
-    except (FileNotFoundError, ValueError):
-        hb = 0
-    if time.time() - hb <= 120:
-        keep.append(e)                # live watcher will emit CANCELLED; Mode D cleans up
-tmp = str(path) + ".tmp"
-json.dump(keep, open(tmp, "w"), indent=2)
-os.replace(tmp, path)
-PY
-```
-
-Each superseded live watcher exits on its next tick and emits `WEBCOMPANION_CANCELLED` — handle it per Mode D when it arrives (the ack sentence is enough; the registry entry is already pruned or will be by Mode D). Dead watchers (stale heartbeat) are pruned from the registry immediately since they will never emit. Do **not** wait for the banners — proceed with the new session right away.
-
 ## Create a session
 
 After `ensure_server.sh` succeeds, read `$HOME/.claude/interactive-review/server.json` to get the server URL, then create a session:
 
 ```bash
 SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["url"])')
-curl -sf -X POST "$SERVER_URL/api/sessions" \
+curl -sf --max-time 90 -X POST "$SERVER_URL/api/sessions" \
   -H 'Content-Type: application/json' \
-  -d "$(printf '{"cwd": "%s", "pr": "%s"}' "$PWD" "$PR_REF")"
+  -d "$(printf '{"cwd": "%s", "pr": "%s", "claude_session_id": "%s"}' "$PWD" "$PR_REF" "$CLAUDE_CODE_SESSION_ID")"
 ```
 
 The server's `create_session_extra` runs `gh pr diff` and `gh pr view`, then writes `diff.patch` and `meta.json` into the session's state directory. The response is:
@@ -118,6 +81,13 @@ the same repo); it is cosmetic for interactive-review.
 
 Save `url`, `sid`, `state_dir`, `events_dir`, `consumed_dir`, and `title` for the rest of this turn.
 
+**One active review per Claude session — enforced server-side.** The
+`claude_session_id` in the payload makes the server cancel this Claude
+session's prior non-terminal review sessions before returning, so a
+re-invocation can never accumulate stale watchers. Each superseded watcher
+emits `WEBCOMPANION_CANCELLED` on its next tick; acknowledge those per Mode D
+when they arrive.
+
 **gh failure:** if `create_session_extra` raises, the endpoint returns HTTP 500 with body `session-init failed: <stderr>`. Surface this verbatim in terminal: *"Couldn't fetch PR diff: `<error>`. Check `gh auth status` and try again."* Do not retry.
 
 **Diff too large:** the server hard-rejects diffs over 5 MB (raised as a `session-init failed` error — surface it like a gh failure and stop). Diffs over 1 MB succeed but return a `warning` field; if present, append it to the "review session ready" sentence so the user knows annotations may be slow.
@@ -139,6 +109,7 @@ SID="<sid>" \
 STATE_DIR="<state_dir>" \
 EVENTS_DIR="<events_dir>" \
 CONSUMED_DIR="<consumed_dir>" \
+CLAUDE_SID="$CLAUDE_CODE_SESSION_ID" \
 "$PLUGIN_ROOT/skills/_shared/web_companion/watcher.sh"
 ```
 
@@ -149,31 +120,9 @@ The watcher emits these stdout banners:
 - **`WEBCOMPANION_EVENT skill=interactive-review sid=<sid> event_id=<id>`** — one per submitted question. Followed by `---payload---`, the event JSON, and `---end---`.
 - **`WEBCOMPANION_FINISHED skill=interactive-review sid=<sid>`** — when the user clicks Done.
 - **`WEBCOMPANION_CANCELLED skill=interactive-review sid=<sid>`** — when the user cancels.
+- **`WEBCOMPANION_DROPPED skill=interactive-review sid=<sid> event_id=<id>`** — the watcher gave up re-emitting an event that was never acked.
 
 Each stdout line wakes you once. The watcher stays alive across many events until the session terminates.
-
-After arming, append a record to the pending registry:
-
-```bash
-mkdir -p ~/.claude/interactive-review
-REG="$HOME/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json"
-python3 - "$REG" "$SID" "$TITLE" "$STATE_DIR" "$EVENTS_DIR" "$CONSUMED_DIR" <<'PY'
-import json, os, sys
-path, sid, title, state_dir, events_dir, consumed_dir = sys.argv[1:]
-try:
-    data = json.load(open(path))
-except FileNotFoundError:
-    data = []
-data.append({"sid": sid, "title": title,
-             "state_dir": state_dir, "events_dir": events_dir,
-             "consumed_dir": consumed_dir})
-tmp = path + ".tmp"
-json.dump(data, open(tmp, "w"), indent=2)
-os.replace(tmp, path)
-PY
-```
-
-The registry is keyed by `CLAUDE_CODE_SESSION_ID` — not shared across sessions.
 
 ## Mode D — handling a watcher event
 
@@ -230,17 +179,19 @@ You wake here when a task-notification arrives whose first stdout line is one of
 
 ### `WEBCOMPANION_FINISHED`
 
-The user clicked Done.
-
-1. Ack in terminal: *"Review session for `<title>` closed."*
-2. Remove this session's entry from `~/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json`.
+The user clicked Done. Ack in terminal: *"Review session for `<title>` closed."*
 
 ### `WEBCOMPANION_CANCELLED`
 
-The user cancelled (clicked tab close or typed `scrap it` in terminal).
+The user cancelled (IDE, terminal `scrap it`, or superseded by a newer
+review from this Claude session). Ack in terminal: *"Review session for
+`<title>` cancelled."*
 
-1. Ack in terminal: *"Review session for `<title>` cancelled."*
-2. Remove this session's entry from the pending registry.
+### `WEBCOMPANION_DROPPED`
+
+An event went unanswered through every re-emit (an earlier wake-up was
+interrupted or compacted away). Tell the user plainly: *"A review question
+went unanswered and was dropped — please re-ask it on the line."*
 
 ## Response style guide
 
@@ -279,14 +230,16 @@ The user cancelled (clicked tab close or typed `scrap it` in terminal).
 
 If the user says "scrap it" / "stop the review" / equivalent while a watcher is armed:
 
-1. Read `~/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json`.
-2. For each entry, write the cancellation marker:
-   ```bash
-   printf '{"reason":"user-cancelled-terminal"}' > "$STATE_DIR/cancelled"
-   ```
-3. The watcher detects the marker on its next tick and emits `WEBCOMPANION_CANCELLED`.
-4. Handle each cancellation per Mode D and clean up the registry.
-5. Continue with whatever the user actually wanted.
+```bash
+SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["url"])')
+curl -sf --max-time 10 -X POST "$SERVER_URL/api/cancel_for_claude_session" \
+  -H 'Content-Type: application/json' \
+  -d "{\"claude_session_id\": \"$CLAUDE_CODE_SESSION_ID\"}"
+```
+
+The server writes the cancellation markers; each armed watcher emits
+`WEBCOMPANION_CANCELLED` on its next tick — handle per Mode D, then continue
+with whatever the user actually wanted.
 
 ## Edge cases
 
