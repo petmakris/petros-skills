@@ -266,6 +266,74 @@ class WalkthroughSessionClientTest {
         }
     }
 
+    @Test void singleHttpErrorFromSessionsDoesNotClearDocOrDetach() throws Exception {
+        // Finding 2 (re-review): fetchNewestSession() used to treat any non-200
+        // from /api/sessions as "no session" (return null), which takes the
+        // found==null branch and detaches on the very first blip — the exact
+        // symptom the two-consecutive-failure threshold exists to prevent,
+        // just entering through a different door than the parse-exception
+        // path singleFailedDiscoveryPollDoesNotClearDocOrDetach covers. Prove
+        // a single 503 leaves the session, doc, and threads untouched.
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson = sessionsRow("wt10");
+            server.stepsJson = STEPS;
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            List<String> events = new CopyOnWriteArrayList<>();
+            WalkthroughSessionClient client = new WalkthroughSessionClient(
+                server.baseUrl(), "/proj", Duration.ofMillis(100));
+            client.addListener(new WalkthroughSessionClient.Listener() {
+                @Override public void onDetached() { events.add("detached"); }
+            });
+            client.start();
+            try {
+                await(() -> client.currentSession().isPresent() && client.doc().steps().size() == 2);
+
+                server.pushSseEvent("thread-changed",
+                    "{\"anchor\":\"step:1\",\"latest_synthesis\":\"yes\","
+                    + "\"version\":1,\"title\":\"T\",\"question\":\"q?\"}");
+                await(() -> client.threadFor("step:1").isPresent());
+
+                // Exactly one /api/sessions request gets a 503, forcing
+                // fetchNewestSession() to throw exactly once.
+                server.sessionsHttpErrorsRemaining.set(1);
+                Thread.sleep(700);
+
+                assertTrue(client.currentSession().isPresent());
+                assertEquals(2, client.doc().steps().size());
+                assertTrue(client.threadFor("step:1").isPresent());
+                assertTrue(events.isEmpty(), "a single 503 must not detach");
+            } finally {
+                client.stop();
+            }
+        }
+    }
+
+    @Test void twoConsecutiveHttpErrorsFromSessionsDoDetach() throws Exception {
+        // The other half: a sustained run of non-200 responses must still
+        // detach at the same threshold as any other failure mode.
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson = sessionsRow("wt11");
+            server.stepsJson = STEPS;
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            List<String> events = new CopyOnWriteArrayList<>();
+            WalkthroughSessionClient client = new WalkthroughSessionClient(
+                server.baseUrl(), "/proj", Duration.ofMillis(100));
+            client.addListener(new WalkthroughSessionClient.Listener() {
+                @Override public void onDetached() { events.add("detached"); }
+            });
+            client.start();
+            try {
+                await(() -> client.currentSession().isPresent() && client.doc().steps().size() == 2);
+                server.sessionsHttpErrorsRemaining.set(2);
+                await(() -> events.contains("detached"));
+                assertTrue(client.currentSession().isEmpty());
+                assertTrue(client.doc().isEmpty());
+            } finally {
+                client.stop();
+            }
+        }
+    }
+
     @Test void stopUnblocksSseWorkerThread() throws Exception {
         // Finding 3: the SSE worker parks in CompletableFuture.join(), which
         // ignores interrupts, so sseTask.cancel(true) alone can't stop it —

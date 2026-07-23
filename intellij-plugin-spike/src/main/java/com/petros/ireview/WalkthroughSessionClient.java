@@ -3,6 +3,7 @@ package com.petros.ireview;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -111,6 +112,22 @@ public final class WalkthroughSessionClient {
         exec.shutdownNow();
         sseExec.shutdownNow();
         setState(State.DORMANT);
+        // Sever the retention path from a still-open SSE exchange: cancelSse() completes
+        // the derived stage so the worker's join() returns, but cancellation does not
+        // propagate upstream to the underlying sendAsync future (SseClient is shared with
+        // the shipped review client and out of scope to change here), and the body pump
+        // keeps running on the HttpClient's own executor thread with its subscriber still
+        // referencing this client. The event-generation check in the subscriber's onEvent
+        // lambda (`gen == sseGen.get()`) already makes any further callback a no-op after
+        // the increment above, but the lambda's closure over `this` still keeps this whole
+        // object graph — listeners, and everything each listener reaches (the project
+        // service, the controller, the navigator, the Project) — reachable for as long as
+        // the leaked exchange lives, which for this server is forever (30s heartbeats).
+        // Clearing the list breaks that reachability at the one edge this class owns: the
+        // leaked client itself may still linger, but it no longer holds a Project. stop()
+        // is terminal (see addListener's closed check below and WalkthroughService#dispose,
+        // its only caller), so no listener is ever waiting on a notification after this.
+        listeners.clear();
     }
 
     /**
@@ -133,7 +150,11 @@ public final class WalkthroughSessionClient {
         if (connect != null) connect.cancel(true);
     }
 
-    public void addListener(Listener l) { listeners.add(l); }
+    /** No-op once {@link #stop()} has run — belt-and-braces alongside the listener clear
+     *  in {@code stop()} so a late/misplaced registration can't re-open the retention path
+     *  Finding 3 closes. Nothing in this codebase currently calls addListener after stop(),
+     *  but the client offers no other way to enforce that invariant. */
+    public void addListener(Listener l) { if (!closed) listeners.add(l); }
 
     public void removeListener(Listener l) { listeners.remove(l); }
 
@@ -264,7 +285,13 @@ public final class WalkthroughSessionClient {
             + URLEncoder.encode(projectCwd, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT).GET().build();
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) return null;
+        // A non-200 (transient 500/503 while the server restarts or the registry is being
+        // rewritten) is a failure, not "no session" — it must count against
+        // DISCOVERY_FAILURE_THRESHOLD in pollDiscover's catch block like a socket failure
+        // would. Returning null here would instead take the found==null branch and detach
+        // on the very first blip. A null return is reserved strictly for "the server
+        // answered 200 and the list is empty".
+        if (resp.statusCode() != 200) throw new IOException("HTTP " + resp.statusCode());
         var root = JsonParser.parseString(resp.body());
         if (!root.isJsonArray() || root.getAsJsonArray().isEmpty()) return null;
         JsonObject o = root.getAsJsonArray().get(0).getAsJsonObject();
@@ -311,7 +338,15 @@ public final class WalkthroughSessionClient {
             return;
         }
         if (ended) { latchEnded(); return; }
-        if (stepsGeneratedAt > 0 && stepsGeneratedAt != doc.get().generatedTs()) {
+        // Skip the freshness reload while CONNECTING: attach() calls openSse(), whose
+        // worker runs its own loadSteps() as the first thing it does, before the state
+        // moves past CONNECTING. pollDiscover calls pollLiveness right after attach()
+        // returns, on a different thread — without this guard both loadSteps() calls can
+        // read doc as EMPTY before either has published, so the tour activates twice (two
+        // openTextEditor + scrollToCaret, two full gutter repaints). Once the SSE worker's
+        // initial load has run and the state has moved on, this reload is legitimate again.
+        if (state != State.CONNECTING
+                && stepsGeneratedAt > 0 && stepsGeneratedAt != doc.get().generatedTs()) {
             loadSteps(sid, sseGen.get());
         }
         if (seenAt <= 0) return;
@@ -447,6 +482,12 @@ public final class WalkthroughSessionClient {
                        setState(State.DISCONNECTED); }
         );
         sseConnectFuture = connect;
+        // A concurrent stop()/cancelSse() that ran between SseClient.connect() returning
+        // and the assignment above saw the stale (pre-assignment) sseConnectFuture — null,
+        // or a previous generation's — and so could not cancel *this* connect. Re-check
+        // now that the field is published: if the client closed or a newer attach/reconnect
+        // already moved the generation on, cancel here instead of parking in join() forever.
+        if (closed || gen != sseGen.get()) connect.cancel(true);
         try {
             connect.join();
         } catch (Throwable ignored) {

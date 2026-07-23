@@ -36,6 +36,17 @@ public final class FakeReviewServer implements AutoCloseable {
      */
     public final java.util.concurrent.atomic.AtomicInteger sessionsFailuresRemaining =
         new java.util.concurrent.atomic.AtomicInteger();
+    /**
+     * Remaining number of /api/sessions requests to answer with a non-200 status
+     * (no body) instead of {@link #sessionsJson}, simulating a transient server
+     * error (e.g. 503 while the registry is being rewritten). Checked before
+     * {@link #sessionsFailuresRemaining}; decrements per request; 0 → respond
+     * normally. Status code is {@link #sessionsHttpErrorStatus}.
+     */
+    public final java.util.concurrent.atomic.AtomicInteger sessionsHttpErrorsRemaining =
+        new java.util.concurrent.atomic.AtomicInteger();
+    /** Status code sent while {@link #sessionsHttpErrorsRemaining} is positive. */
+    public volatile int sessionsHttpErrorStatus = 503;
     /** When true, /poll reports ended=true (terminal or watcher-dead past reap). */
     public volatile boolean ended = false;
     /** ended_reason returned by /poll when ended; null → JSON null. */
@@ -62,6 +73,11 @@ public final class FakeReviewServer implements AutoCloseable {
 
     private void handleSessions(HttpExchange ex) throws IOException {
         requests.add(ex);
+        if (sessionsHttpErrorsRemaining.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
+            ex.sendResponseHeaders(sessionsHttpErrorStatus, -1);
+            ex.close();
+            return;
+        }
         byte[] body;
         if (sessionsFailuresRemaining.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
             // Deliberately unparsable JSON (unterminated object) — the client

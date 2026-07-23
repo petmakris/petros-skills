@@ -57,7 +57,10 @@ public final class WalkthroughGutter implements EditorFactoryListener {
         Editor editor = event.getEditor();
         Project project = editor.getProject();
         // Diff editors are handled separately (SpikeDiffExtension paints interactive-review's
-        // ask icon there); attaching here too would double every marker on those gutters.
+        // ask icon there). The kind check here is just a cheap bypass to skip registering
+        // the project listener from a diff editor's open event; repaint() below enforces
+        // the same guard for every subsequent controller-driven repaint, so this one being
+        // removed or kept doesn't change what ever gets painted.
         if (project == null || !(editor instanceof EditorEx) || editor.getEditorKind() != EditorKind.MAIN_EDITOR) return;
         WalkthroughService service = WalkthroughService.get(project);
         ensureProjectListener(project, service);
@@ -101,6 +104,13 @@ public final class WalkthroughGutter implements EditorFactoryListener {
 
     private static void repaint(Editor editor, WalkthroughService service) {
         if (editor.isDisposed()) return;
+        // Same invariant as editorCreated's guard, enforced here too: repaintAll walks
+        // EditorFactory.getAllEditors() filtered only by project, with no kind check of
+        // its own, so a diff viewer's local-side editor (which shares the file's Document
+        // and therefore resolves the same VirtualFile/step) would otherwise get painted on
+        // every controller callback even though editorCreated skipped it on open. This is
+        // the one gate both entry points share.
+        if (editor.getEditorKind() != EditorKind.MAIN_EDITOR) return;
         clear(editor);
         Project project = editor.getProject();
         VirtualFile vf = FileDocumentManager.getInstance().getFile(editor.getDocument());
