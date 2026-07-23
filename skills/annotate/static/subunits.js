@@ -48,10 +48,18 @@
   // 0-based position of `el` among its block's sub-units that share the
   // same normalized text. Recomputed on demand from the live DOM rather
   // than cached, so it stays correct across reorders/re-decoration.
-  function unitOrdinal(el, text) {
-    const section = el.closest("section.block");
-    if (!section) return 0;
-    const same = Array.from(section.querySelectorAll(".sub-unit"))
+  //
+  // `root` is the decorated `.block-content` subtree, threaded down from
+  // decorate() (captured in the click-handler closure, not re-derived via
+  // el.closest() at call time). During createBlockSection's first decorate
+  // pass `content` is still DETACHED — appendChild into `section`/`body`
+  // happens after decorate() runs — so el.closest("section.block") would
+  // return null there and silently collapse every ordinal to 0. Querying
+  // `root` directly works whether it's attached to the document or not,
+  // since querySelectorAll is scoped to the subtree, not the document.
+  function unitOrdinal(root, el, text) {
+    if (!root) return 0;
+    const same = Array.from(root.querySelectorAll(".sub-unit"))
       .filter((u) => unitText(stripClone(u)) === text);
     const idx = same.indexOf(el);
     return idx === -1 ? same.length : idx;
@@ -97,7 +105,7 @@
     units.forEach((el) => {
       // Authored sub-units keep their existing immediate-comment path.
       if (el.closest("[data-annotate-id]")) return;
-      if (el.classList.contains("sub-unit")) { applyMarkState(el, blockId); return; }
+      if (el.classList.contains("sub-unit")) { applyMarkState(content, el, blockId); return; }
       const text = unitText(el);
       if (!text) return;
       el.classList.add("sub-unit");
@@ -113,34 +121,38 @@
         b.dataset.kind = kind;
         b.textContent = glyph;
         b.title = title;
+        // Capture `content` (the decorated root) in this closure rather than
+        // re-deriving it via el.closest() at click time — one consistent
+        // mechanism for both the detached-DOM initial pass and any later
+        // (already-attached) re-decoration.
         b.addEventListener("click", (ev) => {
           ev.stopPropagation();
           ev.preventDefault();
           if (document.body.classList.contains("is-busy")) return;
-          if (kind === "comment") openComposer(el, blockId);
-          else toggleMark(el, blockId, kind);
+          if (kind === "comment") openComposer(content, el, blockId);
+          else toggleMark(content, el, blockId, kind);
         });
         strip.appendChild(b);
       }
       el.appendChild(strip);
-      applyMarkState(el, blockId);
+      applyMarkState(content, el, blockId);
     });
     renderDock();
   }
 
-  function toggleMark(el, blockId, kind) {
+  function toggleMark(root, el, blockId, kind) {
     const text = unitText(stripClone(el));
-    const ordinal = unitOrdinal(el, text);
+    const ordinal = unitOrdinal(root, el, text);
     const key = markKey(blockId, text, ordinal);
     const existing = marks[key];
     if (existing && existing.kind === kind) {
       delete marks[key];                      // undo
     } else {
-      marks[key] = buildMark(el, blockId, kind, ordinal,
+      marks[key] = buildMark(root, el, blockId, kind, ordinal,
         existing && existing.kind === "comment" ? existing.text : "");
     }
     saveMarks();
-    applyMarkState(el, blockId);
+    applyMarkState(root, el, blockId);
     renderDock();
   }
 
@@ -152,15 +164,20 @@
     return c;
   }
 
-  function buildMark(el, blockId, kind, ordinal, text) {
+  // `root` is the decorated `.block-content` subtree (see unitOrdinal for
+  // why it's threaded down rather than re-derived via el.closest()).
+  // blockText comes from that same subtree — the rendered markdown content
+  // only, excluding card-title/header chrome — which is also strictly
+  // better prefix/suffix context: it matches what the markdown source
+  // actually contains.
+  function buildMark(root, el, blockId, kind, ordinal, text) {
     const selected = unitText(stripClone(el));
     // `ordinal` is stored for internal bookkeeping only — never copied onto
     // the wire payload (see submitRound's explicit field list).
     const mark = { block_id: blockId, kind, selected_text: selected, ordinal };
     if (text) mark.text = text;
-    const section = el.closest("section.block");
-    if (section) {
-      const blockText = unitText(stripClone(section));
+    if (root) {
+      const blockText = unitText(stripClone(root));
       if (occurrences(blockText, selected) > 1) {
         const idx = nthIndexOf(blockText, selected, ordinal);
         if (idx !== -1) {
@@ -173,9 +190,9 @@
     return mark;
   }
 
-  function applyMarkState(el, blockId) {
+  function applyMarkState(root, el, blockId) {
     const text = unitText(stripClone(el));
-    const ordinal = unitOrdinal(el, text);
+    const ordinal = unitOrdinal(root, el, text);
     const m = marks[markKey(blockId, text, ordinal)];
     if (m) el.dataset.mark = m.kind;
     else delete el.dataset.mark;
@@ -194,10 +211,10 @@
   // ── Inline per-unit composer (local pin, not a submit) ────────────────────
   let openComposerEl = null;
 
-  function openComposer(el, blockId) {
+  function openComposer(root, el, blockId) {
     closeComposer();
     const text = unitText(stripClone(el));
-    const ordinal = unitOrdinal(el, text);
+    const ordinal = unitOrdinal(root, el, text);
     const existing = marks[markKey(blockId, text, ordinal)];
     const wrap = document.createElement("span");
     wrap.className = "unit-composer";
@@ -211,11 +228,11 @@
     const commit = () => {
       const v = input.value.trim();
       const key = markKey(blockId, text, ordinal);
-      if (v) marks[key] = buildMark(el, blockId, "comment", ordinal, v);
+      if (v) marks[key] = buildMark(root, el, blockId, "comment", ordinal, v);
       else delete marks[key];
       saveMarks();
       closeComposer();
-      applyMarkState(el, blockId);
+      applyMarkState(root, el, blockId);
       renderDock();
     };
     pin.addEventListener("click", commit);
