@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 from skills._shared.web_companion import server as wc_server
+from skills._shared.web_companion.atomic import write_text_atomic
 from skills._shared.web_companion import events as events_module
 from skills._shared.web_companion import uploads as uploads_module
 from skills.interactive_review import diff as diff_module
@@ -306,8 +307,8 @@ class Handlers:
                 f"diff is {diff_bytes // 1024} KB, over the {MAX_DIFF_BYTES // (1024 * 1024)} MB limit — "
                 "review a narrower PR, a single commit, or a branch with fewer changes"
             )
-        (state_dir / "diff.patch").write_text(diff_text)
-        (state_dir / "meta.json").write_text(json.dumps({
+        write_text_atomic(state_dir / "diff.patch", diff_text)
+        write_text_atomic(state_dir / "meta.json", json.dumps({
             "pr_ref": pr_ref,
             "title": meta.get("title", pr_ref),
             "head": meta.get("headRefName", ""),

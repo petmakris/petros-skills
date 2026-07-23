@@ -4,11 +4,12 @@
     <vendor>Petros Makris</vendor>
 
     <description><![CDATA[
-        Spike: attach a gutter icon to line 1 of the right side of any two-side text diff.
-        Clicking the icon pops an input dialog and logs the entered text.
+        IDE companion for the petros-skills web-companion server: per-line
+        threaded Q&A on GitHub PR diffs (/interactive-review) and anchored
+        code walkthroughs (/walkthrough), with Claude answering inline.
     ]]></description>
 
-    <idea-version since-build="242" until-build="243.*"/>
+    <idea-version since-build="242" until-build="261.*"/>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
