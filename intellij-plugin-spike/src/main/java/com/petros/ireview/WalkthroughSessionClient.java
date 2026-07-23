@@ -53,6 +53,13 @@ public final class WalkthroughSessionClient {
     private static final Duration STALE_AFTER = Duration.ofSeconds(15);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
     private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
+    /**
+     * Consecutive {@link #fetchNewestSession()} failures (timeout, connection
+     * refused, server restart) required before a discovery blip is treated as
+     * a real detach. One dropped poll must not reset an in-progress tour —
+     * see {@link #pollDiscover()}.
+     */
+    private static final int DISCOVERY_FAILURE_THRESHOLD = 2;
 
     private final String baseUrl;
     private final String projectCwd;
@@ -81,6 +88,9 @@ public final class WalkthroughSessionClient {
     private volatile SessionInfo current = null;
     private volatile Future<?> sseTask = null;
     private volatile ScheduledFuture<?> discoverTask = null;
+    /** The in-flight SSE connect future, so {@link #stop()} can cancel it and unblock the worker's join(). */
+    private volatile CompletableFuture<Void> sseConnectFuture = null;
+    private volatile int discoveryFailures = 0;
 
     public WalkthroughSessionClient(String baseUrl, String projectCwd, Duration pollInterval) {
         this.baseUrl = baseUrl;
@@ -97,10 +107,30 @@ public final class WalkthroughSessionClient {
         closed = true;
         sseGen.incrementAndGet();
         if (discoverTask != null) discoverTask.cancel(true);
-        if (sseTask != null) sseTask.cancel(true);
+        cancelSse();
         exec.shutdownNow();
         sseExec.shutdownNow();
         setState(State.DORMANT);
+    }
+
+    /**
+     * Cancels the current SSE worker's task and its connect future.
+     * {@code sseTask.cancel(true)} alone only interrupts the worker thread;
+     * the thread is parked in {@code CompletableFuture.join()} on the SSE
+     * request, and {@code join()} ignores interrupts. Cancelling the connect
+     * future itself completes it exceptionally, so {@code join()} unblocks
+     * and the thread (and everything on its stack — listeners, the project
+     * service, the Project) can be released. Used on every teardown path:
+     * final shutdown ({@link #stop()}), the ENDED latch ({@link
+     * #latchEnded()}), detach ({@link #handleNoSession()}), and reconnect
+     * ({@link #openSse(String)}) — all of them previously left the old
+     * worker thread blocked until the server-side connection happened to
+     * close on its own.
+     */
+    private void cancelSse() {
+        if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+        CompletableFuture<Void> connect = sseConnectFuture;
+        if (connect != null) connect.cancel(true);
     }
 
     public void addListener(Listener l) { listeners.add(l); }
@@ -189,14 +219,29 @@ public final class WalkthroughSessionClient {
         }
     }
 
+    /**
+     * A single failed {@link #fetchNewestSession()} (timeout, momentary
+     * connection refusal, server restart) does not detach — it takes
+     * {@link #DISCOVERY_FAILURE_THRESHOLD} consecutive failures. Detaching on
+     * one blip would clear {@link #doc} to EMPTY; the next successful poll
+     * would then publish a fresh (non-EMPTY) doc past the unchanged-guard in
+     * {@link #loadSteps}, resetting the controller's step index to 0 and
+     * yanking the editor for no user-visible reason. A session that is
+     * genuinely gone (the server successfully answers with an empty list, or
+     * pollLiveness's /poll reports ended) is unaffected by this and still
+     * detaches on the first observation — see the {@code found == null}
+     * branch below and {@link #latchEnded()}.
+     */
     private void pollDiscover() {
         SessionInfo found;
         try {
             found = fetchNewestSession();
         } catch (Exception e) {
-            if (!endedLatched) handleNoSession();
+            discoveryFailures++;
+            if (!endedLatched && discoveryFailures >= DISCOVERY_FAILURE_THRESHOLD) handleNoSession();
             return;
         }
+        discoveryFailures = 0;
         if (endedLatched) {
             if (found != null && (current == null || !current.sid().equals(found.sid()))) attach(found);
             return;
@@ -226,9 +271,30 @@ public final class WalkthroughSessionClient {
         return new SessionInfo(str(o, "sid"), str(o, "title"), str(o, "state_dir"));
     }
 
+    /**
+     * Polls liveness AND — the cheap fix for the "tour invisible for up to
+     * 30s" gap — steps freshness. {@code serve_poll} returns {@code
+     * steps_generated_at} on every call; nothing on the server wakes the SSE
+     * stream when Claude writes a fresh steps.json (only {@code
+     * registry.note_change} does, and only submit/delete call that), so
+     * without this the IDE would only learn about new steps from the next
+     * SSE {@code steps-changed} event, which can lag up to 30s behind the
+     * waiter's timeout. This discovery loop already runs every {@code
+     * pollInterval} (~5s in production), so reading the field here and
+     * reloading on change bounds the delay at ~one poll interval with no new
+     * network traffic. The reload goes through {@link #loadSteps}, using the
+     * *current* SSE generation read fresh right before the call — that keeps
+     * the same stale-publish guard the SSE path relies on: if a reconnect
+     * bumps the generation while this call is in flight, loadSteps's loop
+     * condition sees the mismatch and aborts without publishing. Publishing
+     * twice (once from here, once from a concurrent SSE steps-changed) is
+     * harmless — loadSteps no-ops when generatedTs and step count already
+     * match.
+     */
     private void pollLiveness(String sid) {
         if (endedLatched) return;
         long seenAt;
+        long stepsGeneratedAt;
         boolean ended;
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/poll"))
@@ -238,11 +304,16 @@ public final class WalkthroughSessionClient {
             JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
             seenAt = o.has("watcher_seen_at") && !o.get("watcher_seen_at").isJsonNull()
                 ? o.get("watcher_seen_at").getAsLong() : 0;
+            stepsGeneratedAt = o.has("steps_generated_at") && !o.get("steps_generated_at").isJsonNull()
+                ? o.get("steps_generated_at").getAsLong() : 0;
             ended = o.has("ended") && !o.get("ended").isJsonNull() && o.get("ended").getAsBoolean();
         } catch (Exception e) {
             return;
         }
         if (ended) { latchEnded(); return; }
+        if (stepsGeneratedAt > 0 && stepsGeneratedAt != doc.get().generatedTs()) {
+            loadSteps(sid, sseGen.get());
+        }
         if (seenAt <= 0) return;
         long ageMs = System.currentTimeMillis() - seenAt * 1000;
         if (ageMs > STALE_AFTER.toMillis()) {
@@ -259,7 +330,7 @@ public final class WalkthroughSessionClient {
         endedLatched = true;
         sseGen.incrementAndGet();
         for (String a : new java.util.ArrayList<>(pending.keySet())) clearPending(a);
-        if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+        cancelSse();
         setState(State.ENDED);
     }
 
@@ -271,7 +342,7 @@ public final class WalkthroughSessionClient {
             pending.clear();
             doc.set(WalkthroughDoc.EMPTY);
             sseGen.incrementAndGet();
-            if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+            cancelSse();
             for (Listener l : listeners) l.onDetached();
             for (Listener l : listeners) l.onStepsChanged(WalkthroughDoc.EMPTY);
         }
@@ -358,8 +429,7 @@ public final class WalkthroughSessionClient {
         if (closed || sseExec.isShutdown()) return;
         URI uri = URI.create(baseUrl + "/s/" + sid + "/stream");
         long gen = sseGen.incrementAndGet();
-        Future<?> prev = sseTask;
-        if (prev != null) prev.cancel(true);
+        cancelSse();
         try {
             sseTask = sseExec.submit(() -> runSse(sid, uri, gen));
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
@@ -371,13 +441,20 @@ public final class WalkthroughSessionClient {
         seedThreads(sid, gen);
         if (gen != sseGen.get() || closed) return;
         if (!endedLatched) setState(State.ACTIVE);
+        CompletableFuture<Void> connect = SseClient.connect(http, uri,
+            ev -> { if (gen == sseGen.get()) handleSseEvent(sid, ev, gen); },
+            t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
+                       setState(State.DISCONNECTED); }
+        );
+        sseConnectFuture = connect;
         try {
-            SseClient.connect(http, uri,
-                ev -> { if (gen == sseGen.get()) handleSseEvent(sid, ev, gen); },
-                t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
-                           setState(State.DISCONNECTED); }
-            ).join();
+            connect.join();
         } catch (Throwable ignored) {
+        } finally {
+            // Only clear it if it's still ours — a newer openSse() may have
+            // already replaced (and cancelled) it.
+            //noinspection ObjectEquality
+            if (sseConnectFuture == connect) sseConnectFuture = null;
         }
         if (gen == sseGen.get() && !closed && !endedLatched) {
             if (state == State.ACTIVE) setState(State.DISCONNECTED);

@@ -26,6 +26,16 @@ public final class FakeReviewServer implements AutoCloseable {
     public volatile String stepsJson = "{\"steps\":[]}";
     /** Epoch seconds of the last watcher heartbeat returned by /poll; null → none yet (0). */
     public volatile Long watcherSeenAt = null;
+    /** {@code steps_generated_at} returned by /poll; null → 0. */
+    public volatile Long stepsGeneratedAt = null;
+    /**
+     * Remaining number of /api/sessions requests to answer with a malformed
+     * (unparsable) body instead of {@link #sessionsJson}, simulating a
+     * transient discovery failure. Decrements per request; 0 → respond
+     * normally.
+     */
+    public final java.util.concurrent.atomic.AtomicInteger sessionsFailuresRemaining =
+        new java.util.concurrent.atomic.AtomicInteger();
     /** When true, /poll reports ended=true (terminal or watcher-dead past reap). */
     public volatile boolean ended = false;
     /** ended_reason returned by /poll when ended; null → JSON null. */
@@ -52,7 +62,14 @@ public final class FakeReviewServer implements AutoCloseable {
 
     private void handleSessions(HttpExchange ex) throws IOException {
         requests.add(ex);
-        byte[] body = sessionsJson.getBytes(StandardCharsets.UTF_8);
+        byte[] body;
+        if (sessionsFailuresRemaining.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
+            // Deliberately unparsable JSON (unterminated object) — the client
+            // must throw on this, not silently treat it as "no session".
+            body = "{".getBytes(StandardCharsets.UTF_8);
+        } else {
+            body = sessionsJson.getBytes(StandardCharsets.UTF_8);
+        }
         ex.getResponseHeaders().add("Content-Type", "application/json");
         ex.sendResponseHeaders(200, body.length);
         try (OutputStream os = ex.getResponseBody()) { os.write(body); }
@@ -77,8 +94,10 @@ public final class FakeReviewServer implements AutoCloseable {
         }
         if (path.endsWith("/poll")) {
             long seen = watcherSeenAt != null ? watcherSeenAt : 0;
+            long stepsTs = stepsGeneratedAt != null ? stepsGeneratedAt : 0;
             String reasonJson = endedReason == null ? "null" : "\"" + endedReason + "\"";
             byte[] body = ("{\"threads\":{},\"watcher_seen_at\":" + seen
+                + ",\"steps_generated_at\":" + stepsTs
                 + ",\"finished\":false,\"ended\":" + (ended ? "true" : "false")
                 + ",\"ended_reason\":" + reasonJson + "}").getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");

@@ -251,6 +251,7 @@ class Handlers:
         if kind not in steps_module.DOC_KINDS:
             raise ValueError(f"kind must be one of {sorted(steps_module.DOC_KINDS)}")
         (state_dir / "meta.json").write_text(json.dumps({
+            "title": question.strip(),
             "question": question.strip(),
             "kind": kind,
             "cwd": dirs.get("_cwd", ""),

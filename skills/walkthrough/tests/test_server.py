@@ -155,6 +155,10 @@ def test_create_session_extra_seeds_threads_dir_and_meta(tmp_path):
     meta = json.loads((state_dir / "meta.json").read_text())
     assert meta["question"] == "how does sharing work"
     assert meta["kind"] == "explain"
+    # Finding 4: the shared framework's session-discovery row builds "title"
+    # from meta.json (see web_companion/server.py's meta.get("title", "")) —
+    # without this key every walkthrough row came back with title="".
+    assert meta["title"] == "how does sharing work"
 
 
 def test_create_session_extra_defaults_kind_to_explain(tmp_path):
