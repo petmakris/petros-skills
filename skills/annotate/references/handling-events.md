@@ -93,7 +93,10 @@ Apply the WHOLE round in one pass — this is the entire point of batching:
 Cross-item coherence is required: if a round dismisses two bullets and
 questions a third in the same block, the single rewrite resolves all three
 together. A `selected_text` that no longer matches the current block content
-(concurrent rewrite) is historical context — same rule as span comments.
+(concurrent rewrite) is historical context — same rule as span comments. A
+`block_id` absent from `blocks.json` at apply time (e.g. a concurrent
+whole-block dismiss removed it between submit and apply) is a no-op for that
+one reaction — apply the rest of the round normally and ack as usual.
 Re-apply safety is unchanged: re-processing the round is a content-hash
 no-op.
 

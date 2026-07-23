@@ -44,6 +44,31 @@ def test_subunits_marks_are_ordinal_aware():
         "function clearRound")[0]
 
 
+def test_subunits_prunes_orphan_marks_before_submit_and_render():
+    """A block/unit Claude has already removed must never reach the wire —
+    server.py's _handle_round 422s the WHOLE round on the first unknown
+    block_id, so an unpruned orphan would wedge Submit forever."""
+    src = SUBUNITS_JS.read_text()
+    for needle in ("pruneMarks", "booted", "main.prose section.block",
+                   ".block-content"):
+        assert needle in src, f"subunits.js missing prune guard {needle!r}"
+    # pruneMarks must run at the top of both call sites the reviewer named.
+    assert "function renderDock() {\n    pruneMarks();" in src
+    assert "function submitRound() {\n    pruneMarks();" in src
+
+
+def test_subunits_resets_pending_round_on_dead_watcher():
+    """Mirrors script.js's WATCHER_DEAD_AFTER_S handling — a dead watcher
+    means no ack is ever coming, so the dock must not stay wedged forever."""
+    src = SUBUNITS_JS.read_text()
+    for needle in ("watcher_age_s", "WATCHER_DEAD_AFTER_S"):
+        assert needle in src, f"subunits.js missing {needle!r}"
+
+
+def test_subunits_surfaces_submit_failure():
+    assert "roundError" in SUBUNITS_JS.read_text()
+
+
 def test_script_js_calls_decorate_on_both_render_paths():
     src = SCRIPT_JS.read_text()
     assert src.count("AnnotateSubunits.decorate") >= 2, \

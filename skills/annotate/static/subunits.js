@@ -29,6 +29,14 @@
   // submit is dispatched (before the promise resolves) so a fast double
   // click can't fire two rounds.
   let pendingRound = null;
+  // Set for a few seconds after a failed submit so the dock can surface it
+  // instead of silently reverting to "Submit round (n)" with no signal.
+  let roundError = false;
+  let roundErrorTimer = null;
+
+  // Mirrors script.js's WATCHER_DEAD_AFTER_S: if the watcher hasn't reported
+  // in this long, no ack is ever coming for an in-flight round either.
+  const WATCHER_DEAD_AFTER_S = 15;
 
   function loadMarks() {
     try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
@@ -82,6 +90,76 @@
     return idx;
   }
 
+  // ── Boot tracking (guards pruneMarks against a partially-built document) ──
+  //
+  // loadAndRenderBlocks() (and reconcile()'s insert-new-block path) build
+  // sections in a fully synchronous per-block loop: createBlockSection(blk)
+  // — which calls decorate(), which calls renderDock() at its end — runs
+  // BEFORE the caller appends that section to the document. So mid-loop,
+  // `document` only contains whichever earlier blocks have already been
+  // appended; later blocks in the same batch are legitimately still
+  // "missing" even though they're about to land. Pruning against that
+  // half-built snapshot would wrongly treat those still-pending blocks'
+  // marks as orphaned and delete them.
+  //
+  // Fix: arm a setTimeout(0) the first time decorate() runs. Because the
+  // whole per-block loop (all blocks, one synchronous call stack) never
+  // awaits mid-loop, a timer queued during it can only fire on a LATER
+  // macrotask — i.e. strictly after that entire loop (and everything after
+  // it in the same synchronous turn) has finished unwinding. `booted` can
+  // therefore never flip true while a per-block loop is still in progress,
+  // regardless of how many blocks it contains or how far through it we are.
+  let booted = false;
+  let bootTimerArmed = false;
+  function armBootTimer() {
+    if (bootTimerArmed) return;
+    bootTimerArmed = true;
+    setTimeout(() => { booted = true; }, 0);
+  }
+
+  // Drop local marks whose block (or, best-effort, whose specific unit)
+  // no longer exists. Reachable whenever Claude removes a block (or a
+  // unit's text changes) out from under a pending local mark — e.g. the
+  // user marks a list item, then dismisses the whole section via the
+  // block-header path. Block-gone is the critical half: an orphaned
+  // block_id 422s the ENTIRE round on submit (server.py's _handle_round
+  // rejects on the first unknown block_id), which without this pruning
+  // would wedge Submit forever with no user-visible recovery short of a
+  // devtools localStorage clear. Unit-gone (text no longer resolves within
+  // an otherwise-live block) is best-effort cleanup on top of that.
+  function pruneMarks() {
+    if (!booted) return;                      // see boot-tracking note above
+    const liveSections = document.querySelectorAll("main.prose section.block");
+    if (!liveSections.length) return;          // belt-and-suspenders
+    const liveBlockIds = new Set();
+    const contentByBlock = new Map();
+    liveSections.forEach((s) => {
+      const id = s.dataset.blockId;
+      if (!id) return;
+      liveBlockIds.add(id);
+      const c = s.querySelector(".block-content");
+      if (c) contentByBlock.set(id, c);
+    });
+    let pruned = false;
+    for (const [key, m] of Object.entries(marks)) {
+      if (!liveBlockIds.has(m.block_id)) {
+        delete marks[key];
+        pruned = true;
+        continue;
+      }
+      const content = contentByBlock.get(m.block_id);
+      if (content && typeof m.ordinal === "number") {
+        const same = Array.from(content.querySelectorAll(".sub-unit"))
+          .filter((u) => unitText(stripClone(u)) === m.selected_text);
+        if (m.ordinal >= same.length) {
+          delete marks[key];
+          pruned = true;
+        }
+      }
+    }
+    if (pruned) saveMarks();
+  }
+
   // The four sub-unit types (spec decision: all four, one DOM walk).
   // Top-level only: a nested list belongs to its parent bullet's unit.
   const UNIT_SELECTOR = [
@@ -97,6 +175,7 @@
   ].join(", ");
 
   function decorate(content, section) {
+    armBootTimer();
     const blockId = section && section.dataset ? section.dataset.blockId : null;
     if (!blockId || !content) return;
     let units;
@@ -252,6 +331,7 @@
 
   // ── Round dock ─────────────────────────────────────────────────────────────
   function renderDock() {
+    pruneMarks();
     let dock = document.getElementById("round-dock");
     const count = Object.keys(marks).length;
     // Keep the dock alive while a round is in flight even if the user
@@ -269,14 +349,22 @@
       document.body.appendChild(dock);
     }
     const btn = dock.querySelector("#round-submit");
-    btn.textContent = pendingRound
-      ? "Applying round…"
-      : `Submit round (${count})`;
+    if (pendingRound) {
+      btn.textContent = "Applying round…";
+      btn.title = "";
+    } else if (roundError) {
+      btn.textContent = "Submit failed — retry";
+      btn.title = "The last submit didn't go through. Click to try again.";
+    } else {
+      btn.textContent = `Submit round (${count})`;
+      btn.title = "";
+    }
     btn.disabled = !!pendingRound || document.body.classList.contains("is-busy");
   }
 
   function submitRound() {
-    if (pendingRound) return;                 // synchronous double-click guard
+    pruneMarks();                              // never submit an orphaned block_id
+    if (pendingRound) return;                  // synchronous double-click guard
     const reactions = Object.values(marks).map((m) => {
       const r = { kind: m.kind, block_id: m.block_id,
                   selected_text: m.selected_text,
@@ -290,13 +378,23 @@
     // button disables synchronously — closes the window where a fast
     // double-click (or a click racing the first busy poll) fires two rounds.
     pendingRound = "inflight";
+    roundError = false;
+    if (roundErrorTimer) { clearTimeout(roundErrorTimer); roundErrorTimer = null; }
     renderDock();
     WebCompanion.api.submit({ type: "round", reactions }).then((res) => {
       pendingRound = res && res.event_id ? String(res.event_id) : null;
       renderDock();
     }).catch(() => {
+      // Surface the failure instead of silently reverting — a bare .catch
+      // that only cleared pendingRound would look like Submit no-oped.
       pendingRound = null;
+      roundError = true;
       renderDock();
+      roundErrorTimer = setTimeout(() => {
+        roundError = false;
+        roundErrorTimer = null;
+        renderDock();
+      }, 5000);
     });
   }
 
@@ -318,6 +416,16 @@
     if (pendingRound && Array.isArray(data.consumed_events) &&
         data.consumed_events.map(String).includes(pendingRound)) {
       clearRound();
+      return;
+    }
+    // Mirrors script.js's watcher_age_s > WATCHER_DEAD_AFTER_S handling: a
+    // dead watcher means no ack is ever coming for our in-flight round
+    // either, so don't leave the dock wedged on "Applying round…" forever.
+    // Marks stay put — they're still valid local state the user can retry.
+    if (pendingRound && typeof data.watcher_age_s === "number" &&
+        data.watcher_age_s > WATCHER_DEAD_AFTER_S) {
+      pendingRound = null;
+      renderDock();
       return;
     }
     renderDock();
