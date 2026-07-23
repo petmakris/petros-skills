@@ -20,6 +20,8 @@ import javax.swing.text.html.StyleSheet;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Mode A renderer: the whole step list, with the active step expanded to show
@@ -31,11 +33,14 @@ import java.util.List;
  *
  * <p>Visual hierarchy ("V2 — Airy"): a coloured numbered disc carries role
  * colour so titles stay plain text; title outranks explanation which
- * outranks the file:line path, which recedes in monospace at disabled-text
- * weight and is truncated from the left (the filename tail is what
- * identifies it, not the leading package). All type and colour is derived
- * from the platform ({@link UIUtil}, {@link JBUI}, {@link JBColor}) so the
- * panel follows the IDE theme instead of hard-coding a look.
+ * outranks the symbol chip — the enclosing {@code Class.method()} from
+ * {@link WalkthroughSymbols}, monospaced at disabled-text weight and
+ * truncated from the left when it doesn't fit its own small box (the tail —
+ * the method name — is what identifies it). The full project-relative
+ * path plus line is still one hover away, as the chip's tooltip. All type
+ * and colour is derived from the platform ({@link UIUtil}, {@link JBUI},
+ * {@link JBColor}) so the panel follows the IDE theme instead of
+ * hard-coding a look.
  */
 public final class WalkthroughPanel implements Disposable {
 
@@ -242,9 +247,9 @@ public final class WalkthroughPanel implements Disposable {
         textColumn.add(title);
         textColumn.add(Box.createVerticalStrut(JBUI.scale(2)));
 
-        LeftTruncatingLabel path = new LeftTruncatingLabel(PATH_FONT, UIUtil.getLabelDisabledForeground());
-        path.setFullText(step.file() + ":" + step.line());
-        path.setAlignmentX(Component.LEFT_ALIGNMENT);
+        SymbolChip symbol = new SymbolChip(PATH_FONT);
+        symbol.setSymbol(WalkthroughSymbols.describe(project, step), step.file() + ":" + step.line());
+        symbol.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         // Resolving every step's snippet on every rebuild would be wasted work —
         // only the active step's navigation target matters to the user right now,
@@ -253,15 +258,15 @@ public final class WalkthroughPanel implements Disposable {
             JPanel pathRow = new JPanel(new BorderLayout(JBUI.scale(6), 0));
             pathRow.setOpaque(false);
             pathRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-            pathRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, path.getPreferredSize().height));
-            pathRow.add(path, BorderLayout.CENTER);
+            pathRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, symbol.getPreferredSize().height));
+            pathRow.add(symbol, BorderLayout.WEST);
             JBLabel stale = new JBLabel("code changed here");
             stale.setFont(PATH_FONT);
             stale.setForeground(STALE_COLOR);
             pathRow.add(stale, BorderLayout.EAST);
             textColumn.add(pathRow);
         } else {
-            textColumn.add(path);
+            textColumn.add(symbol);
         }
 
         if (active) {
@@ -470,7 +475,7 @@ public final class WalkthroughPanel implements Disposable {
      * reduced opacity — the "visited" cue.
      */
     private static final class RoleDisc implements Icon {
-        private static final int SIZE = JBUI.scale(22);
+        private static final int SIZE = JBUI.scale(24);
 
         private final Color color;
         private final int number;
@@ -520,70 +525,144 @@ public final class WalkthroughPanel implements Disposable {
     }
 
     /**
-     * Single-line label that elides from the <em>left</em> when its text
-     * doesn't fit — {@code "…/lifecycle/Foo.java:167"} instead of
-     * {@code "com/petros/.../lifecycle/Foo.jav…"} — because the tail of a
-     * path is what identifies the file, not the leading package. Measures
-     * and truncates against the component's current width on every paint,
-     * so it re-truncates automatically across tool-window resizes without
-     * needing a resize listener. The untruncated text is always available
-     * as the tooltip.
+     * Longest left-truncated ("…" + suffix) form of {@code s} that fits
+     * {@code width} — {@code "…lTask()"} instead of {@code "completeTa…"} —
+     * because the tail is what identifies a symbol or a path (the method
+     * name; the filename), not the leading qualifier. Shared by
+     * {@link SymbolChip}.
      */
-    private static final class LeftTruncatingLabel extends JComponent {
-        private String text = "";
+    private static String leftFit(String s, FontMetrics fm, int width) {
+        if (s.isEmpty() || width <= 0 || fm.stringWidth(s) <= width) return s;
+        String ellipsis = "…";
+        int lo = 0, hi = s.length();
+        // Binary search for the smallest cut point (= longest remaining
+        // suffix) whose ellipsis-prefixed form still fits: fitting is
+        // monotonic in the cut point, so this converges to the boundary.
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            String candidate = ellipsis + s.substring(mid);
+            if (fm.stringWidth(candidate) <= width) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        return ellipsis + s.substring(lo);
+    }
 
-        LeftTruncatingLabel(Font font, Color foreground) {
+    /**
+     * Small rounded, bordered, monospaced badge showing the step's enclosing
+     * symbol ({@link WalkthroughSymbols#describe}) — {@code Class.method()}
+     * with the class name a shade brighter than the method, or a bare class
+     * name, or (when the anchor can't be resolved to a symbol) the raw
+     * {@code File.java:123} fallback in a single dim tone. Bounded to
+     * {@link #MAX_WIDTH} and left-truncated beyond that — a chip stays a
+     * chip, it doesn't stretch to fill the row. The full project-relative
+     * path plus line lives in the tooltip.
+     */
+    private static final class SymbolChip extends JComponent {
+        // "ClassName.methodName()" — group 1 is the class, group 2 the method
+        // (with its trailing parens). Anything that doesn't match this or a
+        // bare identifier is treated as the File.java:123 fallback form.
+        private static final Pattern METHOD =
+            Pattern.compile("^([A-Za-z_$][A-Za-z0-9_$]*)(\\.[A-Za-z_$][A-Za-z0-9_$]*\\(\\))$");
+        private static final Pattern CLASS_ONLY =
+            Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*$");
+
+        private static final int MAX_WIDTH = JBUI.scale(200);
+        private static final int PAD_H = JBUI.scale(6);
+        private static final int PAD_V = JBUI.scale(2);
+        private static final int ARC = JBUI.scale(6);
+
+        // Class name sits between the title and the disabled/path colour —
+        // brighter than the method, dimmer than the title.
+        private final Color classColor = mix(UIUtil.getLabelForeground(), UIUtil.getLabelDisabledForeground(), 0.35f);
+        private final Color methodColor = UIUtil.getLabelDisabledForeground();
+        private final Color fallbackColor = UIUtil.getLabelDisabledForeground();
+        // A hairline-subtle tint of the panel background, not a bare literal —
+        // derives from the platform colour the chip actually sits on.
+        private final Color background = mix(UIUtil.getPanelBackground(), UIUtil.getLabelForeground(), 0.05f);
+        private final Color border = JBColor.border();
+
+        private String text = "";
+        private String classPart = "";
+        private String methodPart = "";
+        private boolean isSymbol;
+
+        SymbolChip(Font font) {
             setFont(font);
-            setForeground(foreground);
         }
 
-        void setFullText(String t) {
-            this.text = t == null ? "" : t;
-            setToolTipText(this.text.isEmpty() ? null : this.text);
+        void setSymbol(String raw, String tooltip) {
+            this.text = raw == null ? "" : raw;
+            Matcher m = METHOD.matcher(text);
+            if (m.matches()) {
+                isSymbol = true;
+                classPart = m.group(1);
+                methodPart = m.group(2);
+            } else if (CLASS_ONLY.matcher(text).matches()) {
+                isSymbol = true;
+                classPart = text;
+                methodPart = "";
+            } else {
+                isSymbol = false;
+                classPart = text;
+                methodPart = "";
+            }
+            setToolTipText(tooltip == null || tooltip.isBlank() ? null : tooltip);
             revalidate();
             repaint();
         }
 
         @Override public Dimension getPreferredSize() {
             FontMetrics fm = getFontMetrics(getFont());
-            return new Dimension(JBUI.scale(40), fm.getHeight());
+            int natural = fm.stringWidth(text) + PAD_H * 2;
+            int w = Math.max(JBUI.scale(24), Math.min(natural, MAX_WIDTH));
+            return new Dimension(w, fm.getHeight() + PAD_V * 2);
         }
 
-        @Override public Dimension getMaximumSize() {
-            return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
-        }
+        @Override public Dimension getMaximumSize() { return getPreferredSize(); }
 
         @Override protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
             try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                int w = getWidth(), h = getHeight();
+                g.setColor(background);
+                g.fillRoundRect(0, 0, w - 1, h - 1, ARC, ARC);
+                g.setColor(border);
+                g.drawRoundRect(0, 0, w - 1, h - 1, ARC, ARC);
+
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                 g.setFont(getFont());
-                g.setColor(getForeground());
                 FontMetrics fm = g.getFontMetrics();
-                g.drawString(fit(text, fm, getWidth()), 0, fm.getAscent());
+                int innerWidth = Math.max(0, w - PAD_H * 2);
+                int ty = (h + fm.getAscent() - fm.getDescent()) / 2;
+
+                if (!isSymbol) {
+                    g.setColor(fallbackColor);
+                    g.drawString(leftFit(text, fm, innerWidth), PAD_H, ty);
+                    return;
+                }
+                String full = classPart + methodPart;
+                if (fm.stringWidth(full) <= innerWidth) {
+                    g.setColor(classColor);
+                    g.drawString(classPart, PAD_H, ty);
+                    if (!methodPart.isEmpty()) {
+                        g.setColor(methodColor);
+                        g.drawString(methodPart, PAD_H + fm.stringWidth(classPart), ty);
+                    }
+                } else {
+                    // Doesn't fit even the chip's own box: left-truncate the
+                    // whole thing in the dimmer (method) tone — the surviving
+                    // tail is the method name, which is the more specific of
+                    // the two anyway.
+                    g.setColor(methodColor);
+                    g.drawString(leftFit(full, fm, innerWidth), PAD_H, ty);
+                }
             } finally {
                 g.dispose();
             }
-        }
-
-        /** Longest left-truncated ("…" + suffix) form of {@code s} that fits {@code width}. */
-        private static String fit(String s, FontMetrics fm, int width) {
-            if (s.isEmpty() || width <= 0 || fm.stringWidth(s) <= width) return s;
-            String ellipsis = "…";
-            int lo = 0, hi = s.length();
-            // Binary search for the smallest cut point (= longest remaining
-            // suffix) whose ellipsis-prefixed form still fits: fitting is
-            // monotonic in the cut point, so this converges to the boundary.
-            while (lo < hi) {
-                int mid = (lo + hi) / 2;
-                String candidate = ellipsis + s.substring(mid);
-                if (fm.stringWidth(candidate) <= width) {
-                    hi = mid;
-                } else {
-                    lo = mid + 1;
-                }
-            }
-            return ellipsis + s.substring(lo);
         }
     }
 
@@ -591,8 +670,8 @@ public final class WalkthroughPanel implements Disposable {
      * Word-wraps text to at most {@code maxLines} lines at the component's
      * current width, ellipsizing the final line when more text remains.
      * Swing's HTML renderer has no line-clamp primitive, so this measures
-     * and wraps by hand; like {@link LeftTruncatingLabel} it recomputes on
-     * every paint, so it re-wraps across tool-window resizes for free.
+     * and wraps by hand; like {@link SymbolChip} it recomputes on every
+     * paint, so it re-wraps across tool-window resizes for free.
      */
     private static final class ClampedLabel extends JComponent {
         private final int maxLines;

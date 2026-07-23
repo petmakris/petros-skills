@@ -5,14 +5,22 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.Inlay;
 import com.intellij.openapi.editor.InlayProperties;
 import com.intellij.openapi.editor.EditorCustomElementRenderer;
+import com.intellij.openapi.editor.event.VisibleAreaEvent;
+import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.ui.JBColor;
+import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 
 import java.awt.*;
+import java.awt.geom.RoundRectangle2D;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Mode B renderer: one block inlay under the active step's anchor line, holding
@@ -56,7 +64,7 @@ public final class WalkthroughInlay {
         this.project = project;
         this.controller = controller;
         this.client = client;
-        this.hud = new WalkthroughHud(project);
+        this.hud = new WalkthroughHud(project, controller);
     }
 
     public void attach() {
@@ -108,13 +116,40 @@ public final class WalkthroughInlay {
         } else if (client.isPending(step.anchor())) {
             body = body + "\n\n● waiting for Claude…";
         }
-        String header = "Step " + (c.index() + 1) + " of " + c.size() + " — " + step.title()
-            + (res.kind() == AnchorResolver.Kind.STALE ? "  (code changed here)" : "");
+        boolean stale = res.kind() == AnchorResolver.Kind.STALE;
+        String meta = "step " + (c.index() + 1) + " of " + c.size() + " · " + roleLabel(step.role())
+            + (stale ? " · code changed here" : "");
 
         currentInlay = editor.getInlayModel().addBlockElement(
             offset, new InlayProperties().showAbove(false).relatesToPrecedingText(true),
-            new CardRenderer(header, body));
+            new CardRenderer(step.title(), meta, body, step.role()));
+
+        // Block elements are sized by calcWidthInPixels()/calcHeightInPixels(),
+        // which the renderer computes fresh from the editor's *current* visible
+        // width every time — but nothing re-invokes those unless told to. A
+        // VisibleAreaListener scoped to the inlay (Inlay is itself Disposable,
+        // so this is auto-removed the moment disposeInlay() tears the inlay
+        // down on the next refresh — no separate bookkeeping needed) calls
+        // Inlay#update() on resize so the card actually re-wraps and repaints
+        // instead of quietly holding stale wrapped lines.
+        Inlay<?> inlayForListener = currentInlay;
+        int[] lastWidth = { CardRenderer.availableWidth(inlayForListener) };
+        editor.getScrollingModel().addVisibleAreaListener(new VisibleAreaListener() {
+            @Override public void visibleAreaChanged(VisibleAreaEvent e) {
+                int w = CardRenderer.availableWidth(inlayForListener);
+                if (w != lastWidth[0]) {
+                    lastWidth[0] = w;
+                    inlayForListener.update();
+                }
+            }
+        }, inlayForListener);
+
         hud.show(step, c.index(), c.size());
+    }
+
+    private static String roleLabel(WalkthroughStep.Role role) {
+        String name = role.name().replace('_', ' ').toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
 
     private void disposeInlay() {
@@ -124,58 +159,198 @@ public final class WalkthroughInlay {
         }
     }
 
-    /** Plain-text card. Kept deliberately simple: the rail is where rich rendering lives. */
+    /**
+     * Rounded card, prose in the UI font (not the editor's monospace — this is
+     * explanation text, not code). One {@link #layout} helper produces the
+     * wrapped header/body lines and the total height from them, and both
+     * {@link #calcHeightInPixels} and {@link #paint} call it — so the height
+     * reserved for the inlay always matches exactly what gets drawn, even as
+     * the editor is resized and the wrap width changes.
+     */
     private static final class CardRenderer implements EditorCustomElementRenderer {
-        private final String header;
-        private final String body;
+        private static final JBFont TITLE_FONT = JBUI.Fonts.label().asBold();
+        private static final JBFont META_FONT = JBUI.Fonts.label().lessOn(1.5f);
+        private static final JBFont BODY_FONT = JBUI.Fonts.label();
 
-        CardRenderer(String header, String body) {
-            this.header = header;
+        private static final Color TITLE_COLOR = UIUtil.getLabelForeground();
+        private static final Color META_COLOR = UIUtil.getLabelDisabledForeground();
+        private static final Color BODY_COLOR =
+            mix(UIUtil.getLabelForeground(), UIUtil.getLabelDisabledForeground(), 0.25f);
+
+        // Card chrome — paired light/dark tones, same convention as
+        // WalkthroughPanel's role palette below.
+        private static final JBColor CARD_BG = new JBColor(new Color(0xF7, 0xF8, 0xFA), new Color(0x2B, 0x2D, 0x30));
+        private static final JBColor CARD_BORDER = new JBColor(new Color(0xD8, 0xDA, 0xDE), new Color(0x45, 0x47, 0x4A));
+        // Same role hues WalkthroughPanel uses for its discs, so the rail and
+        // the inline card agree on what "SEAM"/"EDIT_SITE" look like.
+        private static final JBColor SEAM_COLOR = new JBColor(new Color(0x35, 0x74, 0xF0), new Color(0x54, 0x8A, 0xF7));
+        private static final JBColor EDIT_SITE_COLOR = new JBColor(new Color(0x1F, 0x9C, 0x5B), new Color(0x4C, 0xBB, 0x79));
+
+        private static final int PAD_X = JBUI.scale(14);
+        private static final int PAD_TOP = JBUI.scale(8);
+        private static final int PAD_BOTTOM = JBUI.scale(8);
+        private static final int HEADER_GAP = JBUI.scale(6);
+        private static final int LINE_GAP = JBUI.scale(3);
+        private static final int ARC = JBUI.scale(8);
+        private static final int EDGE_W = JBUI.scale(3);
+
+        private final String title;
+        private final String meta;
+        private final String body;
+        private final WalkthroughStep.Role role;
+
+        CardRenderer(String title, String meta, String body, WalkthroughStep.Role role) {
+            this.title = title;
+            this.meta = meta;
             this.body = body;
+            this.role = role;
         }
 
-        private static String[] lines(String text) { return text.split("\n", -1); }
+        /** The width the card wraps to: the editor's current visible width, minus its own insets and gutter. */
+        static int availableWidth(Inlay<?> inlay) {
+            Editor e = inlay.getEditor();
+            int w = e.getScrollingModel().getVisibleArea().width;
+            if (w <= 0) w = e.getContentComponent().getWidth();
+            if (w <= 0) w = JBUI.scale(640); // not laid out yet — a sane placeholder, re-wrapped on the next resize
+            return Math.max(JBUI.scale(160), w - JBUI.scale(8));
+        }
+
+        private record Layout(String title, String meta, List<String> bodyLines,
+                               int headerHeight, int lineHeight, int totalHeight) {}
+
+        private Layout layout(Inlay<?> inlay) {
+            Component c = inlay.getEditor().getContentComponent();
+            FontMetrics titleFm = c.getFontMetrics(TITLE_FONT);
+            FontMetrics metaFm = c.getFontMetrics(META_FONT);
+            FontMetrics bodyFm = c.getFontMetrics(BODY_FONT);
+
+            int width = availableWidth(inlay);
+            int innerWidth = Math.max(JBUI.scale(60), width - EDGE_W - PAD_X * 2);
+
+            int metaWidth = metaFm.stringWidth(meta);
+            int titleBudget = Math.max(JBUI.scale(20), innerWidth - metaWidth - JBUI.scale(12));
+            String fittedTitle = truncateEnd(title, titleFm, titleBudget);
+
+            List<String> bodyLines = wrap(body, bodyFm, innerWidth);
+
+            int headerHeight = Math.max(titleFm.getHeight(), metaFm.getHeight());
+            int lineHeight = bodyFm.getHeight() + LINE_GAP;
+            int totalHeight = PAD_TOP + headerHeight + HEADER_GAP
+                + bodyLines.size() * lineHeight + PAD_BOTTOM;
+
+            return new Layout(fittedTitle, meta, bodyLines, headerHeight, lineHeight, totalHeight);
+        }
 
         @Override public int calcWidthInPixels(Inlay inlay) {
-            Editor e = inlay.getEditor();
-            FontMetrics fm = e.getContentComponent().getFontMetrics(e.getColorsScheme().getFont(
-                com.intellij.openapi.editor.colors.EditorFontType.PLAIN));
-            int max = fm.stringWidth(header);
-            for (String l : lines(body)) max = Math.max(max, fm.stringWidth(l));
-            return max + JBUI.scale(32);
+            return availableWidth(inlay);
         }
 
         @Override public int calcHeightInPixels(Inlay inlay) {
-            int rows = lines(body).length + 2;
-            return rows * inlay.getEditor().getLineHeight() + JBUI.scale(8);
+            return layout(inlay).totalHeight();
         }
 
         @Override public void paint(Inlay inlay, Graphics g, Rectangle target, TextAttributes attributes) {
-            Editor e = inlay.getEditor();
+            Layout l = layout(inlay);
             Graphics2D g2 = (Graphics2D) g.create();
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(new Color(0xF5, 0xF8, 0xFF));
-                g2.fillRect(target.x, target.y, target.width, target.height);
-                g2.setColor(new Color(0x35, 0x74, 0xF0));
-                g2.fillRect(target.x, target.y, JBUI.scale(3), target.height);
-                g2.setFont(e.getColorsScheme().getFont(
-                    com.intellij.openapi.editor.colors.EditorFontType.BOLD));
-                int lineHeight = e.getLineHeight();
-                int x = target.x + JBUI.scale(14);
-                int y = target.y + lineHeight;
-                g2.setColor(new Color(0x1F, 0x21, 0x26));
-                g2.drawString(header, x, y);
-                g2.setFont(e.getColorsScheme().getFont(
-                    com.intellij.openapi.editor.colors.EditorFontType.PLAIN));
-                g2.setColor(new Color(0x2F, 0x32, 0x37));
-                for (String l : lines(body)) {
-                    y += lineHeight;
-                    g2.drawString(l, x, y);
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+                RoundRectangle2D.Float cardShape = new RoundRectangle2D.Float(
+                    target.x, target.y, Math.max(1, target.width - 1), Math.max(1, target.height - 1), ARC, ARC);
+
+                Shape oldClip = g2.getClip();
+                g2.setClip(cardShape);
+                g2.setColor(CARD_BG);
+                g2.fill(cardShape);
+                g2.setColor(roleColor(role));
+                g2.fillRect(target.x, target.y, EDGE_W, target.height);
+                g2.setClip(oldClip);
+                g2.setColor(CARD_BORDER);
+                g2.draw(cardShape);
+
+                int x = target.x + EDGE_W + PAD_X;
+                int rightEdge = target.x + target.width - PAD_X;
+                int y = target.y + PAD_TOP;
+
+                g2.setFont(TITLE_FONT);
+                FontMetrics titleFm = g2.getFontMetrics();
+                g2.setColor(TITLE_COLOR);
+                g2.drawString(l.title(), x, y + titleFm.getAscent());
+
+                g2.setFont(META_FONT);
+                FontMetrics metaFm = g2.getFontMetrics();
+                g2.setColor(META_COLOR);
+                int metaWidth = metaFm.stringWidth(l.meta());
+                g2.drawString(l.meta(), rightEdge - metaWidth, y + metaFm.getAscent());
+
+                y += l.headerHeight() + HEADER_GAP;
+
+                g2.setFont(BODY_FONT);
+                FontMetrics bodyFm = g2.getFontMetrics();
+                g2.setColor(BODY_COLOR);
+                for (String line : l.bodyLines()) {
+                    g2.drawString(line, x, y + bodyFm.getAscent());
+                    y += l.lineHeight();
                 }
             } finally {
                 g2.dispose();
             }
+        }
+
+        private static Color roleColor(WalkthroughStep.Role role) {
+            return switch (role) {
+                case SEAM -> SEAM_COLOR;
+                case EDIT_SITE -> EDIT_SITE_COLOR;
+                case CONTEXT -> UIUtil.getLabelDisabledForeground();
+            };
+        }
+
+        private static Color mix(Color a, Color b, float t) {
+            int r = Math.round(a.getRed() + (b.getRed() - a.getRed()) * t);
+            int g = Math.round(a.getGreen() + (b.getGreen() - a.getGreen()) * t);
+            int bl = Math.round(a.getBlue() + (b.getBlue() - a.getBlue()) * t);
+            return new Color(r, g, bl);
+        }
+
+        /** Word-wraps {@code text} to {@code maxWidth}, treating existing "\n" as paragraph breaks. */
+        private static List<String> wrap(String text, FontMetrics fm, int maxWidth) {
+            List<String> out = new ArrayList<>();
+            if (maxWidth <= 0) { out.add(text); return out; }
+            for (String paragraph : text.split("\n", -1)) {
+                if (paragraph.isEmpty()) { out.add(""); continue; }
+                String[] words = paragraph.split(" ");
+                StringBuilder line = new StringBuilder();
+                for (String word : words) {
+                    String candidate = line.length() == 0 ? word : line + " " + word;
+                    if (fm.stringWidth(candidate) <= maxWidth || line.length() == 0) {
+                        line = new StringBuilder(candidate);
+                    } else {
+                        out.add(line.toString());
+                        line = new StringBuilder(word);
+                    }
+                }
+                out.add(line.toString());
+            }
+            return out;
+        }
+
+        /** Right-truncating ellipsis fit — the header title reads left to right, so unlike the rail's
+         *  chip (whose tail identifies it) this keeps the beginning and drops the end. */
+        private static String truncateEnd(String s, FontMetrics fm, int width) {
+            if (s.isEmpty() || width <= 0 || fm.stringWidth(s) <= width) return s;
+            String ellipsis = "…";
+            int lo = 0, hi = s.length();
+            while (lo < hi) {
+                int mid = (lo + hi + 1) / 2;
+                String candidate = s.substring(0, mid) + ellipsis;
+                if (fm.stringWidth(candidate) <= width) {
+                    lo = mid;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            return lo == 0 ? ellipsis : s.substring(0, lo) + ellipsis;
         }
     }
 }
