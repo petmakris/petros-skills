@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.keymap.KeymapUtil;
@@ -16,6 +17,10 @@ import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.HierarchyEvent;
+import java.awt.event.HierarchyListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.RoundRectangle2D;
@@ -26,18 +31,31 @@ import java.util.Locale;
  * over the active editor — title + progress, real prev/next buttons wired to
  * the controller, and a row of step dots. Replaced (not stacked) on each step.
  *
- * <p>Delivered as a real child component of the editor's own layered pane
- * ({@link Editor#getComponent()}, added at {@link JLayeredPane#PALETTE_LAYER})
+ * <p>Delivered as a real child component of the IDE window's own layered pane
+ * ({@code JRootPane#getLayeredPane()}, added at {@link JLayeredPane#PALETTE_LAYER})
  * rather than through a {@link com.intellij.openapi.ui.popup.JBPopup}. A
  * popup is cancelled by anything the platform considers "elsewhere" — focus
  * leaving it, the IDE window (de)activating, another popup opening, Escape,
  * even the editor scrolling — none of which have anything to do with the
  * walkthrough being finished, yet each one silently and permanently killed
  * this bar until the next unrelated refresh brought it back. Anchoring
- * inside the editor's own component tree removes that whole class of bug
- * rather than patching each cancellation path: a plain child component has
- * no cancellation channel to plug in the first place, so it just stays
- * exactly as visible as the editor around it.
+ * inside a plain child component of the window's component tree removes
+ * that whole class of bug rather than patching each cancellation path: a
+ * plain child component has no cancellation channel to plug in the first
+ * place, so it just stays exactly as visible as the editor around it.
+ *
+ * <p>{@link Editor#getComponent()} itself is <em>not</em> a layered pane —
+ * it is a plain {@code JPanel} wrapper around the editor's scroll pane and
+ * gutter — and {@code EditorImpl} keeps its own internal floating-toolbar
+ * layered pane private, with no public accessor. The nearest genuinely
+ * usable layered pane is therefore the one every {@code JRootPane} already
+ * exposes, resolved via {@link SwingUtilities#getRootPane(Component)} from
+ * the editor's component. Coordinates are converted from the editor
+ * component's origin into that layered pane's coordinate space (see
+ * {@link #positionPill}), and the pill's bounds are always clamped to the
+ * editor component's own footprint within the layered pane — so even though
+ * the host is window-scoped, the pill itself can never stray outside the
+ * editor area into a neighbouring tool window or split.
  *
  * <p>The pill's bounds are kept to its own visible rectangle only — never a
  * full-size transparent overlay — so hit-testing on the empty pixels around
@@ -48,22 +66,35 @@ import java.util.Locale;
  */
 public final class WalkthroughHud {
 
+    private static final Logger LOG = Logger.getInstance(WalkthroughHud.class);
+
     private static final JBFont TITLE_FONT = JBUI.Fonts.label().asBold();
     private static final JBFont META_FONT = JBUI.Fonts.label().lessOn(1.5f);
     private static final int BOTTOM_MARGIN = JBUI.scale(36);
 
     private final WalkthroughController controller;
 
-    // The editor currently hosting the pill (null when hidden), its layered
-    // pane (the component the pill is actually a child of), the pill itself,
-    // and the listener that keeps it glued to that editor's bottom-centre
-    // across resizes and scrolling. hide() tears all four down together —
-    // see hide() — so at most one pill exists at a time (WalkthroughInlay's
-    // refresh() calls show() on every step activation; show() always hides
-    // first).
+    // The editor component currently hosting the pill (null when hidden),
+    // the layered pane the pill is actually a child of, the root pane that
+    // layered pane belongs to, the pill itself, and every listener that
+    // keeps it glued to that editor's bottom-centre across scrolling,
+    // editor resize/move and window/root-pane resize. hide() tears all of
+    // it down together — see hide() — so at most one pill exists at a time
+    // (WalkthroughInlay's refresh() calls show() on every step activation;
+    // show() always hides first).
     private JLayeredPane hostLayeredPane;
+    private JComponent hostEditorComponent;
+    private JRootPane hostRootPane;
     private JComponent currentPill;
     private Disposable listenerScope;
+    private ComponentAdapter editorComponentListener;
+    private ComponentAdapter rootComponentListener;
+
+    // While waiting for a not-yet-realised editor component to become
+    // showing (see attemptShow) — at most one pending attempt at a time,
+    // torn down by hide() the same as everything else.
+    private JComponent pendingComponent;
+    private HierarchyListener pendingListener;
 
     public WalkthroughHud(WalkthroughController controller) {
         this.controller = controller;
@@ -80,36 +111,112 @@ public final class WalkthroughHud {
      */
     public void show(Editor editor, WalkthroughStep step, int index, int total) {
         hide();
-        // No editor to anchor to (very early in project open, or a
-        // non-standard Editor implementation whose root component isn't a
-        // JLayeredPane) — there's nowhere sensible to host the pill, so just
-        // skip it, the same way the old missing-IdeFrame guard did.
+        // No editor to anchor to (very early in project open, or the user
+        // has no text editor selected) — there's nowhere sensible to host
+        // the pill, so just skip it, the same way the old missing-IdeFrame
+        // guard did. This is a normal, expected state, not a failure.
         if (editor == null) return;
-        JComponent editorComponent = editor.getComponent();
-        if (!(editorComponent instanceof JLayeredPane layeredPane)) return;
+        attemptShow(editor.getComponent(), editor, step, index, total);
+    }
+
+    /**
+     * Resolves a host for {@code editorComponent} and shows the pill in it.
+     * If the component isn't realised yet ({@link Component#isShowing()} is
+     * false — happens very early in project open, or immediately after a
+     * tab switch before layout has run) this does <em>not</em> give up
+     * silently: it registers a one-shot {@link HierarchyListener} and
+     * retries the instant the component becomes showing. Only a component
+     * that is showing yet still has no {@link JRootPane} — genuinely
+     * unexpected — is logged and dropped.
+     */
+    private void attemptShow(JComponent editorComponent, Editor editor, WalkthroughStep step, int index, int total) {
+        if (!editorComponent.isShowing()) {
+            HierarchyListener[] self = new HierarchyListener[1];
+            self[0] = e -> {
+                if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && editorComponent.isShowing()) {
+                    editorComponent.removeHierarchyListener(self[0]);
+                    if (pendingListener == self[0]) {
+                        pendingListener = null;
+                        pendingComponent = null;
+                    }
+                    attemptShow(editorComponent, editor, step, index, total);
+                }
+            };
+            editorComponent.addHierarchyListener(self[0]);
+            pendingComponent = editorComponent;
+            pendingListener = self[0];
+            return;
+        }
+
+        JRootPane root = SwingUtilities.getRootPane(editorComponent);
+        JLayeredPane layeredPane = root != null ? root.getLayeredPane() : null;
+        if (layeredPane == null) {
+            LOG.warn("WalkthroughHud: editor component is showing but has no JRootPane; "
+                + "cannot host the step bar for step \"" + step.title() + "\"");
+            return;
+        }
 
         JComponent pill = buildPill(step, index, total);
         pill.setFocusable(false);
 
         Disposable scope = Disposer.newDisposable("WalkthroughHud");
-        VisibleAreaListener reposition = e -> positionPill(layeredPane, pill);
+        VisibleAreaListener reposition = e -> positionPill(layeredPane, editorComponent, pill);
         editor.getScrollingModel().addVisibleAreaListener(reposition, scope);
 
+        // VisibleAreaListener covers scrolling and most resizes (the visible
+        // area is a function of viewport size), but editor resize/move that
+        // don't change the visible area's logical extent — and root-pane
+        // (whole IDE window) resize — need their own listeners so the pill
+        // never drifts from the editor's bottom-centre.
+        ComponentAdapter editorListener = new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent e) { positionPill(layeredPane, editorComponent, pill); }
+            @Override public void componentMoved(ComponentEvent e) { positionPill(layeredPane, editorComponent, pill); }
+        };
+        editorComponent.addComponentListener(editorListener);
+
+        ComponentAdapter rootListener = new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent e) { positionPill(layeredPane, editorComponent, pill); }
+        };
+        root.addComponentListener(rootListener);
+
         layeredPane.add(pill, JLayeredPane.PALETTE_LAYER);
-        positionPill(layeredPane, pill);
+        positionPill(layeredPane, editorComponent, pill);
         layeredPane.revalidate();
         layeredPane.repaint();
 
         hostLayeredPane = layeredPane;
+        hostEditorComponent = editorComponent;
+        hostRootPane = root;
+        editorComponentListener = editorListener;
+        rootComponentListener = rootListener;
         currentPill = pill;
         listenerScope = scope;
+
+        // Defensive check: the exact class of bug this HUD once shipped
+        // (WalkthroughHud.show() returning before adding anything to the
+        // hierarchy) produced no exception and no log line — just a pill
+        // that silently never appeared. Make that failure mode visible
+        // instead of silent, in both dev (-ea) and production builds.
+        boolean healthy = pill.getParent() != null && !pill.getBounds().isEmpty();
+        if (!healthy) {
+            LOG.warn("WalkthroughHud: pill attached but not laid out — parent=" + pill.getParent()
+                + " bounds=" + pill.getBounds() + " step=\"" + step.title() + "\"");
+        }
+        assert healthy : "WalkthroughHud pill failed to attach: parent=" + pill.getParent() + " bounds=" + pill.getBounds();
     }
 
     public void hide() {
+        if (pendingComponent != null) {
+            pendingComponent.removeHierarchyListener(pendingListener);
+            pendingComponent = null;
+            pendingListener = null;
+        }
         if (currentPill == null) return;
         hostLayeredPane.remove(currentPill);
         hostLayeredPane.revalidate();
         hostLayeredPane.repaint();
+        hostEditorComponent.removeComponentListener(editorComponentListener);
+        hostRootPane.removeComponentListener(rootComponentListener);
         // Disposing rather than editor.getScrollingModel().removeVisibleAreaListener(...)
         // directly: the editor behind hostLayeredPane may already be closed
         // by the time hide() runs (e.g. the user closed the tab), and
@@ -118,15 +225,43 @@ public final class WalkthroughHud {
         // model would not be.
         Disposer.dispose(listenerScope);
         hostLayeredPane = null;
+        hostEditorComponent = null;
+        hostRootPane = null;
+        editorComponentListener = null;
+        rootComponentListener = null;
         currentPill = null;
         listenerScope = null;
     }
 
-    private static void positionPill(JLayeredPane layeredPane, JComponent pill) {
+    /**
+     * Positions {@code pill} at {@code editorComponent}'s bottom-centre,
+     * converting {@code editorComponent}'s origin into {@code layeredPane}'s
+     * coordinate space (they are not the same component — the layered pane
+     * belongs to the enclosing {@link JRootPane}, which may host tool
+     * windows and other editors besides this one). The result is then
+     * clamped to {@code editorComponent}'s own footprint within that space,
+     * so a small editor (e.g. a narrow split) can never let the pill
+     * overhang into a neighbouring tool window or split — even though the
+     * host layered pane itself spans the whole window.
+     */
+    private static void positionPill(JLayeredPane layeredPane, JComponent editorComponent, JComponent pill) {
+        if (!editorComponent.isShowing() || !layeredPane.isShowing()) return;
+        Point origin = SwingUtilities.convertPoint(editorComponent, 0, 0, layeredPane);
+        int editorWidth = editorComponent.getWidth();
+        int editorHeight = editorComponent.getHeight();
         Dimension pref = pill.getPreferredSize();
-        int x = Math.max(0, (layeredPane.getWidth() - pref.width) / 2);
-        int y = Math.max(0, layeredPane.getHeight() - pref.height - BOTTOM_MARGIN);
+
+        int x = origin.x + Math.max(0, (editorWidth - pref.width) / 2);
+        int y = origin.y + editorHeight - pref.height - BOTTOM_MARGIN;
+
+        x = clamp(x, origin.x, origin.x + Math.max(0, editorWidth - pref.width));
+        y = clamp(y, origin.y, origin.y + Math.max(0, editorHeight - pref.height));
+
         pill.setBounds(x, y, pref.width, pref.height);
+    }
+
+    private static int clamp(int value, int lo, int hi) {
+        return Math.max(lo, Math.min(value, hi));
     }
 
     private PillPanel buildPill(WalkthroughStep step, int index, int total) {
