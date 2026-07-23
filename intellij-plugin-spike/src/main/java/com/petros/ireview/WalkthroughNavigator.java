@@ -1,5 +1,6 @@
 package com.petros.ireview;
 
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -54,14 +55,16 @@ public interface WalkthroughNavigator {
         @Override public void navigate(WalkthroughStep step) {
             VirtualFile vf = resolveStepFile(project, step);
             if (vf == null || vf.isDirectory()) return;
-            com.intellij.openapi.editor.Document doc =
-                com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vf);
-            int line = step.line();
-            if (doc != null) {
+            // getDocument() touches the PSI/VFS model and asserts a read action even
+            // on the EDT — only this model read needs the wrapper, not the whole method.
+            int line = ReadAction.compute(() -> {
+                com.intellij.openapi.editor.Document doc =
+                    com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vf);
+                if (doc == null) return step.line();
                 List<String> lines = List.of(doc.getText().split("\n", -1));
                 AnchorResolver.Resolution res = resolveLine(lines, step);
-                if (res.kind() != AnchorResolver.Kind.STALE) line = res.line();
-            }
+                return res.kind() != AnchorResolver.Kind.STALE ? res.line() : step.line();
+            });
             int line0 = Math.max(0, line - 1);
             OpenFileDescriptor descriptor = new OpenFileDescriptor(project, vf, line0, 0);
             Editor editor = FileEditorManager.getInstance(project)
