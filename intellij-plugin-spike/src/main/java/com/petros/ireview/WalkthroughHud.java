@@ -3,14 +3,12 @@ package com.petros.ireview;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.Shortcut;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.keymap.KeymapUtil;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.popup.JBPopup;
-import com.intellij.openapi.ui.popup.JBPopupFactory;
-import com.intellij.openapi.wm.IdeFrame;
-import com.intellij.openapi.wm.WindowManager;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.JBColor;
-import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
@@ -25,64 +23,110 @@ import java.util.Locale;
 
 /**
  * Mode B position indicator: a floating "control pill" docked bottom-centre
- * over the editor — title + progress, real prev/next buttons wired to the
- * controller, and a row of step dots. Replaced (not stacked) on each step.
+ * over the active editor — title + progress, real prev/next buttons wired to
+ * the controller, and a row of step dots. Replaced (not stacked) on each step.
  *
- * <p>Delivered via a chromeless {@link JBPopup} (no title bar, no shadow, no
- * border of its own) rather than {@link com.intellij.openapi.ui.popup.Balloon}
- * — a balloon's built-in chrome is exactly the plain-grey-rectangle-with-a-
- * callout look this replaces, and fighting it to draw a bespoke pill inside
- * it would mean overriding more than it saves. All of the pill's chrome
- * (gradient fill, border, inner highlight, drop shadow) is instead painted
- * by {@link PillPanel} itself.
+ * <p>Delivered as a real child component of the editor's own layered pane
+ * ({@link Editor#getComponent()}, added at {@link JLayeredPane#PALETTE_LAYER})
+ * rather than through a {@link com.intellij.openapi.ui.popup.JBPopup}. A
+ * popup is cancelled by anything the platform considers "elsewhere" — focus
+ * leaving it, the IDE window (de)activating, another popup opening, Escape,
+ * even the editor scrolling — none of which have anything to do with the
+ * walkthrough being finished, yet each one silently and permanently killed
+ * this bar until the next unrelated refresh brought it back. Anchoring
+ * inside the editor's own component tree removes that whole class of bug
+ * rather than patching each cancellation path: a plain child component has
+ * no cancellation channel to plug in the first place, so it just stays
+ * exactly as visible as the editor around it.
+ *
+ * <p>The pill's bounds are kept to its own visible rectangle only — never a
+ * full-size transparent overlay — so hit-testing on the empty pixels around
+ * it falls straight through to the editor beneath; nothing extra is needed
+ * to avoid stealing clicks meant for the editor. All of its chrome (gradient
+ * fill, border, inner highlight, drop shadow) is painted by {@link PillPanel}
+ * itself; no callout/pointer, same as before.
  */
 public final class WalkthroughHud {
 
     private static final JBFont TITLE_FONT = JBUI.Fonts.label().asBold();
     private static final JBFont META_FONT = JBUI.Fonts.label().lessOn(1.5f);
+    private static final int BOTTOM_MARGIN = JBUI.scale(36);
 
-    private final Project project;
     private final WalkthroughController controller;
-    private JBPopup popup;
 
-    public WalkthroughHud(Project project, WalkthroughController controller) {
-        this.project = project;
+    // The editor currently hosting the pill (null when hidden), its layered
+    // pane (the component the pill is actually a child of), the pill itself,
+    // and the listener that keeps it glued to that editor's bottom-centre
+    // across resizes and scrolling. hide() tears all four down together —
+    // see hide() — so at most one pill exists at a time (WalkthroughInlay's
+    // refresh() calls show() on every step activation; show() always hides
+    // first).
+    private JLayeredPane hostLayeredPane;
+    private JComponent currentPill;
+    private Disposable listenerScope;
+
+    public WalkthroughHud(WalkthroughController controller) {
         this.controller = controller;
     }
 
-    public void show(WalkthroughStep step, int index, int total) {
+    /**
+     * Shows the pill anchored to {@code editor}'s bottom-centre. Hides any
+     * previously-shown pill first, including one anchored to a *different*
+     * editor — this is how the bar follows the active editor: refresh()
+     * calls this with whatever editor is currently selected, and switching
+     * tabs naturally migrates the pill (or drops it, if {@code editor} is
+     * null or the wrong kind of editor) rather than leaving it stuck over a
+     * file the user has navigated away from.
+     */
+    public void show(Editor editor, WalkthroughStep step, int index, int total) {
         hide();
-        // The IDE frame may not be allocated yet (e.g. very early in project open);
-        // there is nothing sensible to anchor the popup to, so just skip it.
-        IdeFrame ideFrame = WindowManager.getInstance().getIdeFrame(project);
-        if (ideFrame == null) return;
-        JComponent frame = (JComponent) ideFrame.getComponent();
+        // No editor to anchor to (very early in project open, or a
+        // non-standard Editor implementation whose root component isn't a
+        // JLayeredPane) — there's nowhere sensible to host the pill, so just
+        // skip it, the same way the old missing-IdeFrame guard did.
+        if (editor == null) return;
+        JComponent editorComponent = editor.getComponent();
+        if (!(editorComponent instanceof JLayeredPane layeredPane)) return;
 
-        PillPanel pill = buildPill(step, index, total);
-        popup = JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(pill, null)
-            .setResizable(false)
-            .setMovable(false)
-            .setRequestFocus(false)
-            .setFocusable(false)
-            .setCancelOnClickOutside(false)
-            .setCancelOnOtherWindowOpen(false)
-            .setShowShadow(false)
-            .setShowBorder(false)
-            .createPopup();
+        JComponent pill = buildPill(step, index, total);
+        pill.setFocusable(false);
 
-        Dimension pref = pill.getPreferredSize();
-        Point at = new Point(
-            Math.max(0, frame.getWidth() / 2 - pref.width / 2),
-            Math.max(0, frame.getHeight() - pref.height - JBUI.scale(36)));
-        popup.show(new RelativePoint(frame, at));
+        Disposable scope = Disposer.newDisposable("WalkthroughHud");
+        VisibleAreaListener reposition = e -> positionPill(layeredPane, pill);
+        editor.getScrollingModel().addVisibleAreaListener(reposition, scope);
+
+        layeredPane.add(pill, JLayeredPane.PALETTE_LAYER);
+        positionPill(layeredPane, pill);
+        layeredPane.revalidate();
+        layeredPane.repaint();
+
+        hostLayeredPane = layeredPane;
+        currentPill = pill;
+        listenerScope = scope;
     }
 
     public void hide() {
-        if (popup != null) {
-            popup.cancel();
-            popup = null;
-        }
+        if (currentPill == null) return;
+        hostLayeredPane.remove(currentPill);
+        hostLayeredPane.revalidate();
+        hostLayeredPane.repaint();
+        // Disposing rather than editor.getScrollingModel().removeVisibleAreaListener(...)
+        // directly: the editor behind hostLayeredPane may already be closed
+        // by the time hide() runs (e.g. the user closed the tab), and
+        // Disposer.dispose on an already-torn-down scope is always safe,
+        // whereas reaching back into a possibly-disposed editor's scrolling
+        // model would not be.
+        Disposer.dispose(listenerScope);
+        hostLayeredPane = null;
+        currentPill = null;
+        listenerScope = null;
+    }
+
+    private static void positionPill(JLayeredPane layeredPane, JComponent pill) {
+        Dimension pref = pill.getPreferredSize();
+        int x = Math.max(0, (layeredPane.getWidth() - pref.width) / 2);
+        int y = Math.max(0, layeredPane.getHeight() - pref.height - BOTTOM_MARGIN);
+        pill.setBounds(x, y, pref.width, pref.height);
     }
 
     private PillPanel buildPill(WalkthroughStep step, int index, int total) {
@@ -98,14 +142,17 @@ public final class WalkthroughHud {
         titleLabel.setFont(TITLE_FONT);
         titleLabel.setForeground(UIUtil.getLabelForeground());
         titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        titleLabel.setFocusable(false);
 
         JBLabel metaLabel = new JBLabel((index + 1) + " / " + total + " · " + roleLabel(step.role()));
         metaLabel.setFont(META_FONT);
         metaLabel.setForeground(UIUtil.getLabelDisabledForeground());
         metaLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        metaLabel.setFocusable(false);
 
         JPanel center = new JPanel(new GridLayout(2, 1, 0, JBUI.scale(1)));
         center.setOpaque(false);
+        center.setFocusable(false);
         center.setBorder(JBUI.Borders.emptyLeft(JBUI.scale(4)));
         center.add(titleLabel);
         center.add(metaLabel);
@@ -117,11 +164,13 @@ public final class WalkthroughHud {
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.CENTER, JBUI.scale(8), 0));
         right.setOpaque(false);
+        right.setFocusable(false);
         right.add(dots);
         right.add(nextBtn);
 
         JPanel content = new JPanel(new BorderLayout(JBUI.scale(10), 0));
         content.setOpaque(false);
+        content.setFocusable(false);
         content.add(prevBtn, BorderLayout.WEST);
         content.add(center, BorderLayout.CENTER);
         content.add(right, BorderLayout.EAST);
@@ -170,6 +219,7 @@ public final class WalkthroughHud {
         PillPanel() {
             super(new BorderLayout());
             setOpaque(false);
+            setFocusable(false);
             setBorder(JBUI.Borders.empty(
                 SHADOW_SPAN + JBUI.scale(6), SHADOW_SPAN + JBUI.scale(14),
                 SHADOW_SPAN + SHADOW_DROP + JBUI.scale(6), SHADOW_SPAN + JBUI.scale(14)));
@@ -221,6 +271,7 @@ public final class WalkthroughHud {
         PillButton(String glyph, boolean accent, Runnable action) {
             this.glyph = glyph;
             this.accent = accent;
+            setFocusable(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             addMouseListener(new MouseAdapter() {
                 @Override public void mouseClicked(MouseEvent e) {
@@ -288,6 +339,7 @@ public final class WalkthroughHud {
             this.activeDot = total <= CAP
                 ? index
                 : (int) Math.round(index * (double) (count - 1) / Math.max(1, total - 1));
+            setFocusable(false);
         }
 
         @Override public Dimension getPreferredSize() {

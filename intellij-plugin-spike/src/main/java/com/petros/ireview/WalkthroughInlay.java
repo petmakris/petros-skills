@@ -9,8 +9,11 @@ import com.intellij.openapi.editor.event.VisibleAreaEvent;
 import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
+import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
@@ -37,6 +40,7 @@ public final class WalkthroughInlay {
     private final WalkthroughHud hud;
     private Inlay<?> currentInlay;
     private boolean attached;
+    private MessageBusConnection editorConnection;
 
     // Controller callbacks may arrive off the EDT; refresh() touches the editor's
     // inlay model, so bridge here the same way WalkthroughService/WalkthroughPanel do.
@@ -56,6 +60,15 @@ public final class WalkthroughInlay {
         @Override public void onDetached() { invokeRefresh(); }
     };
 
+    // The HUD is now anchored to whichever editor is selected (see
+    // WalkthroughHud), so switching tabs — not just step/doc/thread
+    // activity — has to trigger a refresh: otherwise the bar would stay
+    // parented to an editor the user has already navigated away from, or
+    // fail to reappear when they navigate back to the step's file.
+    private final FileEditorManagerListener editorListener = new FileEditorManagerListener() {
+        @Override public void selectionChanged(FileEditorManagerEvent event) { invokeRefresh(); }
+    };
+
     private void invokeRefresh() {
         ApplicationManager.getApplication().invokeLater(this::refresh);
     }
@@ -64,7 +77,7 @@ public final class WalkthroughInlay {
         this.project = project;
         this.controller = controller;
         this.client = client;
-        this.hud = new WalkthroughHud(project, controller);
+        this.hud = new WalkthroughHud(controller);
     }
 
     public void attach() {
@@ -72,6 +85,8 @@ public final class WalkthroughInlay {
         attached = true;
         controller.addListener(controllerListener);
         client.addListener(clientListener);
+        editorConnection = project.getMessageBus().connect();
+        editorConnection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, editorListener);
         refresh();
     }
 
@@ -80,6 +95,8 @@ public final class WalkthroughInlay {
         attached = false;
         controller.removeListener(controllerListener);
         client.removeListener(clientListener);
+        editorConnection.disconnect();
+        editorConnection = null;
         disposeInlay();
         hud.hide();
     }
@@ -95,12 +112,15 @@ public final class WalkthroughInlay {
 
         Editor editor = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
             .getSelectedTextEditor();
-        if (editor == null) { hud.show(step, c.index(), c.size()); return; }
+        // No editor at all — nothing to anchor the bar to.
+        if (editor == null) { hud.hide(); return; }
         VirtualFile vf = FileDocumentManager.getInstance().getFile(editor.getDocument());
         if (!WalkthroughNavigator.isStepFile(project, vf, step)) {
-            // The editor is showing a different file — the controller's navigate
-            // will land here again once the right file is open.
-            hud.show(step, c.index(), c.size());
+            // The editor is showing a different file — don't linger over it;
+            // hide until the controller's navigate (or the user) brings the
+            // right file back, which re-triggers refresh() via onStepActivated
+            // or the editor-selection listener.
+            hud.hide();
             return;
         }
         List<String> lines = List.of(editor.getDocument().getText().split("\n", -1));
@@ -144,7 +164,7 @@ public final class WalkthroughInlay {
             }
         }, inlayForListener);
 
-        hud.show(step, c.index(), c.size());
+        hud.show(editor, step, c.index(), c.size());
     }
 
     private static String roleLabel(WalkthroughStep.Role role) {
