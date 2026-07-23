@@ -18,10 +18,16 @@ skipped, never raised, so a GC failure can't stop the server from starting.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
 from skills._shared.web_companion.atomic import write_text_atomic
+
+# Shape of server-minted sids (sessions.Registry.make_sid). The stray sweep
+# only ever deletes directories matching this, so user files that happen to
+# live next to session dirs are never candidates.
+_SID_DIR_RE = re.compile(r"^\d{6}-\d{6}-[0-9a-f]{16}$")
 
 # Files whose mtime signals recent activity for a session. The server never
 # rewrites the <sid> base dir after creation, so its mtime alone would read
@@ -131,6 +137,66 @@ def _sweep_sessions(state_root: Path, retention_seconds: float, now: float,
             write_text_atomic(sessions_file, json.dumps(kept, indent=2))
         except OSError:
             summary["errors"] += 1
+
+    _prune_meta(state_root, kept, summary)
+    _sweep_strays(snapshot, kept, retention_seconds, now, summary)
+
+
+def _prune_meta(state_root: Path, kept: dict, summary: dict[str, int]) -> None:
+    """Drop sessions_meta.json rows for sids no longer in sessions.json.
+
+    Stale rows kept their slugs reserved, so a recreated session with the
+    same title got a needless -2 bump until the next persist() happened by.
+    """
+    meta_file = state_root / "sessions_meta.json"
+    try:
+        meta = json.loads(meta_file.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return
+    if not isinstance(meta, dict):
+        return
+    pruned = {sid: m for sid, m in meta.items() if sid in kept}
+    if pruned != meta:
+        try:
+            write_text_atomic(meta_file, json.dumps(pruned, indent=2))
+        except OSError:
+            summary["errors"] += 1
+
+
+def _sweep_strays(snapshot: dict, kept: dict, retention_seconds: float,
+                  now: float, summary: dict[str, int]) -> None:
+    """Remove dormant sid-shaped dirs that no registry row points at.
+
+    A session dir becomes invisible to the registry-driven sweep when its
+    create failed after mkdirs, or when rehydrate() dropped its row while
+    the dir survived. Walk the parent dirs the registry DOES know about and
+    reap unregistered siblings past retention.
+    """
+    parents = set()
+    for dirs in snapshot.values():
+        state_dir_str = dirs.get("state_dir") if isinstance(dirs, dict) else None
+        if state_dir_str:
+            # <cwd>/.claude/<skill>/<sid>/state -> <cwd>/.claude/<skill>
+            parents.add(Path(state_dir_str).parent.parent)
+    registered = set(snapshot)
+    for parent in parents:
+        try:
+            children = list(parent.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.name in registered or not _SID_DIR_RE.match(child.name):
+                continue
+            if not child.is_dir():
+                continue
+            activity = _last_activity(child, child / "state")
+            if activity is None or (now - activity) <= retention_seconds:
+                continue
+            try:
+                shutil.rmtree(child)
+                summary["sessions_removed"] += 1
+            except OSError:
+                summary["errors"] += 1
 
 
 def _sweep_by_mtime(paths, retention_seconds: float, now: float,

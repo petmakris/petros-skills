@@ -137,6 +137,7 @@ class Registry:
         with self._lock:
             self._sessions.pop(sid, None)
             self._meta.pop(sid, None)
+            self._waiters.pop(sid, None)
 
     def items(self) -> list[tuple[str, dict[str, Path]]]:
         with self._lock:

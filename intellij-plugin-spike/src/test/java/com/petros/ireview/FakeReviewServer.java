@@ -22,8 +22,31 @@ public final class FakeReviewServer implements AutoCloseable {
     public final ConcurrentLinkedQueue<String> sseQueue = new ConcurrentLinkedQueue<>();
     public volatile String sessionsJson = "[]";
     public volatile String threadsJson = "{}";
+    /** Body returned by GET /s/<sid>/steps.json. */
+    public volatile String stepsJson = "{\"steps\":[]}";
     /** Epoch seconds of the last watcher heartbeat returned by /poll; null → none yet (0). */
     public volatile Long watcherSeenAt = null;
+    /** {@code steps_generated_at} returned by /poll; null → 0. */
+    public volatile Long stepsGeneratedAt = null;
+    /**
+     * Remaining number of /api/sessions requests to answer with a malformed
+     * (unparsable) body instead of {@link #sessionsJson}, simulating a
+     * transient discovery failure. Decrements per request; 0 → respond
+     * normally.
+     */
+    public final java.util.concurrent.atomic.AtomicInteger sessionsFailuresRemaining =
+        new java.util.concurrent.atomic.AtomicInteger();
+    /**
+     * Remaining number of /api/sessions requests to answer with a non-200 status
+     * (no body) instead of {@link #sessionsJson}, simulating a transient server
+     * error (e.g. 503 while the registry is being rewritten). Checked before
+     * {@link #sessionsFailuresRemaining}; decrements per request; 0 → respond
+     * normally. Status code is {@link #sessionsHttpErrorStatus}.
+     */
+    public final java.util.concurrent.atomic.AtomicInteger sessionsHttpErrorsRemaining =
+        new java.util.concurrent.atomic.AtomicInteger();
+    /** Status code sent while {@link #sessionsHttpErrorsRemaining} is positive. */
+    public volatile int sessionsHttpErrorStatus = 503;
     /** When true, /poll reports ended=true (terminal or watcher-dead past reap). */
     public volatile boolean ended = false;
     /** ended_reason returned by /poll when ended; null → JSON null. */
@@ -36,6 +59,18 @@ public final class FakeReviewServer implements AutoCloseable {
     /** Count of POSTs that reached /api/cancel. */
     public final java.util.concurrent.atomic.AtomicInteger cancelCount =
         new java.util.concurrent.atomic.AtomicInteger();
+    /** Count of SSE /stream connections opened. */
+    public final java.util.concurrent.atomic.AtomicInteger streamOpens =
+        new java.util.concurrent.atomic.AtomicInteger();
+    /** Count of SSE /stream connections the SERVER saw end (write failed →
+     *  the client actually closed the TCP connection, not just a future). */
+    public final java.util.concurrent.atomic.AtomicInteger streamCloses =
+        new java.util.concurrent.atomic.AtomicInteger();
+    /** Delay (ms) before answering GET /threads.json — simulates a slow seed.
+     *  The body is captured BEFORE the delay, so a test can change
+     *  {@link #threadsJson} mid-flight and the delayed response still carries
+     *  the old content. */
+    public volatile long threadsDelayMs = 0;
 
     public FakeReviewServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -50,7 +85,19 @@ public final class FakeReviewServer implements AutoCloseable {
 
     private void handleSessions(HttpExchange ex) throws IOException {
         requests.add(ex);
-        byte[] body = sessionsJson.getBytes(StandardCharsets.UTF_8);
+        if (sessionsHttpErrorsRemaining.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
+            ex.sendResponseHeaders(sessionsHttpErrorStatus, -1);
+            ex.close();
+            return;
+        }
+        byte[] body;
+        if (sessionsFailuresRemaining.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
+            // Deliberately unparsable JSON (unterminated object) — the client
+            // must throw on this, not silently treat it as "no session".
+            body = "{".getBytes(StandardCharsets.UTF_8);
+        } else {
+            body = sessionsJson.getBytes(StandardCharsets.UTF_8);
+        }
         ex.getResponseHeaders().add("Content-Type", "application/json");
         ex.sendResponseHeaders(200, body.length);
         try (OutputStream os = ex.getResponseBody()) { os.write(body); }
@@ -59,8 +106,23 @@ public final class FakeReviewServer implements AutoCloseable {
     private void handleSession(HttpExchange ex) throws IOException {
         requests.add(ex);
         String path = ex.getRequestURI().getPath();
+        if (path.endsWith("/steps.json")) {
+            byte[] body = stepsJson.getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream os = ex.getResponseBody()) { os.write(body); }
+            return;
+        }
         if (path.endsWith("/threads.json")) {
             byte[] body = threadsJson.getBytes(StandardCharsets.UTF_8);
+            long delay = threadsDelayMs;
+            if (delay > 0) {
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             ex.getResponseHeaders().add("Content-Type", "application/json");
             ex.sendResponseHeaders(200, body.length);
             try (OutputStream os = ex.getResponseBody()) { os.write(body); }
@@ -68,8 +130,10 @@ public final class FakeReviewServer implements AutoCloseable {
         }
         if (path.endsWith("/poll")) {
             long seen = watcherSeenAt != null ? watcherSeenAt : 0;
+            long stepsTs = stepsGeneratedAt != null ? stepsGeneratedAt : 0;
             String reasonJson = endedReason == null ? "null" : "\"" + endedReason + "\"";
             byte[] body = ("{\"threads\":{},\"watcher_seen_at\":" + seen
+                + ",\"steps_generated_at\":" + stepsTs
                 + ",\"finished\":false,\"ended\":" + (ended ? "true" : "false")
                 + ",\"ended_reason\":" + reasonJson + "}").getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
@@ -94,6 +158,7 @@ public final class FakeReviewServer implements AutoCloseable {
             return;
         }
         if (path.endsWith("/stream")) {
+            streamOpens.incrementAndGet();
             ex.getResponseHeaders().add("Content-Type", "text/event-stream");
             ex.sendResponseHeaders(200, 0);
             try (OutputStream os = ex.getResponseBody()) {
@@ -103,10 +168,15 @@ public final class FakeReviewServer implements AutoCloseable {
                         os.write(chunk.getBytes(StandardCharsets.UTF_8));
                         os.flush();
                     }
+                    // Heartbeat comment (ignored by the SSE parser) so a client
+                    // that closed its end surfaces here as a failed write.
+                    os.write(": hb\n".getBytes(StandardCharsets.UTF_8));
+                    os.flush();
                     try { Thread.sleep(20); } catch (InterruptedException e) { break; }
                 }
             } catch (IOException ignored) {
-                // Client disconnected — fine.
+                // Client disconnected — the server-side view of EOF.
+                streamCloses.incrementAndGet();
             }
             return;
         }

@@ -19,6 +19,12 @@ set -u
 mkdir -p "$EVENTS_DIR" "$CONSUMED_DIR"
 
 while [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; do
+  # Workspace reaped (GC/retention) -> nothing left to watch. Without this
+  # the loop would spin forever writing heartbeats into a void.
+  if [ ! -d "$STATE_DIR" ]; then
+    printf 'WEBCOMPANION_CANCELLED skill=%s sid=%s\n' "$SKILL" "$SID"
+    exit 0
+  fi
   date +%s > "$STATE_DIR/watcher_heartbeat"
   if [ -n "${CLAUDE_SID:-}" ]; then
     mkdir -p "$STATE_DIR/watchers"
@@ -63,6 +69,10 @@ while [ ! -f "$STATE_DIR/finished" ] && [ ! -f "$STATE_DIR/cancelled" ]; do
         if [ "$n" -ge "${WEBCOMPANION_MAX_EMITS:-3}" ]; then
           rm -f "$CONSUMED_DIR/$id.attempts"
           mv -f "$evt" "$CONSUMED_DIR/$id.json"
+          # Giving up must be loud: this banner wakes Claude one final time
+          # so the user can be told their question was dropped, instead of
+          # a spinner that silently vanishes.
+          printf 'WEBCOMPANION_DROPPED skill=%s sid=%s event_id=%s\n' "$SKILL" "$SID" "$id"
         else
           echo "$n" > "$CONSUMED_DIR/$id.attempts"
         fi

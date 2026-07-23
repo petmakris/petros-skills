@@ -4,11 +4,12 @@
     <vendor>Petros Makris</vendor>
 
     <description><![CDATA[
-        Spike: attach a gutter icon to line 1 of the right side of any two-side text diff.
-        Clicking the icon pops an input dialog and logs the entered text.
+        IDE companion for the petros-skills web-companion server: per-line
+        threaded Q&A on GitHub PR diffs (/interactive-review) and anchored
+        code walkthroughs (/walkthrough), with Claude answering inline.
     ]]></description>
 
-    <idea-version since-build="242" until-build="243.*"/>
+    <idea-version since-build="242" until-build="261.*"/>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
@@ -18,6 +19,8 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <diff.DiffExtension implementation="com.petros.ireview.SpikeDiffExtension"/>
+        <editorFactoryListener implementation="com.petros.ireview.WorkingCopyAskGutter"/>
+        <editorFactoryListener implementation="com.petros.ireview.WalkthroughGutter"/>
 <projectService serviceImplementation="com.petros.ireview.ReviewSessionService"/>
         <applicationService serviceImplementation="com.petros.ireview.ShortcutPrefs"/>
         <statusBarWidgetFactory id="com.petros.ireview.statusbar"
@@ -26,6 +29,13 @@
                     anchor="right"
                     icon="/icons/annotation_yellow.svg"
                     factoryClass="com.petros.ireview.AnnotationsToolWindowFactory"/>
+        <projectService serviceImplementation="com.petros.ireview.WalkthroughService"/>
+        <toolWindow id="Walkthrough"
+                    anchor="right"
+                    icon="/icons/comment.svg"
+                    factoryClass="com.petros.ireview.WalkthroughToolWindowFactory"/>
+        <statusBarWidgetFactory id="com.petros.ireview.walkthrough.mode"
+                                implementation="com.petros.ireview.WalkthroughModeWidgetFactory"/>
     </extensions>
 
     <actions>
@@ -51,6 +61,34 @@
                  ⌃⌥⇧/ is free and parallels this plugin's ⌃⌥⇧L (Prettify). -->
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift SLASH"/>
             <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift SLASH"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughNext"
+                class="com.petros.ireview.WalkthroughActions$Next"
+                text="Walkthrough: Next Step"
+                description="Move to the next step of the active walkthrough.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift RIGHT"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift RIGHT"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughPrev"
+                class="com.petros.ireview.WalkthroughActions$Prev"
+                text="Walkthrough: Previous Step"
+                description="Move to the previous step of the active walkthrough.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift LEFT"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift LEFT"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughAsk"
+                class="com.petros.ireview.WalkthroughActions$Ask"
+                text="Walkthrough: Ask About This Step"
+                description="Ask Claude a question about the active walkthrough step.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift A"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift A"/>
+        </action>
+        <action id="com.petros.ireview.WalkthroughToggleMode"
+                class="com.petros.ireview.WalkthroughActions$ToggleMode"
+                text="Walkthrough: Toggle Rail / Inline"
+                description="Switch the walkthrough between the tool window and inline editor cards.">
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="control alt shift W"/>
+            <keyboard-shortcut keymap="Mac OS X"       first-keystroke="control alt shift W"/>
         </action>
     </actions>
 </idea-plugin>

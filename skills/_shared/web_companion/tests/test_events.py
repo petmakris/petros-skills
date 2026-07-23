@@ -2,7 +2,7 @@ import json
 import time
 from pathlib import Path
 
-from skills._shared.web_companion.events import append, heartbeat
+from skills._shared.web_companion.events import append
 
 
 def test_append_creates_file(tmp_path):
@@ -29,11 +29,3 @@ def test_append_atomic_write(tmp_path):
     # No leftover .tmp files
     assert not list(events_dir.glob("*.tmp"))
     assert (events_dir / f"{eid}.json").exists()
-
-
-def test_heartbeat_writes_state(tmp_path):
-    state_dir = tmp_path / "state"
-    state_dir.mkdir()
-    heartbeat(state_dir)
-    hb = (state_dir / "watcher_heartbeat").read_text().strip()
-    assert int(hb) > 0

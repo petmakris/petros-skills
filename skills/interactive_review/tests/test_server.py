@@ -616,3 +616,51 @@ def test_sse_recovers_from_missed_wakeup_on_heartbeat(tmp_path):
     all_output = b"".join(collected).decode("utf-8", errors="replace")
     assert "thread-changed" in all_output
     assert "new synthesis" in all_output
+
+
+def test_handle_submit_confines_image_paths_to_state_dir(tmp_path):
+    h = Handlers()
+    dirs = make_dirs(tmp_path)
+    handler = make_handler()
+    h.handle_submit(handler, dirs, {
+        "anchor": "src/x.py:R:42", "type": "comment", "text": "x",
+        "images": [{"token": "t", "path": "/etc/passwd"}]})
+    handler.send_response.assert_called_with(400)
+    assert list((dirs["events_dir"]).glob("*.json")) == []
+
+
+def test_handle_submit_accepts_images_inside_state_dir(tmp_path):
+    h = Handlers()
+    dirs = make_dirs(tmp_path)
+    img_dir = dirs["state_dir"] / "images"
+    img_dir.mkdir()
+    img = img_dir / "a.png"
+    img.write_bytes(b"png")
+    handler = make_handler()
+    h.handle_submit(handler, dirs, {
+        "anchor": "src/x.py:R:42", "type": "comment", "text": "x",
+        "images": [{"token": "t", "path": str(img)}]})
+    handler.send_response.assert_called_with(202)
+
+
+def test_handle_submit_rejects_non_list_images(tmp_path):
+    h = Handlers()
+    dirs = make_dirs(tmp_path)
+    handler = make_handler()
+    h.handle_submit(handler, dirs, {
+        "anchor": "src/x.py:R:42", "type": "comment", "text": "x",
+        "images": "nope"})
+    handler.send_response.assert_called_with(400)
+
+
+def test_serve_poll_dead_when_never_armed_and_old(tmp_path, monkeypatch):
+    import os
+    h = Handlers()
+    dirs = make_dirs(tmp_path)
+    old = time.time() - 3600
+    os.utime(dirs["state_dir"], (old, old))
+    handler = make_handler()
+    h.serve_poll(handler, dirs)
+    body = json.loads(handler.wfile.getvalue().decode())
+    assert body["ended"] is True
+    assert body["ended_reason"] == "dead"

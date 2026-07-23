@@ -5,7 +5,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 /**
  * Minimal Server-Sent Events consumer.
@@ -56,31 +58,74 @@ public final class SseClient {
     }
 
     /**
-     * Open an SSE stream on the supplied (shared) client. Returns a
-     * CompletableFuture that completes when the stream ends. Reusing the
-     * caller's {@link HttpClient} avoids leaking one IO-thread pool per
-     * reconnect — Java 17's {@code HttpClient} has no {@code close()}, so a
-     * fresh client per connect is only reclaimed by GC.
+     * Handle on one live SSE stream. {@link #done()} completes when the stream
+     * ends (server close, error, or {@link #close()}). {@code close()} closes
+     * the underlying lines {@code Stream}, which cancels the HTTP body
+     * subscription and tears down the TCP connection — merely cancelling the
+     * future would leave the connection and its consumer thread alive until
+     * the server happened to hang up.
      */
-    public static CompletableFuture<Void> connect(
+    public static final class Connection {
+        private final CompletableFuture<Void> done = new CompletableFuture<>();
+        private final AtomicReference<Stream<String>> lines = new AtomicReference<>();
+        private volatile boolean closed = false;
+
+        /** Completes (normally) when the stream ends, however it ends. */
+        public CompletableFuture<Void> done() { return done; }
+
+        /** Idempotent. Cancels the HTTP subscription so the server sees EOF. */
+        public void close() {
+            closed = true;
+            Stream<String> s = lines.getAndSet(null);
+            if (s != null) {
+                try { s.close(); } catch (RuntimeException ignored) { }
+            }
+            done.complete(null);
+        }
+    }
+
+    /**
+     * Open an SSE stream on the supplied (shared) client. Returns a
+     * {@link Connection} whose {@code done()} future completes when the stream
+     * ends, and whose {@code close()} actually terminates the connection.
+     * Reusing the caller's {@link HttpClient} avoids leaking one IO-thread
+     * pool per reconnect — Java 17's {@code HttpClient} has no {@code close()},
+     * so a fresh client per connect is only reclaimed by GC.
+     */
+    public static Connection connect(
             HttpClient client,
             URI uri,
             Consumer<Event> onEvent,
             Consumer<Throwable> onError) {
+        Connection conn = new Connection();
         HttpRequest req = HttpRequest.newBuilder(uri)
             .header("Accept", "text/event-stream")
             .GET()
             .build();
-        return client.sendAsync(req, HttpResponse.BodyHandlers.ofLines())
+        client.sendAsync(req, HttpResponse.BodyHandlers.ofLines())
             .thenAccept(resp -> {
+                Stream<String> body = resp.body();
+                conn.lines.set(body);
+                if (conn.closed) {
+                    // close() raced the response arriving: it may have missed
+                    // the stream we just published, so close it here too
+                    // (Stream.close is idempotent).
+                    Stream<String> s = conn.lines.getAndSet(null);
+                    if (s != null) {
+                        try { s.close(); } catch (RuntimeException ignored) { }
+                    }
+                    return;
+                }
                 Parser parser = new Parser(onEvent);
                 try {
-                    resp.body().forEach(parser::feed);
+                    body.forEach(parser::feed);
                 } catch (Exception e) {
-                    onError.accept(e);
+                    if (!conn.closed) onError.accept(e);
                 }
             })
-            .exceptionally(t -> { onError.accept(t); return null; });
+            .exceptionally(t -> { if (!conn.closed) onError.accept(t); return null; })
+            .whenComplete((v, t) -> conn.done.complete(null));
+        return conn;
     }
 
     private SseClient() {}

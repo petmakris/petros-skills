@@ -78,3 +78,18 @@ diff --git a/b b/b
     files = parse_unified_diff(diff)
     assert [f.path for f in files] == ["a", "b"]
     assert len(files[1].hunks[0].lines) == 2
+
+
+def test_validate_pr_ref_accepts_number_url_branch():
+    from skills.interactive_review.diff import validate_pr_ref
+    for ref in ["123", "https://github.com/org/repo/pull/123",
+                "feature/foo-bar", "release-1.2_x"]:
+        assert validate_pr_ref(ref) == ref
+
+
+def test_validate_pr_ref_rejects_flag_injection_and_junk():
+    from skills.interactive_review.diff import validate_pr_ref
+    for ref in ["--web", "-w", "", "foo bar", "foo;rm -rf /",
+                "https://evil.com/org/repo/pull/1", "$(id)", "a\nb"]:
+        with pytest.raises(ValueError):
+            validate_pr_ref(ref)

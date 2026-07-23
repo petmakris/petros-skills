@@ -48,9 +48,9 @@ After `ensure_server.sh` succeeds, read `$HOME/.claude/interactive-review/server
 
 ```bash
 SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["url"])')
-curl -sf -X POST "$SERVER_URL/api/sessions" \
+curl -sf --max-time 90 -X POST "$SERVER_URL/api/sessions" \
   -H 'Content-Type: application/json' \
-  -d "$(printf '{"cwd": "%s", "pr": "%s"}' "$PWD" "$PR_REF")"
+  -d "$(printf '{"cwd": "%s", "pr": "%s", "claude_session_id": "%s"}' "$PWD" "$PR_REF" "$CLAUDE_CODE_SESSION_ID")"
 ```
 
 The server's `create_session_extra` runs `gh pr diff` and `gh pr view`, then writes `diff.patch` and `meta.json` into the session's state directory. The response is:
@@ -81,6 +81,13 @@ the same repo); it is cosmetic for interactive-review.
 
 Save `url`, `sid`, `state_dir`, `events_dir`, `consumed_dir`, and `title` for the rest of this turn.
 
+**One active review per Claude session — enforced server-side.** The
+`claude_session_id` in the payload makes the server cancel this Claude
+session's prior non-terminal review sessions before returning, so a
+re-invocation can never accumulate stale watchers. Each superseded watcher
+emits `WEBCOMPANION_CANCELLED` on its next tick; acknowledge those per Mode D
+when they arrive.
+
 **gh failure:** if `create_session_extra` raises, the endpoint returns HTTP 500 with body `session-init failed: <stderr>`. Surface this verbatim in terminal: *"Couldn't fetch PR diff: `<error>`. Check `gh auth status` and try again."* Do not retry.
 
 **Diff too large:** the server hard-rejects diffs over 5 MB (raised as a `session-init failed` error — surface it like a gh failure and stop). Diffs over 1 MB succeed but return a `warning` field; if present, append it to the "review session ready" sentence so the user knows annotations may be slow.
@@ -102,6 +109,7 @@ SID="<sid>" \
 STATE_DIR="<state_dir>" \
 EVENTS_DIR="<events_dir>" \
 CONSUMED_DIR="<consumed_dir>" \
+CLAUDE_SID="$CLAUDE_CODE_SESSION_ID" \
 "$PLUGIN_ROOT/skills/_shared/web_companion/watcher.sh"
 ```
 
@@ -112,31 +120,9 @@ The watcher emits these stdout banners:
 - **`WEBCOMPANION_EVENT skill=interactive-review sid=<sid> event_id=<id>`** — one per submitted question. Followed by `---payload---`, the event JSON, and `---end---`.
 - **`WEBCOMPANION_FINISHED skill=interactive-review sid=<sid>`** — when the user clicks Done.
 - **`WEBCOMPANION_CANCELLED skill=interactive-review sid=<sid>`** — when the user cancels.
+- **`WEBCOMPANION_DROPPED skill=interactive-review sid=<sid> event_id=<id>`** — the watcher gave up re-emitting an event that was never acked.
 
 Each stdout line wakes you once. The watcher stays alive across many events until the session terminates.
-
-After arming, append a record to the pending registry:
-
-```bash
-mkdir -p ~/.claude/interactive-review
-REG="$HOME/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json"
-python3 - "$REG" "$SID" "$TITLE" "$STATE_DIR" "$EVENTS_DIR" "$CONSUMED_DIR" <<'PY'
-import json, os, sys
-path, sid, title, state_dir, events_dir, consumed_dir = sys.argv[1:]
-try:
-    data = json.load(open(path))
-except FileNotFoundError:
-    data = []
-data.append({"sid": sid, "title": title,
-             "state_dir": state_dir, "events_dir": events_dir,
-             "consumed_dir": consumed_dir})
-tmp = path + ".tmp"
-json.dump(data, open(tmp, "w"), indent=2)
-os.replace(tmp, path)
-PY
-```
-
-The registry is keyed by `CLAUDE_CODE_SESSION_ID` — not shared across sessions.
 
 ## Mode D — handling a watcher event
 
@@ -169,41 +155,34 @@ You wake here when a task-notification arrives whose first stdout line is one of
    {"anchor": "<the event's anchor, verbatim>", "title": "<short headline>", "source_event_id": "<event_id>"}
    ```
 
-   c. **Run the helper** (values come from those files and the environment — never interpolated into code):
+   c. **Run the helper** — appends the reply AND acks the event in one
+   command (values come from those files and the environment — never
+   interpolated into code):
    ```bash
    PLUGIN_ROOT=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["plugin_root"])')
-   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" python3 - <<'PY'
-   import json, os, time
-   from pathlib import Path
-   from skills.interactive_review.threads import append_message
-   sd = Path(os.environ["STATE_DIR"])
-   meta = json.loads((sd / ".reply.meta.json").read_text())
-   text = (sd / ".reply.md").read_text()
-   append_message(sd / "threads", meta["anchor"], {
-       "role": "claude",
-       "ts": int(time.time()),
-       "text": text,
-       "source_event_id": meta["source_event_id"],
-   }, title=(meta.get("title") or None))
-   PY
+   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" \
+     python3 -m skills._shared.web_companion.reply_cli --ack "$EVENT_ID"
    ```
-   `append_message` handles anchor→filename encoding and `source_event_id` dedup; you don't compute paths manually. `.reply.md` / `.reply.meta.json` are scratch files — reused (overwritten) each event.
-5. **Write the ack:** `<consumed_dir>/<event_id>.ack` (empty file — existence is the signal).
-6. **End your turn. No terminal output.** The watcher stays armed.
+   It handles anchor→filename encoding and `source_event_id` dedup, and only
+   writes the ack after the append succeeds — a crashed append re-emits.
+   `.reply.md` / `.reply.meta.json` are scratch files, overwritten each event.
+5. **End your turn. No terminal output.** The watcher stays armed.
 
 ### `WEBCOMPANION_FINISHED`
 
-The user clicked Done.
-
-1. Ack in terminal: *"Review session for `<title>` closed."*
-2. Remove this session's entry from `~/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json`.
+The user clicked Done. Ack in terminal: *"Review session for `<title>` closed."*
 
 ### `WEBCOMPANION_CANCELLED`
 
-The user cancelled (clicked tab close or typed `scrap it` in terminal).
+The user cancelled (IDE, terminal `scrap it`, or superseded by a newer
+review from this Claude session). Ack in terminal: *"Review session for
+`<title>` cancelled."*
 
-1. Ack in terminal: *"Review session for `<title>` cancelled."*
-2. Remove this session's entry from the pending registry.
+### `WEBCOMPANION_DROPPED`
+
+An event went unanswered through every re-emit (an earlier wake-up was
+interrupted or compacted away). Tell the user plainly: *"A review question
+went unanswered and was dropped — please re-ask it on the line."*
 
 ## Response style guide
 
@@ -242,14 +221,16 @@ The user cancelled (clicked tab close or typed `scrap it` in terminal).
 
 If the user says "scrap it" / "stop the review" / equivalent while a watcher is armed:
 
-1. Read `~/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json`.
-2. For each entry, write the cancellation marker:
-   ```bash
-   printf '{"reason":"user-cancelled-terminal"}' > "$STATE_DIR/cancelled"
-   ```
-3. The watcher detects the marker on its next tick and emits `WEBCOMPANION_CANCELLED`.
-4. Handle each cancellation per Mode D and clean up the registry.
-5. Continue with whatever the user actually wanted.
+```bash
+SERVER_URL=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["url"])')
+curl -sf --max-time 10 -X POST "$SERVER_URL/api/cancel_for_claude_session" \
+  -H 'Content-Type: application/json' \
+  -d "{\"claude_session_id\": \"$CLAUDE_CODE_SESSION_ID\"}"
+```
+
+The server writes the cancellation markers; each armed watcher emits
+`WEBCOMPANION_CANCELLED` on its next tick — handle per Mode D, then continue
+with whatever the user actually wanted.
 
 ## Edge cases
 
@@ -257,7 +238,7 @@ If the user says "scrap it" / "stop the review" / equivalent while a watcher is 
 - **Empty PR (no diff)** — the diff snapshot is empty; the IDE shows no annotatable lines. General comments (`__general__` anchor) still work.
 - **PR updated mid-session** — the diff is snapshotted at session-open. If the PR head changes mid-session, anchors may no longer match current head. Recommend the user restart the session.
 - **Very large PR** — soft warning above 1 MB of diff; hard reject above 5 MB. The user can request narrower review by passing a branch or a more focused PR.
-- **Malformed event payload** — fall back to no-op; write the `.ack` anyway so the event isn't re-emitted forever.
+- **Malformed event payload** — no reply; run `python3 -m skills._shared.web_companion.reply_cli --ack "$EVENT_ID" --ack-only` so the event isn't re-emitted forever.
 - **Server unreachable** — re-run `ensure_server.sh`; it will restart the server. Retry the failed request once.
 
 ## Token budget

@@ -13,6 +13,7 @@ import http.server
 import json
 import os
 import socket
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -26,6 +27,7 @@ from skills._shared.web_companion.sessions import Registry, SID_RE
 from skills._shared.web_companion import uploads as upload_module
 from skills._shared.web_companion import static_serve
 from skills._shared.web_companion import cleanup
+from skills._shared.web_companion.atomic import write_text_atomic
 
 SHARED_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -138,7 +140,35 @@ def list_rows(registry, cwd, scope, now, count_fn=None):
     return out
 
 
-def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None):
+def supersede_for_claude_session(registry, claude_session_id, exclude_sid=None):
+    """Cancel every non-terminal session created by this Claude session.
+
+    Lifecycle ownership lives here, not in SKILL.md prose: a skill whose
+    handlers set `supersede_by_claude_session = True` gets prior sessions
+    cancelled server-side on every create, so a model that forgets a cleanup
+    step can no longer leak watchers. Returns the superseded sids.
+    """
+    if not claude_session_id:
+        return []
+    superseded = []
+    for sid, dirs in registry.list_all():
+        if sid == exclude_sid:
+            continue
+        if registry.get_meta(sid).get("claude_session_id") != claude_session_id:
+            continue
+        state_dir = Path(dirs.get("state_dir", ""))
+        if not state_dir.is_dir() or _is_terminal(dirs):
+            continue
+        write_text_atomic(
+            state_dir / "cancelled",
+            json.dumps({"reason": "superseded", "at": int(time.time())}))
+        registry.note_change(sid)
+        superseded.append(sid)
+    return superseded
+
+
+def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None,
+                     supersede=False):
     """Return ({sid, slug, dirs, created}, created_bool).
 
     mkdirs(sid) -> dirs dict (response_dir/annotations_dir/state_dir/events_dir/
@@ -146,13 +176,19 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None)
 
     on_create(dirs), if given, runs on the CREATE path only — after dirs are
     made and `_cwd` is set, but BEFORE the session is registered/persisted.
-    If it raises, the exception propagates and nothing is registered (no
-    zombie session). Never called on the attach path (attach must not re-run
-    a skill's per-session init, e.g. re-fetching a PR diff).
+    If it raises, the exception propagates, nothing is registered, and the
+    just-made directory tree is removed again (an unregistered tree would be
+    invisible to the GC sweep and leak forever). Never called on the attach
+    path (attach must not re-run a skill's per-session init, e.g. re-fetching
+    a PR diff).
+
+    supersede=True: after a successful CREATE, cancel every other non-terminal
+    session whose meta carries the same `claude_session_id` as this payload.
     """
     title = (payload.get("title") or "").strip()
     project = (payload.get("project") or Path(cwd).name).strip()
     explicit_slug = (payload.get("slug") or "").strip()
+    claude_session_id = (payload.get("claude_session_id") or "").strip()
     want_attach = bool(payload.get("attach"))
 
     if want_attach:
@@ -179,17 +215,47 @@ def create_or_attach(registry, skill_name, payload, cwd, mkdirs, on_create=None)
     dirs = mkdirs(sid)
     dirs["_cwd"] = str(cwd)
     if on_create is not None:
-        on_create(dirs)
+        try:
+            on_create(dirs)
+        except Exception:
+            # The tree was made before init failed; it isn't registered, so
+            # the registry-driven GC would never see it. Remove it now.
+            base = Path(dirs["state_dir"]).parent
+            shutil.rmtree(base, ignore_errors=True)
+            raise
     # Slug allocation + registration happen atomically under one lock inside
     # register_with_slug — see its docstring for why the old two-step
     # (make_slug snapshot, then register) was a check-then-act race.
-    slug = registry.register_with_slug(
-        sid, dirs,
-        {"title": title, "project": project, "created_at": int(time.time())},
-        cwd, explicit_slug,
-    )
+    meta = {"title": title, "project": project, "created_at": int(time.time())}
+    if claude_session_id:
+        meta["claude_session_id"] = claude_session_id
+    slug = registry.register_with_slug(sid, dirs, meta, cwd, explicit_slug)
     registry.persist()
+    if supersede:
+        supersede_for_claude_session(registry, claude_session_id, exclude_sid=sid)
     return ({"sid": sid, "slug": slug, "dirs": dirs, "created": True}, True)
+
+
+def code_fingerprint() -> str:
+    """Stable hash of the skills tree this process runs from.
+
+    Mirrors the computation in ensure_server.sh; the pair must agree so a
+    healthy-but-outdated server (old install dir, or same dir with edited
+    files) is detected and restarted instead of serving stale code forever.
+    """
+    import hashlib
+    root = Path(__file__).resolve().parents[2]      # .../skills
+    h = hashlib.sha1()
+    paths = sorted(list(root.rglob("*.py")) + list(root.rglob("*.sh")))
+    for p in paths:
+        if "__pycache__" in p.parts or "tests" in p.parts:
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        h.update(f"{p.relative_to(root)}:{st.st_mtime_ns}:{st.st_size}".encode())
+    return h.hexdigest()[:12]
 
 
 def _resolve_public_host() -> str:
@@ -209,12 +275,23 @@ def _resolve_public_host() -> str:
     return "127.0.0.1"
 
 
-def _bind_first_available_port(port_range: range) -> tuple[socket.socket, int]:
+def _resolve_bind_addr() -> str:
+    """Loopback unless explicitly opened up.
+
+    The server is unauthenticated, so binding every interface exposes
+    session-create (which runs gh/git in an attacker-chosen cwd) and event
+    submission to the whole LAN. Sharing across devices (Tailscale) is an
+    explicit opt-in: WEBCOMPANION_BIND=0.0.0.0 (or a specific interface IP).
+    """
+    return os.environ.get("WEBCOMPANION_BIND", "127.0.0.1")
+
+
+def _bind_first_available_port(port_range: range, bind_addr: str) -> tuple[socket.socket, int]:
     for port in port_range:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(("0.0.0.0", port))
+            s.bind((bind_addr, port))
             return s, port
         except OSError:
             s.close()
@@ -236,7 +313,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
         shutdown_after_seconds = int(os.environ.get(
             f"{skill_name.upper()}_SHUTDOWN_SECONDS", 24 * 60 * 60))
 
-    public_host = _resolve_public_host()
+    # A Tailscale/public hostname in `url` is only truthful when the socket
+    # actually listens beyond loopback; otherwise advertise loopback.
+    public_host = (_resolve_public_host()
+                   if _resolve_bind_addr() not in ("127.0.0.1", "localhost")
+                   else "127.0.0.1")
 
     state_root = Path(os.path.expanduser(f"~/.claude/{skill_name}"))
 
@@ -270,6 +351,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             return time.time() - last_activity[0]
 
     banner = f"{skill_name}-server v1"
+    # /health advertises a fingerprint of the code tree this process actually
+    # runs, so ensure_server.sh can detect an old-code server surviving a
+    # plugin update (its 24h idle clock resets on every request, so it would
+    # otherwise pass the static-banner check forever) and restart it.
+    code_fp = code_fingerprint()
     server_holder = {}
 
     class _Handler(http.server.BaseHTTPRequestHandler):
@@ -373,7 +459,7 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
         def _dispatch_get(self):
             touch()
             if self.path == "/health":
-                self._send_text(200, banner)
+                self._send_text(200, f"{banner} fp={code_fp}")
                 return
             if self.path == "/":
                 static_serve.serve(self, "sessions.html", static_dirs)
@@ -415,6 +501,23 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             if self.path == "/api/sessions":
                 self._handle_create_session()
                 return
+            if self.path == "/api/cancel_for_claude_session":
+                raw, err = self._read_body_text()
+                if err is not None:
+                    self._send_text(400, err)
+                    return
+                try:
+                    payload = json.loads(raw) if raw else {}
+                except json.JSONDecodeError:
+                    self._send_text(400, "invalid json")
+                    return
+                csid = payload.get("claude_session_id")
+                if not isinstance(csid, str) or not csid:
+                    self._send_text(400, "missing claude_session_id")
+                    return
+                superseded = supersede_for_claude_session(registry, csid)
+                self._send_json(200, {"cancelled": superseded})
+                return
             matched = self._match_session("/s/")
             if matched is not None:
                 sid, rest = matched
@@ -423,6 +526,9 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
                     self._handle_submit(sid, dirs)
                     return
                 if rest == "/api/finish":
+                    if _is_terminal(dirs):
+                        self._send_text(409, "session closed")
+                        return
                     (Path(dirs["state_dir"]) / "finished").write_text("")
                     self._send_text(200, "ok")
                     return
@@ -489,7 +595,8 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
 
             try:
                 result, _created = create_or_attach(
-                    registry, skill_name, payload, cwd, _mkdirs, on_create=_on_create)
+                    registry, skill_name, payload, cwd, _mkdirs, on_create=_on_create,
+                    supersede=getattr(handlers, "supersede_by_claude_session", False))
             except Exception as e:
                 self._send_text(500, f"session-init failed: {e}")
                 return
@@ -548,12 +655,13 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             handlers.handle_thread_delete(self, dirs, payload)
             registry.note_change(sid)
 
-    sock, port = _bind_first_available_port(port_range)
+    bind_addr = _resolve_bind_addr()
+    sock, port = _bind_first_available_port(port_range, bind_addr)
     sock.listen()
 
-    server = _ThreadedHTTPServer(("0.0.0.0", port), _Handler, bind_and_activate=False)
+    server = _ThreadedHTTPServer((bind_addr, port), _Handler, bind_and_activate=False)
     server.socket = sock
-    server.server_address = ("0.0.0.0", port)
+    server.server_address = (bind_addr, port)
     server_holder['server'] = server
 
     info = {"type": "server-started", "skill": skill_name, "port": port,
@@ -570,6 +678,15 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
     def _watch_idle():
         while not stop_event.wait(1.0):
             if seconds_since_activity() >= shutdown_after_seconds:
+                # HTTP silence alone isn't idleness: an armed watcher beats
+                # via the filesystem, not via requests. Shutting down under
+                # it strands server.json on a dead port with no way for the
+                # IDE to restart us.
+                if any((_watcher_age(dirs) or REAP_AFTER + 1) <= REAP_AFTER
+                       for _sid, dirs in registry.items()
+                       if not _is_terminal(dirs)):
+                    touch()
+                    continue
                 threading.Thread(target=server.shutdown, daemon=True).start()
                 return
 

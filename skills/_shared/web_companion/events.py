@@ -29,10 +29,3 @@ def append(events_dir: Path, payload: dict) -> str:
     event_id = f"{time.time_ns():020d}-{os.getpid()}-{next(_counter):06d}"
     write_text_atomic(events_dir / f"{event_id}.json", json.dumps(payload))
     return event_id
-
-
-def heartbeat(state_dir: Path) -> None:
-    """Write the watcher heartbeat (used by /poll's watcher_seen_at)."""
-    state_dir = Path(state_dir)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "watcher_heartbeat").write_text(str(int(time.time())))

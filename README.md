@@ -74,6 +74,7 @@ To uninstall everywhere: `/plugin uninstall petros-skills@petros-skills`.
 - **`/annotate`** (`skills/annotate/`) — Long Claude responses (plans, analyses, lists of findings) get pushed to a local browser page where you highlight any text and leave free-text comments. The annotations come back to Claude on its next turn. Stdlib-only Python server, no installs.
 - **`/humanize`** (`skills/humanize/`) — Rewrite Claude-generated markdown so it reads like a long-time colleague wrote it. Manual only — invoked when you type `/humanize` or ask to "derobotize" something.
 - **`/refine-prompt`** (`skills/refine-prompt/`) — Turns messy speech-to-text transcripts into high-quality coding prompts via a normalize → probe → classify → compose pipeline. Two modes: explicit `/refine-prompt` refines your clipboard (or inline text) inside a subagent and copies a bare, paste-ready prompt back to the clipboard without polluting the session or executing it; the in-chat auto-refine path (via the `auto-refine` hook) refines a rambling message in place and runs it after you reply `go`.
+- **`/walkthrough`** (`skills/walkthrough/`) — Answer a codebase question as an ordered tour instead of terminal prose: 5–12 steps, each anchored to a real `file:line`, walked step by step in IntelliJ via the plugin. Ask a question on any step and the answer lands in that step, in place. Read-only — it explains code, never edits it.
 
 ## Hooks
 

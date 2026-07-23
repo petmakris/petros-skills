@@ -23,11 +23,55 @@ INFO_FILE="$STATE_DIR/server.json"
 
 mkdir -p "$STATE_DIR"
 
+expected_fp() {
+  # Must mirror server.code_fingerprint() so a running server built from a
+  # different tree state (old install dir after a plugin update, or edited
+  # files) reads as outdated and gets restarted.
+  python3 - "$PLUGIN_ROOT" <<'PY'
+import hashlib, sys
+from pathlib import Path
+root = Path(sys.argv[1]) / "skills"
+h = hashlib.sha1()
+for p in sorted(list(root.rglob("*.py")) + list(root.rglob("*.sh"))):
+    if "__pycache__" in p.parts or "tests" in p.parts:
+        continue
+    try:
+        st = p.stat()
+    except OSError:
+        continue
+    h.update(f"{p.relative_to(root)}:{st.st_mtime_ns}:{st.st_size}".encode())
+print(h.hexdigest()[:12])
+PY
+}
+
 is_healthy() {
   local url="$1"
   local body
   body="$(curl -sf --max-time 1 "$url/health" 2>/dev/null || true)"
-  [[ "$body" == *"$BANNER"* ]]
+  [[ "$body" == *"$BANNER"* ]] || return 1
+  # Old servers (pre-fingerprint) send no fp= token: treat them as outdated
+  # so they get replaced by a fingerprinted build exactly once.
+  local fp
+  fp="$(sed -n 's/.*fp=\([0-9a-f]*\).*/\1/p' <<<"$body")"
+  [[ -n "$fp" && "$fp" == "$(expected_fp)" ]]
+}
+
+kill_recorded_server() {
+  # Best-effort: only kill the recorded pid when it is still our module,
+  # never an unrelated process that recycled the pid.
+  local pid_file="$STATE_DIR/server.pid"
+  [[ -f "$pid_file" ]] || return 0
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 0
+  if ps -p "$pid" -o command= 2>/dev/null | grep -q "$MODULE"; then
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      ps -p "$pid" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+  fi
+  rm -f "$pid_file"
 }
 
 read_url() {
@@ -52,10 +96,24 @@ fi
 # the lock holder starts the server, and after ~12s of a stuck peer it proceeds
 # best-effort rather than hanging.
 LOCK_DIR="$STATE_DIR/.startup.lock"
+break_stale_lock() {
+  # A SIGKILLed lock holder skips its EXIT trap and leaves the lock forever;
+  # without this, every future waiter times out and proceeds WITHOUT the
+  # lock — two servers, split registries. Age-break: a legitimate startup
+  # holds the lock for ~5s max, so >60s means a dead holder.
+  local age now mt
+  now="$(date +%s)"
+  mt="$(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo "$now")"
+  age=$((now - mt))
+  if [[ "$age" -gt 60 ]]; then
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
 have_lock=0
 for _ in $(seq 1 120); do
   if mkdir "$LOCK_DIR" 2>/dev/null; then have_lock=1; break; fi
   if healthy_now; then exit 0; fi
+  break_stale_lock
   sleep 0.1
 done
 if [[ "$have_lock" == 1 ]]; then
@@ -66,6 +124,11 @@ fi
 if healthy_now; then
   exit 0
 fi
+
+# An unhealthy answer can still be a LIVE server running outdated code
+# (banner matches, fingerprint doesn't). It holds a port and server.json —
+# stop it before starting the replacement.
+kill_recorded_server
 
 LOG="$STATE_DIR/server.log"
 : > "$LOG"

@@ -60,14 +60,25 @@ internal object GhPrDiffDriver {
                 val changes = dataProvider.changesData.loadChanges().changes
                 if (changes.isEmpty()) {
                     LOG.warn("GhPrDiffDriver: PR ${prId.number} loaded 0 changes")
+                    notifyWarn(project, "PR diff has no changes",
+                        "PR #${prId.number} loaded 0 changes — nothing to show.")
                     return@launch
                 }
-                val idx = filePath?.let { fp ->
-                    changes.indexOfFirst { c ->
+                val idx = if (filePath != null) {
+                    val i = changes.indexOfFirst { c ->
                         val p = c.filePathAfter?.path ?: c.filePathBefore?.path
-                        p != null && p.endsWith(fp)
+                        p != null && p.endsWith(filePath)
                     }
-                }?.takeIf { it >= 0 } ?: 0
+                    if (i < 0) {
+                        // Silently showing the first change instead would look
+                        // like the wrong file "for no reason" — say why and stop.
+                        LOG.warn("GhPrDiffDriver: $filePath not among PR ${prId.number}'s changes")
+                        notifyWarn(project, "File not in PR diff",
+                            "$filePath is not among PR #${prId.number}'s changed files.")
+                        return@launch
+                    }
+                    i
+                } else 0
                 val location: Pair<Side, Int> = diffSide(side) to maxOf(0, line)
                 val selection = ChangesSelection.Precise(changes, idx, location)
                 withContext(Dispatchers.EDT) {
@@ -76,8 +87,18 @@ internal object GhPrDiffDriver {
                 }
             } catch (t: Throwable) {
                 LOG.warn("GhPrDiffDriver.show failed for PR ${prId.number}", t)
+                notifyWarn(project, "Couldn't open the PR diff",
+                    "PR #${prId.number}: ${t.message ?: t.javaClass.simpleName}")
             }
         }
+    }
+
+    private fun notifyWarn(project: Project, title: String, body: String) {
+        com.intellij.notification.Notifications.Bus.notify(
+            com.intellij.notification.Notification(
+                "Interactive Review", title, body,
+                com.intellij.notification.NotificationType.WARNING),
+            project)
     }
 
     private fun diffSide(side: String): Side =
