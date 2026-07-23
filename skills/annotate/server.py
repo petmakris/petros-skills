@@ -2,7 +2,7 @@
 
 Implements HandlersProtocol against the incremental flow:
 - blocks.json is the canonical document model
-- /api/submit queues one event per block-comment
+- /api/submit queues one event per block-comment (or one per batched round)
 - /poll returns a per-block version vector
 
 The watcher (see web_companion/watcher.sh) consumes events and wakes Claude.
@@ -294,6 +294,9 @@ class Handlers:
         if _is_terminal(Path(dirs["state_dir"])):
             _send_text(h, 409, "session closed")
             return
+        if payload.get("type") == "round":
+            self._handle_round(h, dirs, payload)
+            return
         block_id = payload.get("block_id")  # None for general comment
         comment_type = payload.get("type", "comment")
         text = payload.get("text", "")
@@ -384,6 +387,65 @@ class Handlers:
         for key in ("block_snippet", "prefix", "suffix"):
             if isinstance(payload.get(key), str):
                 evt[key] = payload[key]
+        eid = events_module.append(Path(dirs["events_dir"]), evt)
+        _send_json(h, 202, {"event_id": eid, "status": "queued"})
+
+    _ROUND_KINDS = ("agree", "dismiss", "comment")
+    _ROUND_MAX_REACTIONS = 200
+
+    def _handle_round(self, h: BaseHTTPRequestHandler, dirs: dict, payload: dict) -> None:
+        """Validate and queue a batched round of sub-unit reactions.
+
+        One event carries the whole round; Claude applies it in a single
+        pass (see references/handling-events.md § Round events).
+        """
+        reactions = payload.get("reactions")
+        if not isinstance(reactions, list) or not reactions:
+            _send_text(h, 422, "round requires a non-empty reactions list")
+            return
+        if len(reactions) > self._ROUND_MAX_REACTIONS:
+            _send_text(h, 422, "too many reactions")
+            return
+        blocks_path = Path(dirs["response_dir"]) / "blocks.json"
+        doc = blocks_model.load(blocks_path)
+        cleaned = []
+        for i, r in enumerate(reactions):
+            if not isinstance(r, dict):
+                _send_text(h, 422, f"reaction {i}: not an object")
+                return
+            kind = r.get("kind")
+            if kind not in self._ROUND_KINDS:
+                _send_text(h, 422, f"reaction {i}: bad kind {kind!r}")
+                return
+            block_id = r.get("block_id")
+            try:
+                blocks_model.find_block(doc, block_id)
+            except KeyError:
+                _send_text(h, 422, f"reaction {i}: unknown block_id {block_id!r}")
+                return
+            selected_text = r.get("selected_text")
+            if not isinstance(selected_text, str) or not selected_text.strip():
+                _send_text(h, 422, f"reaction {i}: selected_text required")
+                return
+            text = r.get("text", "")
+            if not isinstance(text, str):
+                _send_text(h, 422, f"reaction {i}: bad text")
+                return
+            if kind == "comment" and not text.strip():
+                _send_text(h, 422, f"reaction {i}: comment requires text")
+                return
+            images = r.get("images", [])
+            if not _images_ok(images, Path(dirs["state_dir"])):
+                _send_text(h, 422, f"reaction {i}: invalid image path(s)")
+                return
+            out = {"kind": kind, "block_id": block_id,
+                   "selected_text": selected_text, "text": text,
+                   "images": images}
+            for key in ("prefix", "suffix"):
+                if isinstance(r.get(key), str):
+                    out[key] = r[key]
+            cleaned.append(out)
+        evt = {"type": "round", "reactions": cleaned}
         eid = events_module.append(Path(dirs["events_dir"]), evt)
         _send_json(h, 202, {"event_id": eid, "status": "queued"})
 
