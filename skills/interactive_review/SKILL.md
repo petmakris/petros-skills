@@ -42,6 +42,43 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(python3 -c 'import json,os;print(json.load(
 
 `$CLAUDE_PLUGIN_ROOT` is **not** exported into the Bash tool's shell, so it is resolved here from the plugin marketplace registry as a fallback. Idempotent and fast (<100 ms when already up). Internally delegates to `skills/_shared/web_companion/ensure_server.sh` — do not call that directly. Do **not** use `run_in_background: true`. If it exits non-zero, surface the stderr to the user and stop.
 
+## Supersede any prior review from this session
+
+One active review per Claude session. Before creating the new session, cancel any review still pending from an earlier `/interactive-review` in this same Claude session — otherwise old watchers accumulate forever (they only exit on a `finished`/`cancelled` marker):
+
+```bash
+REG="$HOME/.claude/interactive-review/pending-${CLAUDE_CODE_SESSION_ID}.json"
+python3 - "$REG" <<'PY'
+import json, os, sys, time
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    entries = json.loads(path.read_text())
+except FileNotFoundError:
+    entries = []
+keep = []
+for e in entries:
+    sd = Path(e["state_dir"])
+    if not sd.is_dir():
+        continue                      # workspace reaped; drop entry
+    if (sd / "finished").exists() or (sd / "cancelled").exists():
+        continue                      # watcher already exited; drop entry
+    (sd / "cancelled").write_text('{"reason":"superseded"}')
+    print(f"superseded {e['sid']}")
+    try:
+        hb = int((sd / "watcher_heartbeat").read_text().strip())
+    except (FileNotFoundError, ValueError):
+        hb = 0
+    if time.time() - hb <= 120:
+        keep.append(e)                # live watcher will emit CANCELLED; Mode D cleans up
+tmp = str(path) + ".tmp"
+json.dump(keep, open(tmp, "w"), indent=2)
+os.replace(tmp, path)
+PY
+```
+
+Each superseded live watcher exits on its next tick and emits `WEBCOMPANION_CANCELLED` — handle it per Mode D when it arrives (the ack sentence is enough; the registry entry is already pruned or will be by Mode D). Dead watchers (stale heartbeat) are pruned from the registry immediately since they will never emit. Do **not** wait for the banners — proceed with the new session right away.
+
 ## Create a session
 
 After `ensure_server.sh` succeeds, read `$HOME/.claude/interactive-review/server.json` to get the server URL, then create a session:
