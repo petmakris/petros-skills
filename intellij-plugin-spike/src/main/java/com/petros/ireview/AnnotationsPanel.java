@@ -61,7 +61,20 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
     private final JButton openDiffButton = new JButton("Open PR diff in IDE", AllIcons.Actions.Diff);
     private final JButton endReviewButton = new JButton(AllIcons.Actions.Cancel);
     private final Map<String, Integer> seenVersions = new HashMap<>();
+    /** Memo for {@link #isStale}: anchor → (document stamp, thread version,
+     *  result). The document scan is O(lines) per row; without this it reruns
+     *  for every row on every rebuild. */
+    private final Map<String, StaleMemo> staleCache = new HashMap<>();
+    /** One-shot Swing timers currently in flight (delete fallbacks, diff-ready
+     *  polls) so dispose() can stop them instead of leaving them firing into a
+     *  dead panel. */
+    private final Set<Timer> transientTimers = ConcurrentHashMap.newKeySet();
+    /** A non-fatal client warning to show in the footer (e.g. seed failed),
+     *  cleared on the next attach/detach. */
+    private volatile String warning = null;
     private final JPanel root;
+
+    private record StaleMemo(long docStamp, int version, boolean stale) {}
     /** Index of the row the mouse is currently over, or -1. Drives × visibility. */
     private int hoveredIndex = -1;
     /** True when the mouse is specifically inside the × hit zone (drives the button's hover color). */
@@ -209,10 +222,32 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
                 });
             }
             @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
-                SwingUtilities.invokeLater(() -> { refreshTitle(); rebuild(); });
+                SwingUtilities.invokeLater(() -> {
+                    // Per-session bookkeeping must not leak across sessions:
+                    // stale "seen" versions would suppress the new-answer dot,
+                    // and stale memos would mislabel rows.
+                    seenVersions.clear();
+                    staleCache.clear();
+                    warning = null;
+                    refreshTitle();
+                    rebuild();
+                });
             }
             @Override public void onDetached() {
-                SwingUtilities.invokeLater(() -> { deleting.clear(); refreshTitle(); rebuild(); });
+                SwingUtilities.invokeLater(() -> {
+                    deleting.clear();
+                    seenVersions.clear();
+                    staleCache.clear();
+                    warning = null;
+                    refreshTitle();
+                    rebuild();
+                });
+            }
+            @Override public void onWarning(String message) {
+                SwingUtilities.invokeLater(() -> {
+                    warning = message;
+                    refreshTitle();
+                });
             }
             @Override public void onThreadChanged(String anchor, String synthesis, int version) {
                 SwingUtilities.invokeLater(AnnotationsPanel.this::rebuild);
@@ -241,6 +276,8 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
     public void dispose() {
         client.removeListener(listener);
         if (spinTimer != null) spinTimer.stop();
+        for (Timer t : transientTimers) t.stop();
+        transientTimers.clear();
     }
 
     private static final JBColor LIVE_COLOR =
@@ -260,7 +297,16 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         endReviewButton.setEnabled(hasSession && st != ReviewSessionClient.State.ENDED);
         // The footer must tell the truth about the Claude session, not just
         // about server reachability.
-        if (!hasSession) {
+        footer.setToolTipText(null);
+        if (warning != null) {
+            footer.setText("⚠ threads didn't load — panel may be incomplete");
+            footer.setToolTipText(warning);
+            footer.setForeground(GONE_COLOR);
+        } else if (st == ReviewSessionClient.State.OFFLINE) {
+            // Unreachable server is not the same as "no session" — say so.
+            footer.setText("○ server offline");
+            footer.setForeground(JBColor.GRAY);
+        } else if (!hasSession) {
             footer.setText("● idle");
             footer.setForeground(LIVE_COLOR);
         } else if (st == ReviewSessionClient.State.ENDED) {
@@ -320,17 +366,41 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
                 anchor,
                 PanelRowTitle.resolve(thread.title(), thread.question(), thread.synthesis(), anchor),
                 thread.version(),
-                0L,
+                thread.updatedAt(),
                 thread.version() > last,
                 isStale(anchor)
             ));
         }
         // Live rows first; stale (drifted) rows grouped at the bottom so they
-        // don't get lost interleaved. Stable by anchor within each group.
-        rows.sort(Comparator.comparing(AnnotationEntry::stale).thenComparing(AnnotationEntry::anchor));
+        // don't get lost interleaved. Within each group most-recently-updated
+        // first (threads without a timestamp sort last), anchor as tiebreak.
+        rows.sort(Comparator.comparing(AnnotationEntry::stale)
+            .thenComparing(Comparator.comparingLong(AnnotationEntry::updatedAt).reversed())
+            .thenComparing(AnnotationEntry::anchor));
+
+        // A rebuild must not yank the user's place in the list: keep the
+        // selected anchor selected and the viewport where it was.
+        AnnotationEntry selected = list.getSelectedValue();
+        String selectedAnchor = selected != null ? selected.anchor() : null;
+        javax.swing.JViewport viewport = (javax.swing.JViewport)
+            SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, list);
+        java.awt.Point viewPos = viewport != null ? viewport.getViewPosition() : null;
+
         model.clear();
         for (var r : rows) model.addElement(r);
         countLabel.setText(rows.size() + " annotation" + (rows.size() == 1 ? "" : "s"));
+
+        if (selectedAnchor != null) {
+            for (int i = 0; i < model.size(); i++) {
+                if (model.getElementAt(i).anchor().equals(selectedAnchor)) {
+                    list.setSelectedIndex(i);
+                    break;
+                }
+            }
+        }
+        if (viewport != null && viewPos != null) {
+            viewport.setViewPosition(viewPos);
+        }
     }
 
     private Component renderCell(JList<? extends AnnotationEntry> jbList,
@@ -440,10 +510,14 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
     /** If no thread-deleted confirmation arrives, stop the spinner so the row
      *  becomes interactive again instead of spinning indefinitely. */
     private void scheduleDeleteFallback(String anchor) {
+        Timer[] holder = new Timer[1];
         Timer t = new Timer(8000, e -> {
+            transientTimers.remove(holder[0]);
             if (deleting.remove(anchor)) list.repaint();
         });
+        holder[0] = t;
         t.setRepeats(false);
+        transientTimers.add(t);
         t.start();
     }
 
@@ -482,7 +556,9 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         return btn;
     }
 
-    /** True if this anchor's thread is currently stale in an open diff editor. */
+    /** True if this anchor's thread is currently stale in an open diff editor.
+     *  Memoized by (document modification stamp, thread version) — the full
+     *  document scan reruns only when either actually changed. */
     private boolean isStale(String anchor) {
         String[] p = anchor.split(":", 3);
         if (p.length < 3) return false;
@@ -492,6 +568,11 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
         if (doc == null) return false;
         var ts = client.threadFor(anchor).orElse(null);
         if (ts == null) return false;
+        long stamp = doc.getModificationStamp();
+        StaleMemo memo = staleCache.get(anchor);
+        if (memo != null && memo.docStamp() == stamp && memo.version() == ts.version()) {
+            return memo.stale();
+        }
         int recorded;
         try { recorded = Integer.parseInt(p[2]); } catch (NumberFormatException e) { return false; }
         var lines = new ArrayList<String>();
@@ -499,8 +580,10 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
             lines.add(doc.getText(new com.intellij.openapi.util.TextRange(
                 doc.getLineStartOffset(i), doc.getLineEndOffset(i))));
         }
-        return AnchorResolver.resolve(lines, recorded, ts.anchorText(), AnchorResolver.DEFAULT_K)
+        boolean stale = AnchorResolver.resolve(lines, recorded, ts.anchorText(), AnchorResolver.DEFAULT_K)
             .kind() == AnchorResolver.Kind.STALE;
+        staleCache.put(anchor, new StaleMemo(stamp, ts.version(), stale));
+        return stale;
     }
 
     private void onRowClicked(AnnotationEntry entry) {
@@ -568,13 +651,16 @@ public final class AnnotationsPanel implements com.intellij.openapi.Disposable {
             var ed = SpikeDiffExtension.editorFor(path + ":" + side);
             if (ed != null && ed.getComponent().isShowing()) {
                 poll.stop();
+                transientTimers.remove(poll);
                 focusAndShowPopup(ed, anchor,
                     SpikeDiffExtension.displayLineFor(path + ":" + side, line0));
             } else if (tries[0] >= 16) {
                 poll.stop();  // GH diff didn't register a viewer for this file — give up quietly
+                transientTimers.remove(poll);
             }
         });
         poll.setRepeats(true);
+        transientTimers.add(poll);
         poll.start();
     }
 

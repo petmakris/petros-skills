@@ -54,43 +54,77 @@ public final class SpikeDiffExtension extends DiffExtension {
             Collections.synchronizedMap(new WeakHashMap<>());
 
     /**
-     * Registry mapping `<project-relative-path>:<L|R>` to the diff-viewer editor
-     * currently showing that side. Used by the side-panel: clicking a row
-     * focuses the original diff viewer (keeps PR context) instead of opening
+     * Registry mapping `<project-relative-path>:<L|R>` to the editors currently
+     * showing that side, newest first (LIFO). Used by the side-panel: clicking a
+     * row focuses the original diff viewer (keeps PR context) instead of opening
      * the working-copy file.
      *
-     * Values are WeakReferences so a closed diff viewer's editor can be GC'd,
-     * but the map entry itself (key + cleared ref) does NOT evict on its own —
-     * a WeakHashMap keyed by editor wouldn't support the path→editor lookup.
-     * So cleared/disposed entries are actively pruned in {@link #editorFor} and
-     * {@link #repaintAllGutters} (which runs on every session change), bounding
-     * the registry to live viewers.
+     * Each key holds a small stack because a PR-diff editor and a working-copy
+     * editor of the same file both register under `<path>:R` — a single-slot
+     * map was last-writer-wins, so whichever opened second silently shadowed
+     * the other, and closing one left a disposed-editor entry behind. Lookup
+     * prefers a live diff-view editor over a working-copy one; disposed
+     * entries are pruned on every touch (register, lookup, repaint), bounding
+     * the registry to live editors.
      */
-    private static final Map<String, DiffTarget> DIFF_EDITORS =
-            Collections.synchronizedMap(new java.util.HashMap<>());
+    private static final Map<String, java.util.ArrayDeque<DiffTarget>> DIFF_EDITORS =
+            new java.util.HashMap<>();
 
     /**
-     * One registered diff surface for one `<path>:<side>`.
+     * One registered surface for one `<path>:<side>`.
      *
      * <p>{@code toDisplayLine} maps a side-relative 0-based line (what anchors are
      * recorded in) to the 0-based line to scroll to in {@code editor}. Side-by-side
      * shows one side per editor, so it is the identity; the unified viewer merges
      * both sides into one document, so it delegates to the platform's convertor.
+     *
+     * <p>{@code workingCopy} marks a plain file editor (not a diff viewer) — a
+     * diff viewer showing the same key wins on lookup.
      */
     private record DiffTarget(java.lang.ref.WeakReference<EditorEx> editor,
                               java.lang.ref.WeakReference<Document> sideDoc,
-                              java.util.function.IntUnaryOperator toDisplayLine) {}
+                              java.util.function.IntUnaryOperator toDisplayLine,
+                              boolean workingCopy) {
+
+        boolean isDead() {
+            EditorEx e = editor.get();
+            return e == null || e.isDisposed();
+        }
+    }
+
+    /** Push a target for {@code key}, dropping dead entries and any previous
+     *  registration of the same editor (re-registration moves it to the front). */
+    private static void register(@NotNull String key, @NotNull DiffTarget target) {
+        EditorEx newEditor = target.editor().get();
+        synchronized (DIFF_EDITORS) {
+            var stack = DIFF_EDITORS.computeIfAbsent(key, k -> new java.util.ArrayDeque<>());
+            stack.removeIf(t -> t.isDead() || t.editor().get() == newEditor);
+            stack.addFirst(target);
+        }
+    }
+
+    /** The best live target for {@code key}: newest diff-view editor if any,
+     *  else newest working-copy editor. Prunes dead entries as it goes. */
+    private static @Nullable DiffTarget targetFor(@NotNull String key) {
+        synchronized (DIFF_EDITORS) {
+            var stack = DIFF_EDITORS.get(key);
+            if (stack == null) return null;
+            stack.removeIf(DiffTarget::isDead);
+            if (stack.isEmpty()) {
+                DIFF_EDITORS.remove(key);
+                return null;
+            }
+            for (DiffTarget t : stack) {
+                if (!t.workingCopy()) return t;
+            }
+            return stack.peekFirst();
+        }
+    }
 
     /** Public lookup for {@link AnnotationsPanel#onRowClicked}. */
     public static @Nullable EditorEx editorFor(@NotNull String pathSideKey) {
-        var target = DIFF_EDITORS.get(pathSideKey);
-        if (target == null) return null;
-        EditorEx editor = target.editor().get();
-        if (editor == null || editor.isDisposed()) {
-            DIFF_EDITORS.remove(pathSideKey);
-            return null;
-        }
-        return editor;
+        var target = targetFor(pathSideKey);
+        return target == null ? null : target.editor().get();
     }
 
     /**
@@ -99,7 +133,7 @@ public final class SpikeDiffExtension extends DiffExtension {
      * pre- or post-change file behind the merged view.
      */
     public static @Nullable Document sideDocumentFor(@NotNull String pathSideKey) {
-        var target = DIFF_EDITORS.get(pathSideKey);
+        var target = targetFor(pathSideKey);
         return target == null ? null : target.sideDoc().get();
     }
 
@@ -109,7 +143,7 @@ public final class SpikeDiffExtension extends DiffExtension {
      * can use it unconditionally.
      */
     public static int displayLineFor(@NotNull String pathSideKey, int sideLine0) {
-        var target = DIFF_EDITORS.get(pathSideKey);
+        var target = targetFor(pathSideKey);
         if (target == null) return sideLine0;
         EditorEx editor = target.editor().get();
         if (editor == null || editor.isDisposed()) return sideLine0;
@@ -117,19 +151,25 @@ public final class SpikeDiffExtension extends DiffExtension {
         return mapped < 0 ? sideLine0 : mapped;
     }
 
-    /** Repaint every currently-tracked diff editor's gutter. Called from a
+    /** Repaint every currently-tracked editor's gutter. Called from a
      *  session listener so deletes / new threads update icons immediately
      *  instead of waiting for the next hover-driven repaint. */
     public static void repaintAllGutters() {
         synchronized (DIFF_EDITORS) {
-            var it = DIFF_EDITORS.values().iterator();
-            while (it.hasNext()) {
-                EditorEx editor = it.next().editor().get();
-                if (editor == null || editor.isDisposed()) {
-                    it.remove(); // prune dead viewers so the registry can't grow unbounded
+            var keys = DIFF_EDITORS.entrySet().iterator();
+            while (keys.hasNext()) {
+                var stack = keys.next().getValue();
+                stack.removeIf(DiffTarget::isDead); // prune so the registry can't grow unbounded
+                if (stack.isEmpty()) {
+                    keys.remove();
                     continue;
                 }
-                editor.getGutterComponentEx().repaint();
+                for (DiffTarget t : stack) {
+                    EditorEx editor = t.editor().get();
+                    if (editor != null && !editor.isDisposed()) {
+                        editor.getGutterComponentEx().repaint();
+                    }
+                }
             }
         }
     }
@@ -203,10 +243,11 @@ public final class SpikeDiffExtension extends DiffExtension {
                                        @NotNull Project project) {
         if (editor == null) return;
         Document doc = editor.getDocument();
-        DIFF_EDITORS.put(label + ":" + side,
+        register(label + ":" + side,
                 new DiffTarget(new java.lang.ref.WeakReference<>(editor),
                                new java.lang.ref.WeakReference<>(doc),
-                               java.util.function.IntUnaryOperator.identity()));
+                               java.util.function.IntUnaryOperator.identity(),
+                               false));
         int lineCount = Math.max(1, doc.getLineCount());
         for (int line = 0; line < lineCount; line++) {
             int start = doc.getLineStartOffset(line);
@@ -228,10 +269,11 @@ public final class SpikeDiffExtension extends DiffExtension {
     static void attachWorkingCopy(@NotNull EditorEx editor,
                                   @NotNull String label,
                                   @NotNull Project project) {
-        DIFF_EDITORS.put(label + ":R",
+        register(label + ":R",
                 new DiffTarget(new java.lang.ref.WeakReference<>(editor),
                                new java.lang.ref.WeakReference<>(editor.getDocument()),
-                               java.util.function.IntUnaryOperator.identity()));
+                               java.util.function.IntUnaryOperator.identity(),
+                               true));
         attachWorkingCopyLines(editor, label, project);
     }
 
@@ -292,16 +334,18 @@ public final class SpikeDiffExtension extends DiffExtension {
         if (editor == null || (leftLabel == null && rightLabel == null)) return;
 
         if (leftLabel != null) {
-            DIFF_EDITORS.put(leftLabel + ":L",
+            register(leftLabel + ":L",
                     new DiffTarget(new java.lang.ref.WeakReference<>(editor),
                                    new java.lang.ref.WeakReference<>(viewer.getDocument(Side.LEFT)),
-                                   line -> viewer.transferLineToOneside(Side.LEFT, line)));
+                                   line -> viewer.transferLineToOneside(Side.LEFT, line),
+                                   false));
         }
         if (rightLabel != null) {
-            DIFF_EDITORS.put(rightLabel + ":R",
+            register(rightLabel + ":R",
                     new DiffTarget(new java.lang.ref.WeakReference<>(editor),
                                    new java.lang.ref.WeakReference<>(viewer.getDocument(Side.RIGHT)),
-                                   line -> viewer.transferLineToOneside(Side.RIGHT, line)));
+                                   line -> viewer.transferLineToOneside(Side.RIGHT, line),
+                                   false));
         }
         installHoverTracker(editor);
 

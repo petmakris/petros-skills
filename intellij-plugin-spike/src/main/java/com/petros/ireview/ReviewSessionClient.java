@@ -32,7 +32,13 @@ public final class ReviewSessionClient {
 
     public record SessionInfo(String sid, String prRef, String title, String stateDir) {}
     public record ThreadState(String synthesis, int version, String anchorText,
-                              String title, String question) {}
+                              String title, String question, long updatedAt) {
+        /** Compat constructor for callers that don't carry a timestamp. */
+        public ThreadState(String synthesis, int version, String anchorText,
+                           String title, String question) {
+            this(synthesis, version, anchorText, title, question, 0L);
+        }
+    }
 
     public interface Listener {
         default void onAttached(SessionInfo info) {}
@@ -41,6 +47,9 @@ public final class ReviewSessionClient {
         default void onThreadDeleted(String anchor) {}
         default void onPendingChanged(String anchor, boolean pending) {}
         default void onStateChanged(State state) {}
+        /** A non-fatal problem worth surfacing to the user (e.g. the thread
+         *  seed gave up after retries and the panel may be incomplete). */
+        default void onWarning(String message) {}
     }
 
     /**
@@ -49,9 +58,10 @@ public final class ReviewSessionClient {
      * user may re-arm). ENDED = the server reported the session terminal
      * (cancelled/finished) or watcher-dead past the reap threshold; it is a
      * one-way latch — the panel freezes read-only and never un-freezes for the
-     * same sid.
+     * same sid. OFFLINE means discovery cannot reach the server at all (as
+     * opposed to DORMANT: server reachable, no session for this cwd).
      */
-    public enum State { DORMANT, CONNECTING, ACTIVE, DISCONNECTED, PAUSED, ENDED }
+    public enum State { DORMANT, CONNECTING, ACTIVE, DISCONNECTED, PAUSED, ENDED, OFFLINE }
 
     /**
      * How long the watcher heartbeat may age before we treat the Claude
@@ -69,9 +79,28 @@ public final class ReviewSessionClient {
      */
     private volatile boolean endedLatched = false;
 
-    private final String baseUrl;
+    /**
+     * Consecutive {@link #fetchNewestSession()} failures (timeout, connection
+     * refused, server restart) required before a discovery blip is treated as
+     * a real detach — same pattern as {@link WalkthroughSessionClient}. One
+     * dropped poll must not wipe the cache and blank the panel.
+     */
+    private static final int DISCOVERY_FAILURE_THRESHOLD = 3;
+
+    /**
+     * How long an anchor may stay pending without an answer before the spinner
+     * is cleared — no ack is coming if Claude is wedged or the event was lost,
+     * and a forever-spinner blocks the gutter's ask affordance.
+     */
+    private static final Duration PENDING_TIMEOUT = Duration.ofSeconds(120);
+
+    /** Re-resolved on discovery failure — the server may have restarted on a
+     *  new port and rewritten server.json (see {@link #refreshBaseUrl()}). */
+    private volatile String baseUrl;
+    private final java.util.function.Supplier<String> baseUrlSupplier;
     private final String projectCwd;
     private final Duration pollInterval;
+    private volatile int discoveryFailures = 0;
     private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
 
     /** Per-request read timeout for the synchronous polls — without it a
@@ -119,9 +148,23 @@ public final class ReviewSessionClient {
     private volatile SessionInfo current = null;
     private volatile Future<?> sseTask = null;
     private volatile ScheduledFuture<?> discoverTask = null;
+    /** The live SSE connection handle, so teardown paths can actually close the
+     *  stream (server sees EOF) instead of only cancelling the worker's join. */
+    private volatile SseClient.Connection sseConnection = null;
 
     public ReviewSessionClient(String baseUrl, String projectCwd, Duration pollInterval) {
-        this.baseUrl = baseUrl;
+        this(() -> baseUrl, projectCwd, pollInterval);
+    }
+
+    /**
+     * @param baseUrlSupplier resolves the server's base URL; re-invoked after a
+     *        failed discovery poll so a server restart on a new port (which
+     *        rewrites server.json) is picked up without an IDE restart.
+     */
+    public ReviewSessionClient(java.util.function.Supplier<String> baseUrlSupplier,
+                               String projectCwd, Duration pollInterval) {
+        this.baseUrlSupplier = baseUrlSupplier;
+        this.baseUrl = baseUrlSupplier.get();
         this.projectCwd = projectCwd;
         this.pollInterval = pollInterval;
     }
@@ -135,10 +178,25 @@ public final class ReviewSessionClient {
         closed = true;
         sseGen.incrementAndGet();
         if (discoverTask != null) discoverTask.cancel(true);
-        if (sseTask != null) sseTask.cancel(true);
+        cancelSse();
         exec.shutdownNow();
         sseExec.shutdownNow();
         setState(State.DORMANT);
+    }
+
+    /**
+     * Cancels the SSE worker task AND closes the underlying stream.
+     * {@code sseTask.cancel(true)} alone only interrupts the worker's join;
+     * the TCP connection and the HttpClient's consumer thread stay alive until
+     * the server hangs up. Closing the {@link SseClient.Connection} cancels
+     * the body subscription so the server sees EOF immediately. Used on every
+     * teardown path: {@link #stop()}, {@link #latchEnded()},
+     * {@link #handleNoSession()}, and reconnect ({@link #openSse(String)}).
+     */
+    private void cancelSse() {
+        if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+        SseClient.Connection conn = sseConnection;
+        if (conn != null) conn.close();
     }
 
     public void addListener(Listener l) { listeners.add(l); }
@@ -237,10 +295,20 @@ public final class ReviewSessionClient {
     }
 
     /** Mark an anchor pending under a submit token; notify only on the
-     *  not-pending → pending transition. */
+     *  not-pending → pending transition. Arms a timeout that clears the
+     *  pending state if no answer ever lands — token-guarded, so a newer
+     *  submit on the same anchor keeps its own spinner and its own clock. */
     private void markPending(String anchor, long token) {
         if (pending.put(anchor, token) == null) {
             for (Listener l : listeners) l.onPendingChanged(anchor, true);
+        }
+        if (!exec.isShutdown()) {
+            try {
+                exec.schedule(() -> clearPendingIfToken(anchor, token),
+                    PENDING_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // stop() raced us — the pending map dies with the client anyway.
+            }
         }
     }
 
@@ -267,12 +335,20 @@ public final class ReviewSessionClient {
         try {
             found = fetchNewestSession();
         } catch (Exception e) {
-            // Server unreachable. A transient blip must not wipe a frozen
-            // (ENDED) panel; for a live session this preserves the prior
-            // behaviour of detaching.
-            if (!endedLatched) handleNoSession();
+            // Server unreachable. It may have restarted on a new port —
+            // re-resolve server.json (cheap file read) before the next try.
+            refreshBaseUrl();
+            // A single blip must not wipe the cache/panel: require several
+            // consecutive failures before detaching (mirrors
+            // WalkthroughSessionClient). A frozen (ENDED) panel is never
+            // wiped by unreachability at all.
+            discoveryFailures++;
+            if (!endedLatched && discoveryFailures >= DISCOVERY_FAILURE_THRESHOLD) {
+                handleNoSession(State.OFFLINE);
+            }
             return;
         }
+        discoveryFailures = 0;
         if (endedLatched) {
             // Frozen read-only. Discovery only reaps dead sessions, so the
             // ONLY thing that replaces a frozen panel is a genuinely new, LIVE
@@ -306,8 +382,24 @@ public final class ReviewSessionClient {
         String url = baseUrl + "/api/sessions?cwd=" + URLEncoder.encode(projectCwd, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT).GET().build();
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) return null;
+        // A non-200 is a failure, not "no session" — it must count against
+        // DISCOVERY_FAILURE_THRESHOLD like a socket failure would. A null
+        // return is reserved for "the server answered 200 and the list is
+        // empty" (mirrors WalkthroughSessionClient).
+        if (resp.statusCode() != 200) throw new java.io.IOException("HTTP " + resp.statusCode());
         return parseFirstSession(resp.body());
+    }
+
+    /** Re-resolve the server URL after a failed discovery poll: the server may
+     *  have restarted on a new port and rewritten server.json. Cheap (one file
+     *  read behind the supplier), so every failed poll re-checks. */
+    private void refreshBaseUrl() {
+        try {
+            String next = baseUrlSupplier.get();
+            if (next != null && !next.equals(baseUrl)) baseUrl = next;
+        } catch (RuntimeException ignored) {
+            // keep the current URL; the next failure retries the read
+        }
     }
 
     /** Freeze the current session read-only. One-way: only attach() clears it. */
@@ -315,7 +407,7 @@ public final class ReviewSessionClient {
         endedLatched = true;
         sseGen.incrementAndGet();
         for (String a : new java.util.ArrayList<>(pending.keySet())) clearPending(a);
-        if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+        cancelSse();
         setState(State.ENDED);
     }
 
@@ -361,7 +453,11 @@ public final class ReviewSessionClient {
         }
     }
 
-    private void handleNoSession() {
+    private void handleNoSession() { handleNoSession(State.DORMANT); }
+
+    /** @param finalState DORMANT when the server answered and has no session;
+     *                    OFFLINE when the server itself is unreachable. */
+    private void handleNoSession(State finalState) {
         endedLatched = false;
         if (current != null) {
             current = null;
@@ -369,10 +465,10 @@ public final class ReviewSessionClient {
             cacheVersion.incrementAndGet();
             pending.clear();
             sseGen.incrementAndGet();
-            if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
+            cancelSse();
             for (Listener l : listeners) l.onDetached();
         }
-        setState(State.DORMANT);
+        setState(finalState);
     }
 
     private void attach(SessionInfo s) {
@@ -395,14 +491,14 @@ public final class ReviewSessionClient {
      * empty until the next SSE event; dedups against the current cache so a
      * re-seed on reconnect doesn't churn listeners for unchanged threads.
      */
-    private void seedCache(String sid) {
-        for (int attempt = 0; attempt < 3 && !closed; attempt++) {
+    private void seedCache(String sid, long gen) {
+        for (int attempt = 0; attempt < 3 && !closed && gen == sseGen.get(); attempt++) {
             try {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/s/" + sid + "/threads.json"))
                     .timeout(REQUEST_TIMEOUT).GET().build();
                 HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() == 200) {
-                    applySeed(parseThreadsBulk(resp.body()));
+                    applySeed(parseThreadsBulk(resp.body()), gen);
                     return;
                 }
             } catch (Exception ignored) {
@@ -414,10 +510,25 @@ public final class ReviewSessionClient {
                 return;
             }
         }
+        // Gave up. An empty "live" panel with no explanation reads as "no
+        // findings" — tell the listeners so the UI can show a warning instead
+        // of silently lying. Only when this seed is still the current attach.
+        if (!closed && gen == sseGen.get()) {
+            for (Listener l : listeners) {
+                l.onWarning("Couldn't load existing threads from the review server — "
+                    + "the panel may be incomplete until the connection recovers.");
+            }
+        }
     }
 
-    private void applySeed(Map<String, ThreadState> seeded) {
+    /** Writes the seeded threads into the cache — but only while {@code gen}
+     *  is still the current attach generation. A session switch during the
+     *  seed HTTP call must not write the old session's threads into the new
+     *  session's cache, so the generation is re-checked before every mutation,
+     *  not just once up front. */
+    private void applySeed(Map<String, ThreadState> seeded, long gen) {
         for (var e : seeded.entrySet()) {
+            if (closed || gen != sseGen.get()) return; // superseded mid-seed
             ThreadState existing = cache.get(e.getKey());
             ThreadState incoming = e.getValue();
             if (existing != null
@@ -437,8 +548,7 @@ public final class ReviewSessionClient {
         if (closed || sseExec.isShutdown()) return;
         URI uri = URI.create(baseUrl + "/s/" + sid + "/stream");
         long gen = sseGen.incrementAndGet();
-        Future<?> prev = sseTask;
-        if (prev != null) prev.cancel(true);
+        cancelSse();
         try {
             sseTask = sseExec.submit(() -> runSse(sid, uri, gen));
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
@@ -452,18 +562,28 @@ public final class ReviewSessionClient {
         // Seed on every (re)connect: covers a failed initial seed and an outage
         // where SSE events were missed while disconnected. Its retry-sleeps are
         // on sseExec, so they never starve discovery polling.
-        seedCache(sid);
+        seedCache(sid, gen);
         if (gen != sseGen.get() || closed) return; // superseded while seeding
         if (!endedLatched) setState(State.ACTIVE);
+        SseClient.Connection conn = SseClient.connect(http, uri,
+            ev -> handleSseEvent(ev, gen),
+            t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
+                       setState(State.DISCONNECTED); });
+        sseConnection = conn;
+        // A concurrent cancelSse() that ran between connect() returning and the
+        // assignment above saw the stale field and couldn't close THIS stream.
+        // Re-check now that it's published.
+        if (closed || gen != sseGen.get()) conn.close();
         try {
-            SseClient.connect(http, uri,
-                ev -> { if (gen == sseGen.get()) handleSseEvent(ev); },
-                t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
-                           setState(State.DISCONNECTED); }
-            ).join();
+            conn.done().join();
         } catch (Throwable ignored) {
             // Task cancelled/interrupted, or an unexpected join failure — fall
             // through to the single reconnect guard below.
+        } finally {
+            // Only clear it if it's still ours — a newer openSse() may have
+            // already replaced (and closed) it.
+            //noinspection ObjectEquality
+            if (sseConnection == conn) sseConnection = null;
         }
         // Stream ended (clean close or post-error). This is the SOLE reconnect
         // path, so an error frame can't double-schedule. Reconnect only if this
@@ -487,7 +607,10 @@ public final class ReviewSessionClient {
         }
     }
 
-    private void handleSseEvent(SseClient.Event e) {
+    /** Applies one SSE event to the cache. {@code gen} is re-checked right
+     *  before each mutation — the caller's check alone leaves a window where a
+     *  session switch lands between the check and the write. */
+    private void handleSseEvent(SseClient.Event e, long gen) {
         String name = e.name();
         com.google.gson.JsonObject data;
         try {
@@ -498,6 +621,7 @@ public final class ReviewSessionClient {
         if ("thread-deleted".equals(name)) {
             String anchor = str(data, "anchor");
             if (anchor.isEmpty()) return;
+            if (gen != sseGen.get() || closed) return; // superseded stream
             cache.remove(anchor);
             cacheVersion.incrementAndGet();
             clearPending(anchor);
@@ -513,12 +637,14 @@ public final class ReviewSessionClient {
         String anchorText = str(data, "anchor_text");
         String title = str(data, "title");
         String question = str(data, "question");
+        long updatedAt = data.has("updated_at") && !data.get("updated_at").isJsonNull()
+            ? data.get("updated_at").getAsLong() : 0L;
 
         ThreadState existing = cache.get(anchor);
         if (existing != null
                 && existing.synthesis().equals(synthesis)
                 && existing.version() == version) {
-            return;
+            return; // truly unchanged
         }
         String priorAnchorText = existing != null ? existing.anchorText() : "";
         String priorTitle = existing != null ? existing.title() : "";
@@ -526,14 +652,14 @@ public final class ReviewSessionClient {
         ThreadState next = new ThreadState(synthesis, version,
             prefer(anchorText, priorAnchorText),
             prefer(title, priorTitle),
-            prefer(question, priorQuestion));
-        if (existing != null && existing.synthesis().equals(synthesis)) {
-            cache.put(anchor, next);
-            cacheVersion.incrementAndGet();
-            return;
-        }
+            prefer(question, priorQuestion),
+            updatedAt);
+        if (gen != sseGen.get() || closed) return; // superseded stream
         cache.put(anchor, next);
         cacheVersion.incrementAndGet();
+        // A version bump with identical text is still an answer (metadata-only
+        // synthesis update): pending must clear and listeners must repaint,
+        // otherwise the spinner spins forever on a deduped reply.
         clearPending(anchor);
         for (Listener l : listeners) l.onThreadChanged(anchor, synthesis, version);
     }
@@ -577,7 +703,9 @@ public final class ReviewSessionClient {
                 t.has("version") && !t.get("version").isJsonNull() ? t.get("version").getAsInt() : 0,
                 str(t, "anchor_text"),
                 str(t, "title"),
-                str(t, "question")));
+                str(t, "question"),
+                t.has("updated_at") && !t.get("updated_at").isJsonNull()
+                    ? t.get("updated_at").getAsLong() : 0L));
         }
         return out;
     }

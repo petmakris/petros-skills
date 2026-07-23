@@ -1,9 +1,14 @@
 package com.petros.ireview;
 
 import org.junit.jupiter.api.Test;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReviewSessionClientTest {
@@ -281,6 +286,191 @@ class ReviewSessionClientTest {
             var ts = client.threadFor("foo:R:1").orElseThrow();
             assertEquals("Null check on foo", ts.title());
             assertEquals("why null-checked?", ts.question());
+            client.stop();
+        }
+    }
+
+    @Test
+    void discoveryBlipsBelowThresholdDoNotDetach() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            CountDownLatch attached = new CountDownLatch(1);
+            AtomicInteger detaches = new AtomicInteger();
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
+                    attached.countDown();
+                }
+                @Override public void onDetached() { detaches.incrementAndGet(); }
+            });
+            client.start();
+            assertTrue(attached.await(2, TimeUnit.SECONDS));
+
+            // Two consecutive failures — below the 3-strike threshold. The
+            // pre-fix behaviour detached (and wiped the cache) on the FIRST one.
+            server.sessionsFailuresRemaining.set(2);
+            Thread.sleep(700); // several poll cycles: fail, fail, recover
+            assertEquals(0, detaches.get(), "blips below the threshold must not detach");
+            assertTrue(client.currentSession().isPresent(), "session must survive the blips");
+            client.stop();
+        }
+    }
+
+    @Test
+    void consecutiveDiscoveryFailuresDetachAndGoOffline() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            CountDownLatch attached = new CountDownLatch(1);
+            CountDownLatch detached = new CountDownLatch(1);
+            CountDownLatch offline = new CountDownLatch(1);
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
+                    attached.countDown();
+                }
+                @Override public void onDetached() { detached.countDown(); }
+                @Override public void onStateChanged(ReviewSessionClient.State s) {
+                    if (s == ReviewSessionClient.State.OFFLINE) offline.countDown();
+                }
+            });
+            client.start();
+            assertTrue(attached.await(2, TimeUnit.SECONDS));
+
+            // Discovery now fails on every poll — a real outage.
+            server.sessionsFailuresRemaining.set(Integer.MAX_VALUE);
+            assertTrue(detached.await(3, TimeUnit.SECONDS),
+                "a sustained outage must eventually detach");
+            assertTrue(offline.await(2, TimeUnit.SECONDS),
+                "an unreachable server must surface as OFFLINE, not idle");
+            client.stop();
+        }
+    }
+
+    @Test
+    void reResolvesServerUrlAfterRestartOnNewPort() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            Path cfg = Files.createTempFile("ireview-server", ".json");
+            try {
+                // server.json initially points at a dead port (the "old" server).
+                Files.writeString(cfg, "{\"url\":\"http://127.0.0.1:9\"}");
+                CountDownLatch attached = new CountDownLatch(1);
+                ReviewSessionClient client = new ReviewSessionClient(
+                    () -> readUrl(cfg, "http://127.0.0.1:9"),
+                    "/proj/montblanc", Duration.ofMillis(100));
+                client.addListener(new ReviewSessionClient.Listener() {
+                    @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
+                        attached.countDown();
+                    }
+                });
+                client.start();
+                Thread.sleep(300); // a few polls against the dead URL
+                assertTrue(client.currentSession().isEmpty(), "dead URL can't attach");
+
+                // The server "restarts" on its real port and rewrites server.json.
+                Files.writeString(cfg, "{\"url\":\"" + server.baseUrl() + "\"}");
+                assertTrue(attached.await(3, TimeUnit.SECONDS),
+                    "a failed poll must re-resolve server.json and pick up the new URL");
+                client.stop();
+            } finally {
+                Files.deleteIfExists(cfg);
+            }
+        }
+    }
+
+    /** Same shape as ReviewSessionService's supplier: regex the url field. */
+    private static String readUrl(Path cfg, String fallback) {
+        try {
+            Matcher m = Pattern.compile("\"url\"\\s*:\\s*\"([^\"]+)\"")
+                .matcher(Files.readString(cfg));
+            if (m.find()) return m.group(1);
+        } catch (java.io.IOException ignored) {
+        }
+        return fallback;
+    }
+
+    @Test
+    void sessionSwitchDuringSlowSeedDoesNotPolluteNewCache() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/a\"}]";
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            // The old session's seed answers slowly, with the OLD threads (the
+            // fake captures the body before the delay).
+            server.threadsJson =
+                "{\"old.java:R:1\":{\"latest_synthesis\":\"stale answer\",\"version\":1}}";
+            server.threadsDelayMs = 700;
+            CountDownLatch attachedAbc = new CountDownLatch(1);
+            CountDownLatch attachedDef = new CountDownLatch(1);
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onAttached(ReviewSessionClient.SessionInfo info) {
+                    if ("abc".equals(info.sid())) attachedAbc.countDown();
+                    if ("def".equals(info.sid())) attachedDef.countDown();
+                }
+            });
+            client.start();
+            assertTrue(attachedAbc.await(2, TimeUnit.SECONDS));
+
+            // Switch sessions while abc's seed request is still in flight.
+            Thread.sleep(150);
+            server.threadsDelayMs = 0;
+            server.threadsJson = "{}"; // def has no threads
+            server.sessionsJson =
+                "[{\"sid\":\"def\",\"pr_ref\":\"PR2\",\"title\":\"t2\",\"state_dir\":\"/tmp/b\"}]";
+            assertTrue(attachedDef.await(2, TimeUnit.SECONDS));
+
+            // Let abc's delayed seed response land (and be discarded).
+            Thread.sleep(900);
+            assertFalse(client.threadFor("old.java:R:1").isPresent(),
+                "old session's slow seed must not write into the new session's cache");
+            client.stop();
+        }
+    }
+
+    @Test
+    void metadataOnlyVersionBumpClearsPendingAndNotifies() throws Exception {
+        try (FakeReviewServer server = new FakeReviewServer()) {
+            server.sessionsJson =
+                "[{\"sid\":\"abc\",\"pr_ref\":\"PR1\",\"title\":\"t\",\"state_dir\":\"/tmp/x\"}]";
+            server.watcherSeenAt = System.currentTimeMillis() / 1000;
+            CountDownLatch gotV1 = new CountDownLatch(1);
+            CountDownLatch gotV2 = new CountDownLatch(1);
+            ReviewSessionClient client = new ReviewSessionClient(
+                server.baseUrl(), "/proj/montblanc", Duration.ofMillis(100));
+            client.addListener(new ReviewSessionClient.Listener() {
+                @Override public void onThreadChanged(String anchor, String synthesis, int version) {
+                    if (!"foo:R:1".equals(anchor)) return;
+                    if (version == 1) gotV1.countDown();
+                    if (version == 2) gotV2.countDown();
+                }
+            });
+            client.start();
+            Thread.sleep(300); // let it attach + open SSE
+            server.pushSseEvent("thread-changed",
+                "{\"anchor\":\"foo:R:1\",\"latest_synthesis\":\"hello\",\"version\":1}");
+            assertTrue(gotV1.await(3, TimeUnit.SECONDS));
+
+            // Ask a question, then the server dedups the reply: same synthesis
+            // text, only the version bumps. Pending must clear and listeners
+            // must still be notified — otherwise the spinner spins forever.
+            client.postComment("foo:R:1", "again?", "").get(2, TimeUnit.SECONDS);
+            assertTrue(client.isPending("foo:R:1"));
+            server.pushSseEvent("thread-changed",
+                "{\"anchor\":\"foo:R:1\",\"latest_synthesis\":\"hello\",\"version\":2}");
+            assertTrue(gotV2.await(3, TimeUnit.SECONDS),
+                "a version-only bump must notify listeners");
+            assertFalse(client.isPending("foo:R:1"),
+                "a version-only bump must clear pending");
+            assertEquals(2, client.threadFor("foo:R:1").orElseThrow().version());
             client.stop();
         }
     }

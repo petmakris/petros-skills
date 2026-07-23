@@ -89,8 +89,9 @@ public final class WalkthroughSessionClient {
     private volatile SessionInfo current = null;
     private volatile Future<?> sseTask = null;
     private volatile ScheduledFuture<?> discoverTask = null;
-    /** The in-flight SSE connect future, so {@link #stop()} can cancel it and unblock the worker's join(). */
-    private volatile CompletableFuture<Void> sseConnectFuture = null;
+    /** The live SSE connection handle, so teardown paths can actually close the
+     *  stream (server sees EOF) instead of only unblocking the worker's join(). */
+    private volatile SseClient.Connection sseConnection = null;
     private volatile int discoveryFailures = 0;
 
     public WalkthroughSessionClient(String baseUrl, String projectCwd, Duration pollInterval) {
@@ -112,42 +113,30 @@ public final class WalkthroughSessionClient {
         exec.shutdownNow();
         sseExec.shutdownNow();
         setState(State.DORMANT);
-        // Sever the retention path from a still-open SSE exchange: cancelSse() completes
-        // the derived stage so the worker's join() returns, but cancellation does not
-        // propagate upstream to the underlying sendAsync future (SseClient is shared with
-        // the shipped review client and out of scope to change here), and the body pump
-        // keeps running on the HttpClient's own executor thread with its subscriber still
-        // referencing this client. The event-generation check in the subscriber's onEvent
-        // lambda (`gen == sseGen.get()`) already makes any further callback a no-op after
-        // the increment above, but the lambda's closure over `this` still keeps this whole
-        // object graph — listeners, and everything each listener reaches (the project
-        // service, the controller, the navigator, the Project) — reachable for as long as
-        // the leaked exchange lives, which for this server is forever (30s heartbeats).
-        // Clearing the list breaks that reachability at the one edge this class owns: the
-        // leaked client itself may still linger, but it no longer holds a Project. stop()
-        // is terminal (see addListener's closed check below and WalkthroughService#dispose,
-        // its only caller), so no listener is ever waiting on a notification after this.
+        // stop() is terminal (see addListener's closed check below and
+        // WalkthroughService#dispose, its only caller): clear the listener list
+        // so nothing this client still references can keep a Project reachable,
+        // even if some stray callback fires after shutdown.
         listeners.clear();
     }
 
     /**
-     * Cancels the current SSE worker's task and its connect future.
+     * Cancels the current SSE worker's task AND closes the underlying stream.
      * {@code sseTask.cancel(true)} alone only interrupts the worker thread;
-     * the thread is parked in {@code CompletableFuture.join()} on the SSE
-     * request, and {@code join()} ignores interrupts. Cancelling the connect
-     * future itself completes it exceptionally, so {@code join()} unblocks
-     * and the thread (and everything on its stack — listeners, the project
-     * service, the Project) can be released. Used on every teardown path:
-     * final shutdown ({@link #stop()}), the ENDED latch ({@link
-     * #latchEnded()}), detach ({@link #handleNoSession()}), and reconnect
-     * ({@link #openSse(String)}) — all of them previously left the old
-     * worker thread blocked until the server-side connection happened to
-     * close on its own.
+     * the thread is parked in {@code join()} on the SSE stream, and the TCP
+     * connection plus the HttpClient's body-pump thread stay alive until the
+     * server happens to hang up. Closing the {@link SseClient.Connection}
+     * closes the lines stream, which cancels the HTTP body subscription — the
+     * server sees EOF immediately and the whole object graph behind the
+     * subscriber (listeners, the project service, the Project) is released.
+     * Used on every teardown path: final shutdown ({@link #stop()}), the
+     * ENDED latch ({@link #latchEnded()}), detach ({@link #handleNoSession()}),
+     * and reconnect ({@link #openSse(String)}).
      */
     private void cancelSse() {
         if (sseTask != null) { sseTask.cancel(true); sseTask = null; }
-        CompletableFuture<Void> connect = sseConnectFuture;
-        if (connect != null) connect.cancel(true);
+        SseClient.Connection conn = sseConnection;
+        if (conn != null) conn.close();
     }
 
     /** No-op once {@link #stop()} has run — belt-and-braces alongside the listener clear
@@ -476,26 +465,26 @@ public final class WalkthroughSessionClient {
         seedThreads(sid, gen);
         if (gen != sseGen.get() || closed) return;
         if (!endedLatched) setState(State.ACTIVE);
-        CompletableFuture<Void> connect = SseClient.connect(http, uri,
+        SseClient.Connection conn = SseClient.connect(http, uri,
             ev -> { if (gen == sseGen.get()) handleSseEvent(sid, ev, gen); },
             t -> { if (gen == sseGen.get() && !endedLatched && state == State.ACTIVE)
                        setState(State.DISCONNECTED); }
         );
-        sseConnectFuture = connect;
+        sseConnection = conn;
         // A concurrent stop()/cancelSse() that ran between SseClient.connect() returning
-        // and the assignment above saw the stale (pre-assignment) sseConnectFuture — null,
-        // or a previous generation's — and so could not cancel *this* connect. Re-check
+        // and the assignment above saw the stale (pre-assignment) sseConnection — null,
+        // or a previous generation's — and so could not close *this* stream. Re-check
         // now that the field is published: if the client closed or a newer attach/reconnect
-        // already moved the generation on, cancel here instead of parking in join() forever.
-        if (closed || gen != sseGen.get()) connect.cancel(true);
+        // already moved the generation on, close here instead of parking in join() forever.
+        if (closed || gen != sseGen.get()) conn.close();
         try {
-            connect.join();
+            conn.done().join();
         } catch (Throwable ignored) {
         } finally {
             // Only clear it if it's still ours — a newer openSse() may have
-            // already replaced (and cancelled) it.
+            // already replaced (and closed) it.
             //noinspection ObjectEquality
-            if (sseConnectFuture == connect) sseConnectFuture = null;
+            if (sseConnection == conn) sseConnection = null;
         }
         if (gen == sseGen.get() && !closed && !endedLatched) {
             if (state == State.ACTIVE) setState(State.DISCONNECTED);

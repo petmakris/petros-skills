@@ -40,19 +40,37 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class SynthesisPopup {
 
-    /** One open popup per anchor; opening a new one cancels the previous. */
+    /** One open popup per project+anchor; opening a new one cancels the
+     *  previous. Keyed by project too — two open projects can review files with
+     *  the same relative path, and an anchor-only key would cross-cancel them. */
     private static final java.util.Map<String, JBPopup> OPEN_POPUPS =
             new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** How long the "Claude is answering…" card may spin before flipping to a
+     *  "still waiting" state — mirrors ReviewSessionClient's pending timeout. */
+    private static final int STILL_WAITING_AFTER_MS = 120_000;
+
+    private static String popupKey(@NotNull Project project, @NotNull String anchor) {
+        return project.getLocationHash() + "|" + anchor;
+    }
+
+    /** True when a popup for this anchor is currently on screen — used to skip
+     *  the "Claude answered" balloon when the user is already looking at it. */
+    static boolean isOpenFor(@NotNull Project project, @NotNull String anchor) {
+        JBPopup p = OPEN_POPUPS.get(popupKey(project, anchor));
+        return p != null && !p.isDisposed() && p.isVisible();
+    }
 
     public static void show(@NotNull Project project,
                             @NotNull EditorEx editor,
                             @NotNull String anchor,
                             int visualLine) {
         ReviewSessionClient client = ReviewSessionService.get(project).client();
+        String popupKey = popupKey(project, anchor);
 
         // Dedupe: if there's already a popup open for this anchor, close it
         // before opening a new one (gives the user the new screen position).
-        JBPopup existing = OPEN_POPUPS.remove(anchor);
+        JBPopup existing = OPEN_POPUPS.remove(popupKey);
         if (existing != null && !existing.isDisposed()) {
             existing.cancel();
         }
@@ -64,6 +82,7 @@ public final class SynthesisPopup {
         // timer (answering state) captured by the lambdas below.
         AtomicReference<String> lastQuestion = new AtomicReference<>();
         final javax.swing.Timer[] elapsedTimer = {null};
+        final javax.swing.Timer[] stillWaitingTimer = {null};
         final long[] startedAt = {0L};
 
         JPanel content = new JPanel(new BorderLayout());
@@ -161,9 +180,17 @@ public final class SynthesisPopup {
         thinkingText.setForeground(JBColor.GRAY);
         spinnerRow.add(spinner);
         spinnerRow.add(thinkingText);
+        // Shown only after the pending timeout: the spinner alone would claim
+        // progress forever, so after 120s the card admits it may be stuck and
+        // offers a way back to the synthesis view.
+        JButton waitDismissBtn = makeAccentButton("Dismiss");
+        waitDismissBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        waitDismissBtn.setVisible(false);
         thinkingInner.add(thinkingQuestion);
         thinkingInner.add(javax.swing.Box.createVerticalStrut(6));
         thinkingInner.add(spinnerRow);
+        thinkingInner.add(javax.swing.Box.createVerticalStrut(10));
+        thinkingInner.add(waitDismissBtn);
         thinkingCard.add(thinkingInner);
 
         // "Error" card: a failed submit must never lose the user's question —
@@ -226,6 +253,8 @@ public final class SynthesisPopup {
 
         Runnable stopElapsed = () -> {
             if (elapsedTimer[0] != null) { elapsedTimer[0].stop(); elapsedTimer[0] = null; }
+            if (stillWaitingTimer[0] != null) { stillWaitingTimer[0].stop(); stillWaitingTimer[0] = null; }
+            waitDismissBtn.setVisible(false);
         };
         Runnable startElapsed = () -> {
             stopElapsed.run();
@@ -236,13 +265,32 @@ public final class SynthesisPopup {
                 thinkingText.setText("Claude is answering… " + secs + "s");
             });
             elapsedTimer[0].start();
+            // After the pending timeout, stop counting up and admit the answer
+            // may never come — with a way out that doesn't lose the popup.
+            stillWaitingTimer[0] = new javax.swing.Timer(STILL_WAITING_AFTER_MS, e -> {
+                if (!thinking.get()) return;
+                if (elapsedTimer[0] != null) { elapsedTimer[0].stop(); elapsedTimer[0] = null; }
+                thinkingText.setText("Still waiting — Claude may be busy");
+                waitDismissBtn.setVisible(true);
+                thinkingCard.revalidate();
+                thinkingCard.repaint();
+            });
+            stillWaitingTimer[0].setRepeats(false);
+            stillWaitingTimer[0].start();
         };
+        waitDismissBtn.addActionListener(e -> {
+            thinking.set(false);
+            stopElapsed.run();
+            renderCurrent.run();
+        });
 
         JButton askBtn = makeAccentButton("Ask");
         askBtn.setMnemonic(KeyEvent.VK_A);
         java.util.function.Consumer<String> submitText = raw -> {
             ReviewSessionClient.State st = client.state();
-            if (st == ReviewSessionClient.State.PAUSED || st == ReviewSessionClient.State.ENDED) return;
+            if (st == ReviewSessionClient.State.PAUSED || st == ReviewSessionClient.State.ENDED
+                    || st == ReviewSessionClient.State.DORMANT
+                    || st == ReviewSessionClient.State.OFFLINE) return;
             if (raw == null) return;
             String q = raw.trim();
             if (q.isEmpty()) return;
@@ -268,19 +316,27 @@ public final class SynthesisPopup {
         askBtn.addActionListener(e -> submit.run());
         retryBtn.addActionListener(e -> submitText.accept(lastQuestion.get()));
 
-        // Liveness gating: a PAUSED/ENDED session has no Claude to answer, so
-        // disable the input + Ask button and drop any stale spinner. The popup
-        // is reachable straight from the gutter, bypassing the side panel, so
-        // it must enforce this itself rather than rely on the panel.
+        // Liveness gating: a PAUSED/ENDED session has no Claude to answer, and
+        // a DORMANT/OFFLINE client has no session at all — so disable the
+        // input + Ask button and drop any stale spinner rather than accept a
+        // question that is guaranteed to fail. The popup is reachable straight
+        // from the gutter, bypassing the side panel, so it must enforce this
+        // itself rather than rely on the panel.
         java.util.function.Consumer<ReviewSessionClient.State> applyLiveness = st -> {
             boolean frozen = st == ReviewSessionClient.State.PAUSED
-                    || st == ReviewSessionClient.State.ENDED;
+                    || st == ReviewSessionClient.State.ENDED
+                    || st == ReviewSessionClient.State.DORMANT
+                    || st == ReviewSessionClient.State.OFFLINE;
             input.setEnabled(!frozen);
             askBtn.setEnabled(!frozen);
             if (frozen) {
                 if (thinking.get()) { thinking.set(false); stopElapsed.run(); renderCurrent.run(); }
-                input.setToolTipText(st == ReviewSessionClient.State.ENDED
-                        ? "Session ended — read-only" : "Paused — reconnecting…");
+                input.setToolTipText(switch (st) {
+                    case ENDED -> "Session ended — read-only";
+                    case PAUSED -> "Paused — reconnecting…";
+                    case OFFLINE -> "Review server offline";
+                    default -> "No active review session";
+                });
             } else {
                 input.setToolTipText(null);
             }
@@ -353,6 +409,15 @@ public final class SynthesisPopup {
                 SwingUtilities.invokeLater(() -> applyLiveness.accept(st));
             }
             @Override
+            public void onDetached() {
+                // The session is gone: an open popup would re-enable input that
+                // can only fail. Close it rather than leave a zombie.
+                SwingUtilities.invokeLater(() -> {
+                    JBPopup p = popupRef.get();
+                    if (p != null && !p.isDisposed()) p.cancel();
+                });
+            }
+            @Override
             public void onThreadChanged(String changedAnchor, String synthesis, int version) {
                 if (!changedAnchor.equals(anchor)) return;
                 SwingUtilities.invokeLater(() -> {
@@ -387,10 +452,10 @@ public final class SynthesisPopup {
                 .createPopup();
         popupRef.set(popup);
         if (browser != null) Disposer.register(popup, browser);
-        OPEN_POPUPS.put(anchor, popup);
+        OPEN_POPUPS.put(popupKey, popup);
         popup.addListener(new com.intellij.openapi.ui.popup.JBPopupListener() {
             @Override public void onClosed(@NotNull com.intellij.openapi.ui.popup.LightweightWindowEvent e) {
-                OPEN_POPUPS.remove(anchor, popup);
+                OPEN_POPUPS.remove(popupKey, popup);
                 client.removeListener(listener);
                 stopElapsed.run();
             }
