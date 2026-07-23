@@ -11,7 +11,6 @@ import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
-import com.intellij.util.ui.JBFont;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 
@@ -68,9 +67,43 @@ public final class WalkthroughHud {
 
     private static final Logger LOG = Logger.getInstance(WalkthroughHud.class);
 
-    private static final JBFont TITLE_FONT = JBUI.Fonts.label().asBold();
-    private static final JBFont META_FONT = JBUI.Fonts.label().lessOn(1.5f);
+    // Same one-constant-per-class convention as WalkthroughPanel: every font
+    // below derives from the platform label font first (so it keeps tracking
+    // the user's font-size/HiDPI settings), then this single factor scales
+    // the whole ramp via {@link #scale}. JBUI.scale(...) sizes that surround
+    // that text — the pill's internal padding, button sizes, progress dots,
+    // the gaps between elements — go through {@link #scaled(int)} the same
+    // way, so nothing looks cramped once the text has grown.
+    private static final float FONT_SCALE = 1.2f;
+
+    private static final Font TITLE_FONT = scale(JBUI.Fonts.label().asBold());
+    private static final Font META_FONT = scale(JBUI.Fonts.label().lessOn(1.5f));
+    // Position offset from the editor's bottom edge, not text sizing —
+    // deliberately left off the FONT_SCALE ramp.
     private static final int BOTTOM_MARGIN = JBUI.scale(36);
+    // Natural width ceiling for the title/meta column: past this, Swing's
+    // own label truncation (a JLabel clips + appends "…" once its actual
+    // layout width is less than the text's natural width) kicks in instead
+    // of the whole pill growing wider than a narrow editor — the same
+    // bounded-width-then-elide shape WalkthroughPanel's SymbolChip already
+    // uses for the identical problem. Scaled so a longer title still gets
+    // roughly the same character budget at the larger font.
+    private static final int MAX_TITLE_WIDTH = scaled(200);
+
+    /** Multiplies an already theme-derived font by {@link #FONT_SCALE}. */
+    private static Font scale(Font f) {
+        return f.deriveFont(f.getSize2D() * FONT_SCALE);
+    }
+
+    /**
+     * Multiplies a {@code JBUI.scale(...)} pixel size that surrounds text
+     * (padding, gaps, button/dot diameters) by {@link #FONT_SCALE} before
+     * handing it to {@link JBUI#scale(int)}, so those sizes keep pace with
+     * the type ramp above instead of looking cramped once it grows.
+     */
+    private static int scaled(int base) {
+        return JBUI.scale(Math.round(base * FONT_SCALE));
+    }
 
     private final WalkthroughController controller;
 
@@ -281,29 +314,38 @@ public final class WalkthroughHud {
 
         JBLabel metaLabel = new JBLabel((index + 1) + " / " + total + " · " + roleLabel(step.role()));
         metaLabel.setFont(META_FONT);
-        metaLabel.setForeground(UIUtil.getLabelDisabledForeground());
+        // Was UIUtil.getLabelDisabledForeground() — near-illegible against the
+        // pill's gradient at small size. getContextHelpForeground() is the
+        // platform's own "subordinate but still readable" tone (used for
+        // help/hint text throughout the IDE), so the meta line stays visually
+        // secondary to the title without being invisible.
+        metaLabel.setForeground(UIUtil.getContextHelpForeground());
         metaLabel.setHorizontalAlignment(SwingConstants.CENTER);
         metaLabel.setFocusable(false);
 
-        JPanel center = new JPanel(new GridLayout(2, 1, 0, JBUI.scale(1)));
+        JPanel center = new JPanel(new GridLayout(2, 1, 0, scaled(1)));
         center.setOpaque(false);
         center.setFocusable(false);
-        center.setBorder(JBUI.Borders.emptyLeft(JBUI.scale(4)));
+        center.setBorder(JBUI.Borders.emptyLeft(scaled(4)));
         center.add(titleLabel);
         center.add(metaLabel);
-        center.setPreferredSize(new Dimension(
-            Math.max(titleLabel.getPreferredSize().width, metaLabel.getPreferredSize().width) + JBUI.scale(8),
-            center.getPreferredSize().height));
+        // Cap the natural width center reports to MAX_TITLE_WIDTH (see field
+        // doc) rather than the title's full unclamped width, so a long title
+        // elides instead of forcing the whole pill wider than the editor.
+        int contentWidth = Math.min(
+            Math.max(titleLabel.getPreferredSize().width, metaLabel.getPreferredSize().width),
+            MAX_TITLE_WIDTH);
+        center.setPreferredSize(new Dimension(contentWidth + scaled(8), center.getPreferredSize().height));
 
         DotsRow dots = new DotsRow(index, total);
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.CENTER, JBUI.scale(8), 0));
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.CENTER, scaled(8), 0));
         right.setOpaque(false);
         right.setFocusable(false);
         right.add(dots);
         right.add(nextBtn);
 
-        JPanel content = new JPanel(new BorderLayout(JBUI.scale(10), 0));
+        JPanel content = new JPanel(new BorderLayout(scaled(10), 0));
         content.setOpaque(false);
         content.setFocusable(false);
         content.add(prevBtn, BorderLayout.WEST);
@@ -356,8 +398,8 @@ public final class WalkthroughHud {
             setOpaque(false);
             setFocusable(false);
             setBorder(JBUI.Borders.empty(
-                SHADOW_SPAN + JBUI.scale(6), SHADOW_SPAN + JBUI.scale(14),
-                SHADOW_SPAN + SHADOW_DROP + JBUI.scale(6), SHADOW_SPAN + JBUI.scale(14)));
+                SHADOW_SPAN + scaled(6), SHADOW_SPAN + scaled(14),
+                SHADOW_SPAN + SHADOW_DROP + scaled(6), SHADOW_SPAN + scaled(14)));
         }
 
         @Override protected void paintComponent(Graphics g0) {
@@ -397,7 +439,7 @@ public final class WalkthroughHud {
      * Disabled buttons dim and stop reacting to clicks.
      */
     private static final class PillButton extends JComponent {
-        private static final int SIZE = JBUI.scale(22);
+        private static final int SIZE = scaled(22);
         private static final JBColor ACCENT = new JBColor(new Color(0x35, 0x74, 0xF0), new Color(0x54, 0x8A, 0xF7));
 
         private final String glyph;
@@ -426,7 +468,7 @@ public final class WalkthroughHud {
                 if (!isEnabled()) {
                     g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.4f));
                 }
-                int arc = JBUI.scale(6);
+                int arc = scaled(6);
                 Color glyphColor;
                 if (accent) {
                     g.setColor(ACCENT);
@@ -461,8 +503,8 @@ public final class WalkthroughHud {
      */
     private static final class DotsRow extends JComponent {
         private static final int CAP = 10;
-        private static final int DOT = JBUI.scale(6);
-        private static final int GAP = JBUI.scale(5);
+        private static final int DOT = scaled(6);
+        private static final int GAP = scaled(5);
         private static final JBColor ACTIVE = new JBColor(new Color(0x35, 0x74, 0xF0), new Color(0x54, 0x8A, 0xF7));
         private static final Color MUTED = JBColor.border();
 

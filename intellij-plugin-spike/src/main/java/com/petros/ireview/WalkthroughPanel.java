@@ -48,13 +48,24 @@ public final class WalkthroughPanel implements Disposable {
     // Every size below is the platform's own label font, nudged by a
     // relative offset (JBFont#biggerOn / #lessOn) rather than a hard-coded
     // point size, so it tracks the user's font-size and HiDPI settings.
+    //
+    // FONT_SCALE is the one knob for this whole class: every derived font is
+    // computed relative to the platform label font first (so it keeps
+    // tracking the user's font-size/HiDPI settings), then multiplied by this
+    // single factor via {@link #scale}, so a future "make it all N% bigger"
+    // is one edit here rather than six separately-tuned deltas. Everything
+    // that surrounds that text — row padding, the disc diameter, chip
+    // padding, the gaps between elements — is scaled the same way via
+    // {@link #scaled(int)} so nothing looks cramped once the text has grown.
+    private static final float FONT_SCALE = 1.2f;
+
     private static final JBFont LABEL_FONT = JBUI.Fonts.label();
     /** Title outranks everything: bold, ~1pt larger than the default label. */
-    private static final Font TITLE_FONT = LABEL_FONT.asBold().biggerOn(1f);
+    private static final Font TITLE_FONT = scale(LABEL_FONT.asBold().biggerOn(1f));
     /** Explanation prose: the default label size, just not bold. */
-    private static final Font EXPLANATION_FONT = LABEL_FONT.asPlain();
+    private static final Font EXPLANATION_FONT = scale(LABEL_FONT.asPlain());
     /** Path: monospaced, ~2pt smaller — recedes behind title and prose. */
-    private static final Font PATH_FONT = JBUI.Fonts.create(Font.MONOSPACED, LABEL_FONT.getSize()).lessOn(2f);
+    private static final Font PATH_FONT = scale(JBUI.Fonts.create(Font.MONOSPACED, LABEL_FONT.getSize()).lessOn(2f));
     /**
      * The symbol chip's own type — one step up from {@link #PATH_FONT} (only
      * 1pt below the base label instead of 2) so the pill text the owner
@@ -63,18 +74,35 @@ public final class WalkthroughPanel implements Disposable {
      * Kept distinct from {@link #PATH_FONT}, which other, smaller elements
      * (the status line, the stale marker) still use.
      */
-    private static final Font SYMBOL_CHIP_FONT = JBUI.Fonts.create(Font.MONOSPACED, LABEL_FONT.getSize()).lessOn(1f);
+    private static final Font SYMBOL_CHIP_FONT = scale(JBUI.Fonts.create(Font.MONOSPACED, LABEL_FONT.getSize()).lessOn(1f));
     /**
      * The role tag badge's type — same nominal size as {@link #SYMBOL_CHIP_FONT}
      * (never smaller, per spec) but sans-serif and bold so it still reads as
      * a small label, not code.
      */
-    private static final Font ROLE_TAG_FONT = JBUI.Fonts.label().lessOn(1f).asBold();
+    private static final Font ROLE_TAG_FONT = scale(JBUI.Fonts.label().lessOn(1f).asBold());
     /** Header strip (question + progress counter): small and quiet. */
-    private static final Font HEADER_FONT = LABEL_FONT.lessOn(1f);
+    private static final Font HEADER_FONT = scale(LABEL_FONT.lessOn(1f));
 
-    private static final int ROW_V = JBUI.scale(11);
-    private static final int ROW_H = JBUI.scale(14);
+    /** Multiplies an already theme-derived font by {@link #FONT_SCALE}. */
+    private static Font scale(Font f) {
+        return f.deriveFont(f.getSize2D() * FONT_SCALE);
+    }
+
+    /**
+     * Multiplies a {@code JBUI.scale(...)} pixel size that surrounds text
+     * (padding, gaps, icon diameters) by {@link #FONT_SCALE} before handing
+     * it to {@link JBUI#scale(int)}, so those sizes keep pace with the type
+     * ramp above instead of looking cramped once it grows.
+     */
+    private static int scaled(int base) {
+        return JBUI.scale(Math.round(base * FONT_SCALE));
+    }
+
+    private static final int ROW_V = scaled(11);
+    private static final int ROW_H = scaled(14);
+    // Decorative accent-bar thickness, not text padding — deliberately left
+    // off the FONT_SCALE ramp.
     private static final int ACCENT_W = JBUI.scale(3);
 
     // Role accents live only on the disc (see RoleDisc) — never on text.
@@ -86,7 +114,7 @@ public final class WalkthroughPanel implements Disposable {
     private final Project project;
     private final WalkthroughService service;
     private final JPanel root = new JPanel(new BorderLayout());
-    private final JPanel header = new JPanel(new BorderLayout(JBUI.scale(10), 0));
+    private final JPanel header = new JPanel(new BorderLayout(scaled(10), 0));
     private final ClampedLabel questionLabel = new ClampedLabel(2, HEADER_FONT, UIUtil.getLabelDisabledForeground());
     private final JBLabel progressLabel = new JBLabel();
     private final JPanel steps = new StepsPanel();
@@ -119,7 +147,7 @@ public final class WalkthroughPanel implements Disposable {
 
         header.setBorder(JBUI.Borders.compound(
             JBUI.Borders.customLineBottom(JBColor.border()),
-            JBUI.Borders.empty(8, ROW_H, 8, ROW_H)));
+            JBUI.Borders.empty(scaled(8), ROW_H, scaled(8), ROW_H)));
         progressLabel.setFont(HEADER_FONT);
         progressLabel.setForeground(UIUtil.getLabelDisabledForeground());
         progressLabel.setHorizontalAlignment(SwingConstants.RIGHT);
@@ -132,9 +160,9 @@ public final class WalkthroughPanel implements Disposable {
         status.setFont(PATH_FONT);
         status.setForeground(UIUtil.getLabelDisabledForeground());
 
-        JPanel south = new JPanel(new BorderLayout(4, 4));
-        south.setBorder(JBUI.Borders.empty(6));
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        JPanel south = new JPanel(new BorderLayout(scaled(4), scaled(4)));
+        south.setBorder(JBUI.Borders.empty(scaled(6)));
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, scaled(6), 0));
         buttons.add(back);
         buttons.add(next);
         buttons.add(status);
@@ -272,14 +300,14 @@ public final class WalkthroughPanel implements Disposable {
         titleRow.add(title);
         String tagText = roleTagText(step.role());
         if (tagText != null) {
-            titleRow.add(Box.createHorizontalStrut(JBUI.scale(6)));
+            titleRow.add(Box.createHorizontalStrut(scaled(6)));
             RoleTag tag = new RoleTag(tagText, accent);
             tag.setAlignmentX(Component.LEFT_ALIGNMENT);
             titleRow.add(tag);
         }
         titleRow.add(Box.createHorizontalGlue());
         textColumn.add(titleRow);
-        textColumn.add(Box.createVerticalStrut(JBUI.scale(2)));
+        textColumn.add(Box.createVerticalStrut(scaled(2)));
 
         SymbolChip symbol = new SymbolChip(SYMBOL_CHIP_FONT);
         symbol.setSymbol(WalkthroughSymbols.describe(project, step), step.file() + ":" + step.line());
@@ -289,7 +317,7 @@ public final class WalkthroughPanel implements Disposable {
         // only the active step's navigation target matters to the user right now,
         // so that's the only one re-resolved against the live document.
         if (active && isStale(step)) {
-            JPanel pathRow = new JPanel(new BorderLayout(JBUI.scale(6), 0));
+            JPanel pathRow = new JPanel(new BorderLayout(scaled(6), 0));
             pathRow.setOpaque(false);
             pathRow.setAlignmentX(Component.LEFT_ALIGNMENT);
             pathRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, symbol.getPreferredSize().height));
@@ -304,7 +332,7 @@ public final class WalkthroughPanel implements Disposable {
         }
 
         if (active) {
-            textColumn.add(Box.createVerticalStrut(JBUI.scale(8)));
+            textColumn.add(Box.createVerticalStrut(scaled(8)));
             JPanel body = new JPanel();
             body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
             body.setOpaque(false);
@@ -316,7 +344,7 @@ public final class WalkthroughPanel implements Disposable {
                     q.setFont(EXPLANATION_FONT.deriveFont(Font.BOLD));
                     q.setForeground(UIUtil.getLabelForeground());
                     q.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    body.add(Box.createVerticalStrut(JBUI.scale(6)));
+                    body.add(Box.createVerticalStrut(scaled(6)));
                     body.add(q);
                 }
                 body.add(markdown(t.synthesis()));
@@ -472,7 +500,7 @@ public final class WalkthroughPanel implements Disposable {
         return "body { font-family: '" + EXPLANATION_FONT.getFamily() + "'; "
             + "font-size: " + EXPLANATION_FONT.getSize() + "pt; "
             + "color: " + toHex(body) + "; line-height: 170%; }"
-            + " p { margin-top: 0; margin-bottom: " + JBUI.scale(6) + "px; }"
+            + " p { margin-top: 0; margin-bottom: " + scaled(6) + "px; }"
             + " code, pre { font-family: monospace; font-size: " + PATH_FONT.getSize() + "pt; }"
             + " a { color: " + toHex(SEAM_COLOR) + "; text-decoration: none; }";
     }
@@ -592,7 +620,7 @@ public final class WalkthroughPanel implements Disposable {
      * reduced opacity — the "visited" cue.
      */
     private static final class RoleDisc implements Icon {
-        private static final int SIZE = JBUI.scale(24);
+        private static final int SIZE = scaled(24);
 
         private final Color color;
         private final int number;
@@ -622,7 +650,7 @@ public final class WalkthroughPanel implements Disposable {
                     g.fillOval(x, y, SIZE, SIZE);
                     numberColor = Color.WHITE;
                 } else {
-                    g.setStroke(new BasicStroke(JBUI.scale(2)));
+                    g.setStroke(new BasicStroke(scaled(2)));
                     g.setColor(color);
                     g.drawOval(x + 1, y + 1, SIZE - 2, SIZE - 2);
                     numberColor = color;
@@ -649,8 +677,8 @@ public final class WalkthroughPanel implements Disposable {
      * competing with the title for attention.
      */
     private static final class RoleTag extends JComponent {
-        private static final int PAD_H = JBUI.scale(6);
-        private static final int PAD_V = JBUI.scale(1);
+        private static final int PAD_H = scaled(6);
+        private static final int PAD_V = scaled(1);
         private static final int ARC = JBUI.scale(4);
         // A visible but low-opacity tint — enough to read as "coloured", not
         // enough to compete with the disc or the active row's accent bar.
@@ -738,11 +766,16 @@ public final class WalkthroughPanel implements Disposable {
         private static final Pattern CLASS_ONLY =
             Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*$");
 
+        // Left as-is rather than run through FONT_SCALE: a fixed ceiling on
+        // how wide any one chip can get, independent of type size — growing
+        // it in lockstep with the font would just move the truncation point,
+        // not remove it. PAD_H/PAD_V (below) are scaled, so the bigger text
+        // still gets breathing room inside that fixed envelope.
         private static final int MAX_WIDTH = JBUI.scale(200);
         // Padding bumped alongside SYMBOL_CHIP_FONT (Fix: chip font was "very
         // very small") so the larger text doesn't look cramped in its pill.
-        private static final int PAD_H = JBUI.scale(8);
-        private static final int PAD_V = JBUI.scale(4);
+        private static final int PAD_H = scaled(8);
+        private static final int PAD_V = scaled(4);
         private static final int ARC = JBUI.scale(7);
 
         // Class name sits between the title and the disabled/path colour —
@@ -788,7 +821,7 @@ public final class WalkthroughPanel implements Disposable {
         @Override public Dimension getPreferredSize() {
             FontMetrics fm = getFontMetrics(getFont());
             int natural = fm.stringWidth(text) + PAD_H * 2;
-            int w = Math.max(JBUI.scale(24), Math.min(natural, MAX_WIDTH));
+            int w = Math.max(scaled(24), Math.min(natural, MAX_WIDTH));
             return new Dimension(w, fm.getHeight() + PAD_V * 2);
         }
 
