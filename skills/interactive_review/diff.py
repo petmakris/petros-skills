@@ -132,10 +132,30 @@ def files_to_json(files: list[FileChange]) -> list[dict]:
     return out
 
 
+# A pr_ref reaches `gh` argv verbatim, and session-create is a network-facing
+# endpoint: constrain it to the three documented shapes (number, github.com PR
+# URL, git branch ref) so `--web`-style flag injection and shell-odd bytes
+# never reach the subprocess.
+_PR_URL_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$")
+_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+# gh talks to the network; git is local. A hung remote call must not pin an
+# HTTP worker thread forever (the skill-side curl gives up long before this).
+_GH_TIMEOUT = 60
+_GIT_TIMEOUT = 30
+
+
+def validate_pr_ref(pr_ref: str) -> str:
+    if pr_ref.isdigit() or _PR_URL_RE.match(pr_ref) or _BRANCH_RE.match(pr_ref):
+        return pr_ref
+    raise ValueError(f"invalid PR ref: {pr_ref!r} (expected number, "
+                     "github.com PR URL, or branch name)")
+
+
 def _pr_meta(pr_ref: str, cwd: str | None = None) -> dict:
     meta_json = subprocess.check_output(
         ["gh", "pr", "view", pr_ref, "--json", "title,headRefName,baseRefName,author,url,headRefOid"],
-        text=True, cwd=cwd,
+        text=True, cwd=cwd, timeout=_GH_TIMEOUT,
     )
     return json.loads(meta_json)
 
@@ -143,7 +163,8 @@ def _pr_meta(pr_ref: str, cwd: str | None = None) -> dict:
 def _rev_exists(ref: str, cwd: str | None = None) -> bool:
     try:
         subprocess.check_output(["git", "rev-parse", "--verify", ref],
-                                text=True, stderr=subprocess.DEVNULL, cwd=cwd)
+                                text=True, stderr=subprocess.DEVNULL, cwd=cwd,
+                                timeout=_GIT_TIMEOUT)
         return True
     except subprocess.CalledProcessError:
         return False
@@ -166,15 +187,17 @@ def _local_git_diff(meta: dict, cwd: str | None = None) -> str:
             f"{base_ref}...{head}", "--", "."]
     args += [f":(exclude){g}" for g in excludes]
     # errors="replace": diffs may contain non-UTF-8 bytes (e.g. latin-1 .properties files)
-    return subprocess.check_output(args, text=True, errors="replace", cwd=cwd)
+    return subprocess.check_output(args, text=True, errors="replace", cwd=cwd,
+                                   timeout=_GIT_TIMEOUT)
 
 
 def fetch_pr_diff(pr_ref: str, cwd: str | None = None) -> tuple[str, dict]:
+    validate_pr_ref(pr_ref)
     meta = _pr_meta(pr_ref, cwd)
     try:
         diff = subprocess.check_output(
             ["gh", "pr", "diff", pr_ref, "--patch"], text=True, errors="replace",
-            stderr=subprocess.DEVNULL, cwd=cwd,
+            stderr=subprocess.DEVNULL, cwd=cwd, timeout=_GH_TIMEOUT,
         )
     except subprocess.CalledProcessError:
         # gh refuses diffs over 300 files (HTTP 406). Fall back to local git,

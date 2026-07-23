@@ -52,6 +52,32 @@ def handle(handler: BaseHTTPRequestHandler, dirs: dict) -> None:
     handler.wfile.write(data)
 
 
+def images_ok(images, state_dir) -> bool:
+    """Every submitted image must point at a file under <state_dir>/images/.
+
+    Paths are minted server-side by handle() above (uuid filename under that
+    dir) and echoed back by the client. Validating containment stops a hostile
+    or buggy client from naming an arbitrary path (e.g. /etc/passwd) that
+    Claude would then be told to read as a 'pasted image'. Empty list is fine.
+    """
+    if not isinstance(images, list):
+        return False
+    images_root = (Path(state_dir) / "images").resolve()
+    for img in images:
+        if not isinstance(img, dict):
+            return False
+        p = img.get("path")
+        if not isinstance(p, str) or not p:
+            return False
+        try:
+            resolved = Path(p).resolve()
+        except (OSError, ValueError):
+            return False
+        if not resolved.is_relative_to(images_root) or not resolved.is_file():
+            return False
+    return True
+
+
 def _send_text(handler: BaseHTTPRequestHandler, status: int, body: str) -> None:
     data = body.encode("utf-8")
     handler.send_response(status)

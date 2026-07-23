@@ -209,12 +209,23 @@ def _resolve_public_host() -> str:
     return "127.0.0.1"
 
 
-def _bind_first_available_port(port_range: range) -> tuple[socket.socket, int]:
+def _resolve_bind_addr() -> str:
+    """Loopback unless explicitly opened up.
+
+    The server is unauthenticated, so binding every interface exposes
+    session-create (which runs gh/git in an attacker-chosen cwd) and event
+    submission to the whole LAN. Sharing across devices (Tailscale) is an
+    explicit opt-in: WEBCOMPANION_BIND=0.0.0.0 (or a specific interface IP).
+    """
+    return os.environ.get("WEBCOMPANION_BIND", "127.0.0.1")
+
+
+def _bind_first_available_port(port_range: range, bind_addr: str) -> tuple[socket.socket, int]:
     for port in port_range:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(("0.0.0.0", port))
+            s.bind((bind_addr, port))
             return s, port
         except OSError:
             s.close()
@@ -236,7 +247,11 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
         shutdown_after_seconds = int(os.environ.get(
             f"{skill_name.upper()}_SHUTDOWN_SECONDS", 24 * 60 * 60))
 
-    public_host = _resolve_public_host()
+    # A Tailscale/public hostname in `url` is only truthful when the socket
+    # actually listens beyond loopback; otherwise advertise loopback.
+    public_host = (_resolve_public_host()
+                   if _resolve_bind_addr() not in ("127.0.0.1", "localhost")
+                   else "127.0.0.1")
 
     state_root = Path(os.path.expanduser(f"~/.claude/{skill_name}"))
 
@@ -548,12 +563,13 @@ def run(skill_name: str, port_range: range, handlers: HandlersProtocol,
             handlers.handle_thread_delete(self, dirs, payload)
             registry.note_change(sid)
 
-    sock, port = _bind_first_available_port(port_range)
+    bind_addr = _resolve_bind_addr()
+    sock, port = _bind_first_available_port(port_range, bind_addr)
     sock.listen()
 
-    server = _ThreadedHTTPServer(("0.0.0.0", port), _Handler, bind_and_activate=False)
+    server = _ThreadedHTTPServer((bind_addr, port), _Handler, bind_and_activate=False)
     server.socket = sock
-    server.server_address = ("0.0.0.0", port)
+    server.server_address = (bind_addr, port)
     server_holder['server'] = server
 
     info = {"type": "server-started", "skill": skill_name, "port": port,

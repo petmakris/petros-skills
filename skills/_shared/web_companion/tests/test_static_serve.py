@@ -28,6 +28,25 @@ def test_serve_traversal_rejected(tmp_path):
     h.send_response.assert_called_with(404)
 
 
+def test_serve_embedded_traversal_rejected(tmp_path):
+    static = tmp_path / "static"
+    (static / "fonts").mkdir(parents=True)
+    (tmp_path / "secret.txt").write_text("s3cret")
+    h = make_handler()
+    serve(h, "fonts/../../secret.txt", [static])
+    h.send_response.assert_called_with(404)
+
+
+def test_serve_symlink_escape_rejected(tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (tmp_path / "secret.txt").write_text("s3cret")
+    (static / "link.txt").symlink_to(tmp_path / "secret.txt")
+    h = make_handler()
+    serve(h, "link.txt", [static])
+    h.send_response.assert_called_with(404)
+
+
 def test_serve_falls_through_chain(tmp_path):
     a = tmp_path / "a"
     b = tmp_path / "b"

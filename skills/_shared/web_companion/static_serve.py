@@ -12,12 +12,16 @@ from http.server import BaseHTTPRequestHandler
 
 
 def serve(handler: BaseHTTPRequestHandler, name: str, dirs: list[Path]) -> None:
-    if "\\" in name or name.startswith(".") or not name:
+    if "\\" in name or not name or any(
+            seg.startswith(".") for seg in name.split("/")):
         _send_text(handler, 404, "not found")
         return
     for static_dir in dirs:
-        static_dir = Path(static_dir)
-        path = static_dir / name
+        static_dir = Path(static_dir).resolve()
+        # Resolve symlinks and any residual dot segments BEFORE the
+        # containment check — a lexical check on the unresolved path lets
+        # `fonts/../../x` (and symlinks pointing outside) escape the root.
+        path = (static_dir / name).resolve()
         try:
             path.relative_to(static_dir)
         except ValueError:

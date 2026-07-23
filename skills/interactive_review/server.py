@@ -17,6 +17,7 @@ from pathlib import Path
 
 from skills._shared.web_companion import server as wc_server
 from skills._shared.web_companion import events as events_module
+from skills._shared.web_companion import uploads as uploads_module
 from skills.interactive_review import diff as diff_module
 from skills.interactive_review import threads as threads_module
 
@@ -206,6 +207,9 @@ class Handlers:
             return
         if not isinstance(text, str):
             _send_text(h, 400, "bad text")
+            return
+        if images and not uploads_module.images_ok(images, state_dir):
+            _send_text(h, 400, "bad images")
             return
         evt = {
             "anchor": anchor,

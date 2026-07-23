@@ -17,6 +17,7 @@ from pathlib import Path
 
 from skills._shared.web_companion import server as wc_server
 from skills._shared.web_companion import events as events_module
+from skills._shared.web_companion import uploads as uploads_module
 from skills._shared.web_companion.templates import html_escape, render_page
 from skills.annotate import blocks as blocks_model
 from skills.annotate import versions as versions_module
@@ -46,33 +47,7 @@ CLOSED_HTML = """<!DOCTYPE html>
 
 
 def _images_ok(images, state_dir: Path) -> bool:
-    """Every submitted image must point at a file under <state_dir>/images/.
-
-    Paths are minted server-side by uploads.py (uuid filename under that dir)
-    and echoed back by the client. Validating containment stops a hostile or
-    buggy client from naming an arbitrary path (e.g. /etc/passwd) that Claude
-    would then be told to read as a 'pasted image'. Empty list is fine.
-    """
-    if not isinstance(images, list):
-        return False
-    images_root = (state_dir / "images").resolve()
-    for img in images:
-        if not isinstance(img, dict):
-            return False
-        p = img.get("path")
-        if not isinstance(p, str) or not p:
-            return False
-        try:
-            resolved = Path(p).resolve()
-        except (OSError, ValueError):
-            return False
-        # Must be contained AND be a real file: the upload always lands the
-        # image before the submit echoes its path, so a path that doesn't
-        # resolve to a regular file under images/ is never a legitimate paste
-        # (and would only hand Claude a broken Read target).
-        if not resolved.is_relative_to(images_root) or not resolved.is_file():
-            return False
-    return True
+    return uploads_module.images_ok(images, state_dir)
 
 
 def _read_meta(response_dir: Path) -> dict:
