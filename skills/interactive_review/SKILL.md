@@ -155,27 +155,18 @@ You wake here when a task-notification arrives whose first stdout line is one of
    {"anchor": "<the event's anchor, verbatim>", "title": "<short headline>", "source_event_id": "<event_id>"}
    ```
 
-   c. **Run the helper** (values come from those files and the environment — never interpolated into code):
+   c. **Run the helper** — appends the reply AND acks the event in one
+   command (values come from those files and the environment — never
+   interpolated into code):
    ```bash
    PLUGIN_ROOT=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.claude/interactive-review/server.json")))["plugin_root"])')
-   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" python3 - <<'PY'
-   import json, os, time
-   from pathlib import Path
-   from skills.interactive_review.threads import append_message
-   sd = Path(os.environ["STATE_DIR"])
-   meta = json.loads((sd / ".reply.meta.json").read_text())
-   text = (sd / ".reply.md").read_text()
-   append_message(sd / "threads", meta["anchor"], {
-       "role": "claude",
-       "ts": int(time.time()),
-       "text": text,
-       "source_event_id": meta["source_event_id"],
-   }, title=(meta.get("title") or None))
-   PY
+   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" \
+     python3 -m skills._shared.web_companion.reply_cli --ack "$EVENT_ID"
    ```
-   `append_message` handles anchor→filename encoding and `source_event_id` dedup; you don't compute paths manually. `.reply.md` / `.reply.meta.json` are scratch files — reused (overwritten) each event.
-5. **Write the ack:** `<consumed_dir>/<event_id>.ack` (empty file — existence is the signal).
-6. **End your turn. No terminal output.** The watcher stays armed.
+   It handles anchor→filename encoding and `source_event_id` dedup, and only
+   writes the ack after the append succeeds — a crashed append re-emits.
+   `.reply.md` / `.reply.meta.json` are scratch files, overwritten each event.
+5. **End your turn. No terminal output.** The watcher stays armed.
 
 ### `WEBCOMPANION_FINISHED`
 
@@ -247,7 +238,7 @@ with whatever the user actually wanted.
 - **Empty PR (no diff)** — the diff snapshot is empty; the IDE shows no annotatable lines. General comments (`__general__` anchor) still work.
 - **PR updated mid-session** — the diff is snapshotted at session-open. If the PR head changes mid-session, anchors may no longer match current head. Recommend the user restart the session.
 - **Very large PR** — soft warning above 1 MB of diff; hard reject above 5 MB. The user can request narrower review by passing a branch or a more focused PR.
-- **Malformed event payload** — fall back to no-op; write the `.ack` anyway so the event isn't re-emitted forever.
+- **Malformed event payload** — no reply; run `python3 -m skills._shared.web_companion.reply_cli --ack "$EVENT_ID" --ack-only` so the event isn't re-emitted forever.
 - **Server unreachable** — re-run `ensure_server.sh`; it will restart the server. Retry the failed request once.
 
 ## Token budget

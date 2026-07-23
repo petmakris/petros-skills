@@ -221,27 +221,15 @@ once; the watcher stays alive across many events.
    {"anchor": "step:3", "title": "<short headline>", "source_event_id": "<event_id>"}
    ```
 
-   c. Run:
+   c. Run — appends the reply AND acks the event in one command:
    ```bash
    PLUGIN_ROOT=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.claude/walkthrough/server.json")))["plugin_root"])')
-   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" python3 - <<'PY'
-   import json, os, time
-   from pathlib import Path
-   from skills.interactive_review.threads import append_message
-   sd = Path(os.environ["STATE_DIR"])
-   meta = json.loads((sd / ".reply.meta.json").read_text())
-   text = (sd / ".reply.md").read_text()
-   append_message(sd / "threads", meta["anchor"], {
-       "role": "claude",
-       "ts": int(time.time()),
-       "text": text,
-       "source_event_id": meta["source_event_id"],
-   }, title=(meta.get("title") or None))
-   PY
+   PYTHONPATH="$PLUGIN_ROOT" STATE_DIR="$STATE_DIR" \
+     python3 -m skills._shared.web_companion.reply_cli --ack "$EVENT_ID"
    ```
-   `append_message` handles anchor→filename encoding and `source_event_id` dedup.
-5. **Write the ack:** `<consumed_dir>/<event_id>.ack` (empty file).
-6. **End your turn. No terminal output.** The watcher stays armed.
+   It handles anchor→filename encoding and `source_event_id` dedup, and only
+   writes the ack after the append succeeds — a crashed append re-emits.
+5. **End your turn. No terminal output.** The watcher stays armed.
 
 **Never rewrite `steps.json` in response to an event.** Steps are frozen. If the
 answer really needs a different path through the code, say so in the reply and
@@ -304,7 +292,7 @@ The server writes the cancellation markers; each armed watcher emits
   retry the failed request once.
 - **Tour lost** — tours are ephemeral by design. If the session ends, say so
   plainly and offer to regenerate.
-- **Malformed event payload** — no-op, but still write the `.ack` so the event
+- **Malformed event payload** — no reply; `python3 -m skills._shared.web_companion.reply_cli --ack "$EVENT_ID" --ack-only` so the event
   isn't re-emitted forever.
 - **Question with special characters** — the question is written to a file with the
   `Write` tool and never interpolated into a shell command or Python source, so
