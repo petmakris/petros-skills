@@ -862,11 +862,22 @@ body.is-busy .unit-strip { display: none; }
 }
 
 .unit-chip {
-  display: inline-block; margin-left: 8px; padding: 1px 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 8px; padding: 1px 4px 1px 8px;
   font-size: 12px; border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   color: var(--accent);
+}
+.unit-chip-remove {
+  border: none; background: transparent; padding: 0 2px;
+  font-size: 13px; line-height: 1; cursor: pointer;
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-dim));
+  border-radius: 4px;
+}
+.unit-chip-remove:hover {
+  color: #dc2626;
+  background: color-mix(in srgb, #dc2626 10%, transparent);
 }
 
 .unit-composer { display: flex; gap: 6px; margin-top: 4px; }

@@ -275,15 +275,31 @@
     const m = marks[markKey(blockId, text, ordinal)];
     if (m) el.dataset.mark = m.kind;
     else delete el.dataset.mark;
-    const chip = el.querySelector(".unit-chip");
+    let chip = el.querySelector(".unit-chip");
     if (m && m.kind === "comment" && m.text) {
-      if (chip) { chip.textContent = "💬 " + m.text; }
-      else {
-        const c = document.createElement("span");
-        c.className = "unit-chip";
-        c.textContent = "💬 " + m.text;
-        el.appendChild(c);
-      }
+      // Rebuild the chip each pass: label + a × that unpins the comment.
+      if (chip) chip.remove();
+      chip = document.createElement("span");
+      chip.className = "unit-chip";
+      const label = document.createElement("span");
+      label.className = "unit-chip-text";
+      label.textContent = "💬 " + m.text;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "unit-chip-remove";
+      rm.textContent = "×";
+      rm.title = "Remove this comment";
+      rm.setAttribute("aria-label", "Remove comment");
+      rm.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        delete marks[markKey(blockId, text, ordinal)];
+        saveMarks();
+        applyMarkState(root, el, blockId);
+        renderDock();
+      });
+      chip.append(label, rm);
+      el.appendChild(chip);
     } else if (chip) chip.remove();
   }
 
