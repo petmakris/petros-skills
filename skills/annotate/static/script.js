@@ -636,6 +636,7 @@
       content.innerHTML = blockMd ? blockMd.render(blk.markdown || "") : (blk.markdown || "");
       sanitizeFreeHtml(content);
       if (window.AnnotateGlossary) window.AnnotateGlossary.decorate(content);
+      if (window.AnnotateSubunits) window.AnnotateSubunits.decorate(content, section);
     }
     body.appendChild(content);
     section.appendChild(body);
@@ -1377,6 +1378,7 @@
     handleConsumedEvents(data.consumed_events);
     // 1b. Caption any still-running spinner with the live progress label.
     applyProgress(data.progress);
+    if (window.AnnotateSubunits) window.AnnotateSubunits.onPoll(data);
     // 2. Reconcile the DOM against the full document. /raw carries everything
     //    (per-block markdown/svg + version + glossary), so one fetch covers
     //    structure, content, and glossary in a single pass.
@@ -1470,6 +1472,7 @@
         content.innerHTML = blockMd.render(blk.markdown || "");
         sanitizeFreeHtml(content);
         if (window.AnnotateGlossary) window.AnnotateGlossary.decorate(content);
+        if (window.AnnotateSubunits) window.AnnotateSubunits.decorate(content, section);
       }
     }
     section.dataset.kind = newKind;
