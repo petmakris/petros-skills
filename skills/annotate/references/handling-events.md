@@ -18,8 +18,9 @@ You wake here when a task-notification arrives whose first stdout line is one of
 2. Read the event payload between the `---payload---` and `---end---` markers in the notification body. **If `type == "choice"`, jump to the `choice` subsection below.** Otherwise, fields are:
    - `block_id` — the block to update, or `null` for a general comment.
    - `step_id` — for `kind: "sequence"` blocks: the step row the user clicked, or `null` for whole-diagram comments. For `kind: "flowchart"` blocks: the clicked node's id (the DOM carries it as `data-node-id`, but it arrives on the wire in this same `step_id` field — there is no separate `node_id` field), or `null` for whole-flowchart comments. For `kind: "diagram"` blocks: always `null` (whole-diagram only in v1). Absent/null for markdown blocks.
-   - `type` — `"comment"`, `"reject"`, `"choice"`, or `"dismiss"`.
+   - `type` — `"comment"`, `"reject"`, `"choice"`, `"dismiss"`, or `"round"`.
    - `selected_options` — for `type: "choice"`: the option id(s) the user picked (a list). Absent otherwise.
+   - `reactions` — for `type: "round"`: the batched sub-unit reactions. Jump to the `round` subsection below.
    - `text` — the user's free-text feedback.
    - `selected_text` — the span they highlighted, or `null` if the comment is block-scoped.
    - `block_snippet` — optional: a short plain-text snapshot of the block as the user saw it when commenting (useful when the block has since been rewritten).
@@ -54,6 +55,47 @@ The user removed a block. **Delete is not reject.** A reject means "I disagree" 
 6. `save_atomic` the doc, write `<consumed_dir>/<event_id>.ack`, end the turn. No terminal output; the watcher stays armed.
 
 A dismissed `choice` or `sequence` block is removed whole-block the same way — there is no step-level dismiss.
+
+### `WEBCOMPANION_EVENT` with `type: "round"`
+
+The user swept the document marking sub-units (list items, paragraphs, table
+rows, code blocks) and submitted them all at once. The payload carries the
+whole batch:
+
+- `reactions` — a list of `{kind, block_id, selected_text, text, images,
+  prefix?, suffix?}`. `kind` is `"agree"`, `"dismiss"`, or `"comment"`.
+  `selected_text` is the sub-unit's plain text; `prefix`/`suffix` pin down
+  which occurrence when it repeats inside the block (same convention as span
+  comments).
+
+Apply the WHOLE round in one pass — this is the entire point of batching:
+
+1. Read `<response_dir>/blocks.json`. Group reactions by `block_id`.
+2. For each touched block, compose ONE new markdown that applies all of its
+   reactions together:
+   - **`dismiss`** — cut that sub-unit (the bullet / paragraph / row / fence
+     matching `selected_text`) from the block's markdown, then re-thread the
+     remainder (renumber, fix dangling references) so the block still reads
+     coherently. This is the sub-unit form of dismiss: do not remove the
+     whole block. Dismissed content is out of scope going forward — do not
+     reintroduce it (same rule as whole-block dismiss).
+   - **`comment`** — the block-rewrite contract scoped to that sub-unit: fold
+     the answer or clarification into the sub-unit's prose. `Read` any
+     `images` paths first.
+   - **`agree`** — no rewrite for this sub-unit. Never re-emit a block whose
+     only reactions are agrees.
+3. Persist each changed block via `blocks.update_block(doc, block_id,
+   new_markdown)` (content-hash-safe), then `blocks.drop_unused_terms(doc)`,
+   then ONE `blocks.save_atomic`.
+4. Write ONE `<consumed_dir>/<event_id>.ack`. End your turn. No terminal
+   output; the watcher stays armed.
+
+Cross-item coherence is required: if a round dismisses two bullets and
+questions a third in the same block, the single rewrite resolves all three
+together. A `selected_text` that no longer matches the current block content
+(concurrent rewrite) is historical context — same rule as span comments.
+Re-apply safety is unchanged: re-processing the round is a content-hash
+no-op.
 
 ### `WEBCOMPANION_FINISHED`
 
